@@ -5,9 +5,15 @@ export function isOwnerEmail(email?: string | null, admin?: string): boolean {
   return !!email && !!admin && email.toLowerCase() === admin.toLowerCase();
 }
 
-// Only same-site relative paths: a single leading "/", no "//" and no backslash.
+// Only same-site relative paths. Browsers strip tab/CR/LF and treat "\" as "/",
+// so "/\t/evil.com" would become "//evil.com": reject control chars and
+// backslashes outright, then parse and require the URL to stay on our origin.
 export function safeNext(next?: string): string {
-  return next && next.startsWith("/") && !next.startsWith("//") && !next.includes("\\") ? next : "/";
+  if (!next || !next.startsWith("/") || /[\u0000-\u001F\u007F\\]/.test(next)) return "/";
+  let u: URL;
+  try { u = new URL(next, "http://x"); } catch { return "/"; }
+  if (u.origin !== "http://x") return "/";
+  return u.pathname + u.search + u.hash;
 }
 
 // Refreshes the session cookie on every request and sends anyone who is not
@@ -26,20 +32,25 @@ export async function updateSession(request: NextRequest) {
   });
   const { data: { user } } = await sb.auth.getUser();
   const owner = !!user && isOwnerEmail(user.email, process.env.ADMIN_EMAIL);
-  const path = request.nextUrl.pathname;
-  const carry = (res: NextResponse) => { response.cookies.getAll().forEach((c) => res.cookies.set(c)); return res; };
+  const target = gateRedirect(request.nextUrl.pathname, !!user, owner);
+  if (!target) return response;
+  const url = request.nextUrl.clone();
+  url.pathname = target.pathname;
+  url.search = target.search;
+  const res = NextResponse.redirect(url);
+  response.cookies.getAll().forEach((c) => res.cookies.set(c));
+  return res;
+}
 
-  if (!owner && path !== "/login") {
-    const url = request.nextUrl.clone();
-    url.pathname = "/login";
-    url.search = path !== "/" ? `?next=${encodeURIComponent(path)}` : "";
-    return carry(NextResponse.redirect(url));
-  }
-  if (owner && path === "/login") {
-    const url = request.nextUrl.clone();
-    url.pathname = "/";
-    url.search = "";
-    return carry(NextResponse.redirect(url));
-  }
-  return response;
+// Where the gate sends a request, or null to let it through. A signed-in account
+// that is not the owner goes to /login?denied=1 so the page can explain why
+// (and sign it out) instead of silently looping back to the login form.
+export function gateRedirect(path: string, signedIn: boolean, owner: boolean): { pathname: string; search: string } | null {
+  if (owner) return path === "/login" ? { pathname: "/", search: "" } : null;
+  if (path === "/login") return null;
+  const params = new URLSearchParams();
+  if (signedIn) params.set("denied", "1");
+  if (path !== "/") params.set("next", path);
+  const qs = params.toString();
+  return { pathname: "/login", search: qs ? `?${qs}` : "" };
 }
