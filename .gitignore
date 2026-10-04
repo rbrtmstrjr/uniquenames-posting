@@ -3,6 +3,7 @@ node_modules/
 .next/
 .env*
 !.env.example
+!.env.import.example
 .vercel/
 .env.import
 next-env.d.ts
