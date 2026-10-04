@@ -20,3 +20,12 @@ describe("validate", () => {
     expect(validateSettings({ ...s, handle: "" })).toMatch(/handle/i);
   });
 });
+
+describe("validateName with curly apostrophes", () => {
+  it("accepts names typed with iPhone smart punctuation", () => {
+    expect(validateName("D’Angelo", "messenger")).toBeNull();
+    expect(validateName("O‘Brien", "noble")).toBeNull();
+    expect(validateName("Keʼala", "path")).toBeNull();
+    expect(validateName("“Luna”", "moon")).toBeNull();
+  });
+});

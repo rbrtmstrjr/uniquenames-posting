@@ -42,3 +42,13 @@ describe("validateCreatePost", () => {
     expect(validateCreatePost({ ...ok, count: 9.5 })).toBeTruthy();
   });
 });
+
+describe("curly apostrophes (iPhone smart punctuation)", () => {
+  it("normalizeName straightens them so storage and dedup use the plain form", () => {
+    expect(normalizeName("D’Angelo")).toBe("D'Angelo");
+    expect(normalizeName("D‘Angelo")).toBe("D'Angelo");
+    expect(normalizeName("DʼAngelo")).toBe("D'Angelo");
+    expect(normalizeName("“Luna”  Rose")).toBe("Luna Rose");
+    expect(nameKey("D’Angelo")).toBe(nameKey("d'angelo"));
+  });
+});

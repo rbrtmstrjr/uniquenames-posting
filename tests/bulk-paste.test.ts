@@ -23,3 +23,12 @@ describe("parseBulkNames", () => {
     ]);
   });
 });
+
+describe("parseBulkNames with curly apostrophes", () => {
+  it("stores D’Angelo as D'Angelo and dedups against the plain form", () => {
+    const { rows, issues } = parseBulkNames("D’Angelo - messenger\nD'Angelo - again\n“Luna” - moon", { gender: "boy" });
+    expect(rows.map((r) => r.name)).toEqual(["D'Angelo", "Luna"]);
+    expect(issues).toHaveLength(1);
+    expect(issues[0].reason).toMatch(/Duplicate/);
+  });
+});

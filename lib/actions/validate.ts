@@ -1,11 +1,11 @@
 import type { Gender } from "@/lib/db/types";
-import { NAME_RE } from "@/lib/names/bulk-paste";
+import { NAME_RE, normalizeQuotes } from "@/lib/names/bulk-paste";
 
 export interface ThemeInput { title: string; gender: Gender; backdrop: string; outfit: string; props: string; lighting: string; palette: string }
 export interface SettingsInput { caption_template: string; hashtags: string; handle: string; min_images: number; max_images: number; sound_on: boolean }
 
 export function validateName(name: string, meaning: string): string | null {
-  const n = name.replace(/\s+/g, " ").trim();
+  const n = normalizeQuotes(name).replace(/\s+/g, " ").trim();
   if (!n) return "Type a name.";
   if (n.length > 40) return "Names can be at most 40 characters.";
   if (!NAME_RE.test(n)) return "Names can only have letters, spaces, hyphens and apostrophes.";

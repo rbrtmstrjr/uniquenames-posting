@@ -1,9 +1,10 @@
 import type { CardStatus, Gender, NameStyle } from "@/lib/db/types";
+import { normalizeQuotes } from "@/lib/names/bulk-paste";
 
 export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-/** Collapse inner whitespace and trim: the stored form of a name. */
-export const normalizeName = (name: string): string => name.replace(/\s+/g, " ").trim();
+/** Straighten curly apostrophes, collapse inner whitespace and trim: the stored form of a name. */
+export const normalizeName = (name: string): string => normalizeQuotes(name).replace(/\s+/g, " ").trim();
 /** Case-insensitive dedup key; matches the lower(name) unique index. */
 export const nameKey = (name: string): string => normalizeName(name).toLowerCase();
 export const styleOf = (name: string): NameStyle => (normalizeName(name).split(" ").length > 1 ? "two-word" : "single");
