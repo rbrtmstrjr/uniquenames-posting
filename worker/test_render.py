@@ -100,6 +100,16 @@ class Layout(unittest.TestCase):
         mid = out.crop((0, int(1080 * 0.40), 1080, int(1080 * 0.60)))
         self.assertLess(mid.getextrema()[0][1], 100)          # nothing drawn mid-frame
 
+    def test_text_turns_dark_on_bright_backdrops(self):
+        light = Image.new("RGB", (1080, 1080), (214, 238, 230))  # pale mint
+        out, band, _ = w.compose_card(light, "Arlo Zenith", "peak strength with calm", "@unique_names", FONTS)
+        a, b = w.BANDS[band]
+        lo = out.convert("L").crop((0, int(1080 * a), 1080, int(1080 * b))).getextrema()[0]
+        self.assertLess(lo, 80)  # dark ink was drawn
+        self.assertEqual(w.text_colors(light, (0, 0, 1080, 1080))[0], w.DARK_INK)
+        dark = Image.new("RGB", (1080, 1080), (90, 60, 40))
+        self.assertEqual(w.text_colors(dark, (0, 0, 1080, 1080))[0], (255, 255, 255))
+
     def test_fit_to_size(self):
         self.assertEqual(w.fit_to_size(Image.new("RGB", (1072, 1072)), 1080, 1080).size, (1080, 1080))
         self.assertEqual(w.fit_to_size(Image.new("RGB", (1080, 1344)), 1080, 1080).size, (1080, 1080))

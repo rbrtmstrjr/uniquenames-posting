@@ -1,7 +1,7 @@
 "use server";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
-import { planExtraCard, planPost } from "@/lib/planner";
+import { planExtraCard, planPost, subjectKey } from "@/lib/planner";
 import type { Gender, NameRow, NameStyle, PostRow, SettingsRow, ThemeRow } from "@/lib/db/types";
 import { validateCreatePost } from "./helpers";
 import { fail, requireOwner, type ActionResult } from "./result";
@@ -88,7 +88,7 @@ export async function addCardAction(postId: string): Promise<ActionResult<{ card
   ]);
   const used = (cards ?? []).map((c) => c.name_id).filter(Boolean) as string[];
   const next = Math.max(0, ...(cards ?? []).map((c) => c.position as number)) + 1;
-  const plan = planExtraCard({ theme: theme as ThemeRow, gender: p.gender, style: p.style, names: (names ?? []) as NameRow[], usedNameIds: used, nextPosition: next, salt: `${postId}|${Date.now()}` });
+  const plan = planExtraCard({ theme: theme as ThemeRow, gender: p.gender, style: p.style, names: (names ?? []) as NameRow[], usedNameIds: used, nextPosition: next, salt: `${postId}|${Date.now()}`, subjectKey: subjectKey(p.post_date, p.gender, p.style) });
   if (!plan.ok) return fail(plan.reason);
   const { data, error } = await sb.rpc("add_card", { p_post: postId, c: plan.card });
   if (error) return fail(error.message);

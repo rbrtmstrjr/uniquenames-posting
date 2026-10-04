@@ -23,7 +23,7 @@ const LEGACY = [
   { file: "05-kael-orion.jpg", name: "Kael Orion", shot: BABY_SHOTS[1] },
   { file: "06-theo-alaric.jpg", name: "Theo Alaric", shot: PROPS_SHOTS[0] },
   { file: "07-cyrus-vaughn.jpg", name: "Cyrus Vaughn", shot: BABY_SHOTS[10] },
-  { file: "08-nico-ashford.jpg", name: "Nico Ashford", shot: BABY_SHOTS[11] },
+  { file: "08-nico-ashford.jpg", name: "Nico Ashford", shot: BABY_SHOTS[10] },
   { file: "09-nolan-pierce.jpg", name: "Nolan Pierce", shot: BABY_SHOTS[8] },
 ];
 
