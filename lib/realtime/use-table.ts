@@ -8,7 +8,7 @@ type Row = { id: string | number };
 // resyncs after the socket reconnects or the tab/phone wakes up, so events
 // missed while asleep never leave stale cards on screen.
 export function useRealtimeRows<T extends Row>(table: string, initial: T[], opts: {
-  key: string; filter?: string; sort?: (a: T, b: T) => number; refetch?: () => Promise<T[]>;
+  key: string; filter?: string; sort?: (a: T, b: T) => number; refetch?: () => Promise<T[] | null>;
 }) {
   const [rows, setRows] = useState<T[]>(initial);
   const sortRef = useRef(opts.sort);
@@ -25,8 +25,13 @@ export function useRealtimeRows<T extends Row>(table: string, initial: T[], opts
   useEffect(() => {
     const sb = createClient();
     const sortIt = (list: T[]) => (sortRef.current ? [...list].sort(sortRef.current) : list);
-    const resync = async () => { if (refetchRef.current) setRows(sortIt(await refetchRef.current())); };
-    const channel = sb.channel(`${table}:${opts.key}`)
+    // A failed refetch (null or thrown) keeps the rows we already have.
+    const resync = async () => {
+      if (!refetchRef.current) return;
+      try { const fresh = await refetchRef.current(); if (fresh) setRows(sortIt(fresh)); } catch { /* keep rows */ }
+    };
+    // Unique topic per instance: realtime-js returns the existing channel for a repeated topic.
+    const channel = sb.channel(`${table}:${opts.key}:${crypto.randomUUID()}`)
       .on("postgres_changes", { event: "*", schema: "public", table, ...(opts.filter ? { filter: opts.filter } : {}) }, (payload) => {
         setRows((prev) => {
           if (payload.eventType === "DELETE") return prev.filter((r) => r.id !== (payload.old as T).id);

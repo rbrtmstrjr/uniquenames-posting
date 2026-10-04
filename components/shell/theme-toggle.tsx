@@ -14,7 +14,7 @@ export function ThemeToggle() {
   const label = !mounted ? "Theme" : theme === "light" ? "Light" : theme === "dark" ? "Dark" : "Auto";
   return (
     <button type="button" onClick={() => setTheme(next)} aria-label={`Theme: ${label}. Switch to ${next}`}
-      className="inline-flex min-h-10 items-center gap-2 rounded-xl px-3 text-xs font-semibold text-muted hover:bg-surface-2 hover:text-ink">
+      className="inline-flex min-h-11 items-center gap-2 rounded-xl px-3 text-xs font-semibold text-muted hover:bg-surface-2 hover:text-ink">
       <Icon className="size-4" aria-hidden /> {label}
     </button>
   );

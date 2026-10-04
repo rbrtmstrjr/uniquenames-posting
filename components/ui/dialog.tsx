@@ -21,7 +21,7 @@ export function Dialog({ open, onOpenChange, title, description, wide, children 
               <D.Title className="font-display text-xl text-ink">{title}</D.Title>
               {description && <D.Description className="mt-1 text-sm text-muted">{description}</D.Description>}
             </div>
-            <D.Close className="grid size-10 place-items-center rounded-full text-muted hover:bg-surface-2 hover:text-ink" aria-label="Close"><X className="size-5" /></D.Close>
+            <D.Close className="grid size-11 shrink-0 place-items-center rounded-full text-muted hover:bg-surface-2 hover:text-ink" aria-label="Close"><X className="size-5" /></D.Close>
           </div>
           <div className="mt-4">{children}</div>
         </D.Content>

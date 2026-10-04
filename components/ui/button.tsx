@@ -12,7 +12,7 @@ const VARIANT: Record<Variant, string> = {
   ghost: "text-ink hover:bg-surface-2",
   danger: "bg-bad/10 text-bad hover:bg-bad/15",
 };
-const SIZE: Record<Size, string> = { sm: "min-h-9 px-3 text-sm rounded-lg", md: "min-h-11 px-4 text-sm rounded-xl", lg: "min-h-12 px-5 text-base rounded-xl" };
+const SIZE: Record<Size, string> = { sm: "min-h-11 px-3 text-sm rounded-lg", md: "min-h-11 px-4 text-sm rounded-xl", lg: "min-h-12 px-5 text-base rounded-xl" };
 
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(
   { variant = "primary", size = "md", loading, className, children, disabled, type = "button", ...rest }, ref,
