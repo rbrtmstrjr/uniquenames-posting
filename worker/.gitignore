@@ -1,0 +1,5 @@
+worker.env
+worker.log
+fonts/
+cache/
+__pycache__/

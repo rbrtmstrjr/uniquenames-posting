@@ -1,0 +1,339 @@
+# The worker's job loop: claim one card at a time from Supabase, make it with
+# ComfyUI + Pillow, upload it, keep a backup copy on the PC, and heartbeat.
+import datetime
+import io
+import json
+import os
+import re
+import threading
+import time
+import traceback
+
+from PIL import Image
+
+from render import JobError, slugify
+from supa import SupaError
+
+VERSION = "2.0.0"
+BUCKET = "cards"
+COMFY_CLOSED = "ComfyUI is closed. Open ComfyUI Desktop on your PC, then press Retry."
+NO_NET_SAVE = "Couldn't reach the internet to save this card. Press Retry."
+NO_NET_LOAD = "Couldn't reach the internet to load this card's photo. Press Retry."
+NO_NET_SETTINGS = "Couldn't reach the internet to load your settings. Press Retry."
+STALE = "stale result dropped (card changed while it was being made)"
+
+
+class PhotoMissing(Exception):
+    """The clean photo is not in storage any more."""
+
+
+def is_http_4xx(e):
+    return re.search(r"HTTP 4\d\d", str(e)) is not None
+
+
+def now_iso():
+    return datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+
+def to_jpeg(img, quality):
+    buf = io.BytesIO()
+    img.convert("RGB").save(buf, "JPEG", quality=quality, optimize=True)
+    return buf.getvalue()
+
+
+# ---------------------------------------------------------------- startup housekeeping
+def rotate_log(path, max_bytes=5 * 1024 * 1024):
+    try:
+        if os.path.getsize(path) > max_bytes:
+            os.replace(path, path + ".1")
+    except OSError:
+        pass
+
+
+def prune_cache(cache_dir, days=14, now=None):
+    now = now or time.time()
+    try:
+        names = os.listdir(cache_dir)
+    except OSError:
+        return
+    for n in names:
+        f = os.path.join(cache_dir, n)
+        try:
+            if n != "backup-index.json" and os.path.isfile(f) and now - os.path.getmtime(f) > days * 86400:
+                os.remove(f)
+        except OSError:
+            pass
+
+
+def sweep_parts(root, hours=1, now=None):
+    now = now or time.time()
+    for d, _dirs, files in os.walk(root):
+        for n in files:
+            f = os.path.join(d, n)
+            try:
+                if n.endswith(".part") and now - os.path.getmtime(f) > hours * 3600:
+                    os.remove(f)
+            except OSError:
+                pass
+
+
+class Runner:
+    def __init__(self, supa, renderer, output_root, cache_dir, poll_seconds=3.0, heartbeat_seconds=15.0, log=print):
+        self.supa = supa
+        self.renderer = renderer
+        self.output_root = output_root
+        self.cache_dir = cache_dir
+        self.poll_seconds = poll_seconds
+        self.heartbeat_seconds = heartbeat_seconds
+        self.log = log
+        self.current = None
+        self.stop_event = threading.Event()
+
+    # ------------------------------------------------------------ heartbeat
+    def heartbeat_once(self):
+        h = self.renderer.health()
+        self.supa.update("worker_status", "id=eq.1", {
+            "last_seen": now_iso(), "comfyui_ok": bool(h["ok"]), "gpu": h.get("gpu"),
+            "current_card_id": self.current, "worker_version": VERSION, "message": h.get("error"),
+        })
+
+    def _heartbeat_loop(self):
+        while not self.stop_event.is_set():
+            try:
+                self.heartbeat_once()
+            except Exception as e:
+                self.log("heartbeat failed: %s" % e)
+            self.stop_event.wait(self.heartbeat_seconds)
+
+    # ------------------------------------------------------------ one job
+    def tick(self):
+        self.supa.rpc("requeue_stuck_cards")
+        # With ComfyUI down, leave queued cards alone (they stay queued) but still
+        # do restamps, which only need Pillow.
+        comfy_ok = bool(self.renderer.health()["ok"])
+        job = self.supa.rpc("claim_next_card", None if comfy_ok else {"p_restamp_only": True})
+        if not job:
+            return False
+        card = job["card"]
+        self.current = card["id"]
+        self.log("%s: %s (%s)" % (job["job"], card["name"], card["id"]))
+        try:
+            settings = self._settings()
+            if job["job"] == "restamp" and card.get("photo_path"):
+                try:
+                    self._restamp(job, settings)
+                except PhotoMissing:
+                    self.log("clean photo missing from storage, generating instead")
+                    self._to_generate(job, settings)
+            elif job["job"] == "restamp":
+                self._to_generate(job, settings)
+            else:
+                self._generate(job, settings)
+        except Exception as e:
+            if not isinstance(e, JobError):
+                self.log(traceback.format_exc())
+            self._fail(card, e)
+        finally:
+            self.current = None
+        return True
+
+    def _settings(self):
+        rows = self._net(lambda: self.supa.select("settings", "id=eq.1&select=handle,width,height"), NO_NET_SETTINGS)
+        if not rows:
+            raise JobError("The settings row is missing. Run supabase/schema.sql again.")
+        return rows[0]
+
+    def _to_generate(self, job, s):
+        card = job["card"]
+        # Tell the UI and the stuck-card recovery that this is now a generate.
+        rows = self._net(lambda: self.supa.update("cards", self._match(card), {"status": "generating"}, returning=True), NO_NET_SAVE)
+        if not rows:
+            self.log(STALE)
+            return
+        self._generate(job, s)
+
+    def _generate(self, job, s):
+        card = job["card"]
+        if not self.renderer.health()["ok"]:
+            raise JobError(COMFY_CLOSED)
+        photo = self.renderer.generate_photo(card["prompt"], int(card["seed"]), int(s["width"]), int(s["height"]))
+        photo_bytes = to_jpeg(photo, 92)
+        card_bytes = to_jpeg(self.renderer.compose(photo, card["name"], card["meaning"], s["handle"]), 93)
+        v = int(card["version"])
+        photo_path = "photos/%s/v%d.jpg" % (card["id"], v)
+        card_path = "cards/%s/v%d.jpg" % (card["id"], v)
+        self._net(lambda: self.supa.upload(BUCKET, photo_path, photo_bytes), NO_NET_SAVE)
+        self._net(lambda: self.supa.upload(BUCKET, card_path, card_bytes), NO_NET_SAVE)
+        self._cache_put(photo_path, photo_bytes)
+        if not self._finish(card, {"photo_path": photo_path, "card_path": card_path}):
+            self._drop_stale([photo_path, card_path])
+            return
+        self._cleanup(card, keep={photo_path, card_path})
+        self._backup(job, card_bytes)
+
+    def _restamp(self, job, s):
+        card = job["card"]
+        photo = Image.open(io.BytesIO(self._load_photo(card["photo_path"]))).convert("RGB")
+        card_bytes = to_jpeg(self.renderer.compose(photo, card["name"], card["meaning"], s["handle"]), 93)
+        card_path = "cards/%s/v%d.jpg" % (card["id"], int(card["version"]))
+        self._net(lambda: self.supa.upload(BUCKET, card_path, card_bytes), NO_NET_SAVE)
+        if not self._finish(card, {"card_path": card_path}):
+            self._drop_stale([card_path])
+            return
+        self._cleanup(card, keep={card["photo_path"], card_path})
+        self._backup(job, card_bytes)
+
+    # ------------------------------------------------------------ results
+    def _match(self, card):
+        # The version guard: if the owner pressed Regenerate or edited the text
+        # meanwhile, the version moved on and this stale result is dropped.
+        return "id=eq.%s&version=eq.%d" % (card["id"], int(card["version"]))
+
+    def _finish(self, card, values):
+        """True if the card row took the result, False if it moved on (0 rows matched)."""
+        body = dict(values, status="done", finished_at=now_iso(), claimed_at=None, error=None)
+        rows = self._retry(lambda: self.supa.update("cards", self._match(card), body, returning=True))
+        return bool(rows)
+
+    def _drop_stale(self, paths):
+        # The card was regenerated, edited or deleted meanwhile. Discard what this
+        # job uploaded and leave everything the DB row points to alone.
+        self.log(STALE)
+        try:
+            self.supa.remove(BUCKET, paths)
+        except Exception as e:
+            self.log("could not remove stale uploads: %s" % e)
+        for p in paths:
+            try:
+                os.remove(self._cache_file(p))
+            except OSError:
+                pass
+
+    def _fail(self, card, e):
+        msg = str(e) if isinstance(e, JobError) else "Something went wrong on your PC: %s" % (str(e) or type(e).__name__)
+        body = {"status": "failed", "error": msg[:300], "claimed_at": None, "finished_at": now_iso()}
+        try:
+            # 0 rows matched (card moved on or was deleted) is fine: nothing to mark.
+            self._retry(lambda: self.supa.update("cards", self._match(card), body))
+        except Exception as e2:
+            self.log("could not mark the card failed: %s" % e2)
+
+    def _net(self, fn, reason):
+        """Retry through network blips; if it still fails, raise a plain-language JobError."""
+        try:
+            return self._retry(fn)
+        except SupaError as e:
+            if is_http_4xx(e):
+                raise JobError("Supabase refused this request: %s" % str(e)[:200])
+            raise JobError(reason)
+
+    def _retry(self, fn, tries=5):
+        delay = 1.0
+        for i in range(tries):
+            try:
+                return fn()
+            except SupaError as e:
+                if i == tries - 1 or is_http_4xx(e):
+                    raise
+                time.sleep(delay)
+                delay = min(delay * 2, 15)
+
+    def _cleanup(self, card, keep):
+        old = [p for p in (card.get("photo_path"), card.get("card_path")) if p and p not in keep]
+        if not old:
+            return
+        try:
+            self.supa.remove(BUCKET, old)
+        except Exception as e:
+            self.log("could not remove old files: %s" % e)
+        for p in old:
+            try:
+                os.remove(self._cache_file(p))
+            except OSError:
+                pass
+
+    # ------------------------------------------------------------ local files
+    def _cache_file(self, path):
+        return os.path.join(self.cache_dir, path.replace("/", "_"))
+
+    def _cache_put(self, path, data):
+        try:
+            os.makedirs(self.cache_dir, exist_ok=True)
+            with open(self._cache_file(path), "wb") as f:
+                f.write(data)
+        except OSError as e:
+            self.log("cache write failed: %s" % e)
+
+    def _load_photo(self, path):
+        f = self._cache_file(path)
+        if os.path.exists(f):
+            with open(f, "rb") as fh:
+                return fh.read()
+        try:
+            data = self._retry(lambda: self.supa.download(BUCKET, path))
+        except SupaError as e:
+            if is_http_4xx(e):
+                raise PhotoMissing(path)
+            raise JobError(NO_NET_LOAD)
+        self._cache_put(path, data)
+        return data
+
+    def _index_file(self):
+        return os.path.join(self.cache_dir, "backup-index.json")
+
+    def _index_load(self):
+        try:
+            with open(self._index_file(), encoding="utf-8") as fh:
+                return json.load(fh)
+        except (OSError, ValueError):
+            return {}
+
+    def _index_save(self, idx):
+        os.makedirs(self.cache_dir, exist_ok=True)
+        tmp = self._index_file() + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(idx, fh)
+        os.replace(tmp, self._index_file())
+
+    def _backup(self, job, data):
+        card = job["card"]
+        if card.get("kind") != "post" or not job.get("post_date") or not job.get("gender_label"):
+            return
+        try:
+            label = "%s %s" % (job["post_date"], job["gender_label"])
+            if job.get("style_label"):
+                label += " " + job["style_label"]
+            rel = os.path.join(label, "%02d-%s.jpg" % (int(card["position"]), slugify(card["name"])))
+            idx = self._index_load()
+            old = idx.get(card["id"])
+            os.makedirs(os.path.join(self.output_root, label), exist_ok=True)
+            final = os.path.join(self.output_root, rel)
+            tmp = final + ".part"
+            with open(tmp, "wb") as fh:
+                fh.write(data)
+            os.replace(tmp, final)
+            # Only delete the file THIS card wrote last time, never by position prefix.
+            if old and old != rel:
+                try:
+                    os.remove(os.path.join(self.output_root, old))
+                except OSError:
+                    pass
+            idx[card["id"]] = rel
+            self._index_save(idx)
+        except OSError as e:
+            self.log("backup copy failed: %s" % e)
+
+    # ------------------------------------------------------------ forever
+    def run_forever(self):
+        threading.Thread(target=self._heartbeat_loop, daemon=True).start()
+        backoff = self.poll_seconds
+        while not self.stop_event.is_set():
+            try:
+                ran = self.tick()
+                backoff = self.poll_seconds
+                if not ran:
+                    self.stop_event.wait(self.poll_seconds)
+            except Exception as e:
+                self.log("loop error (retrying in %ds): %s" % (backoff, e))
+                self.stop_event.wait(backoff)
+                backoff = min(backoff * 2, 60)
