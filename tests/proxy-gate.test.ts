@@ -29,6 +29,17 @@ describe("safeNext", () => {
     expect(safeNext("/%09/evil.com")).toBe("/%09/evil.com");
     expect(safeNext("/posts/abc#card-2")).toBe("/posts/abc#card-2");
   });
+  it("rejects dot segments and doubled slashes that URL parsing collapses into //host", () => {
+    expect(safeNext("/.//evil.com")).toBe("/");
+    expect(safeNext("/a/..//evil.com")).toBe("/");
+    expect(safeNext("/..//evil.com")).toBe("/");
+    expect(safeNext("/%2e//evil.com")).toBe("/");
+    expect(safeNext("/%2E%2E/evil.com")).toBe("/");
+    expect(safeNext("/posts/./abc")).toBe("/");
+    expect(safeNext("/posts//abc")).toBe("/");
+    expect(safeNext("/posts/abc?u=//x.com")).toBe("/posts/abc?u=//x.com");
+    expect(safeNext("/names/o.brien")).toBe("/names/o.brien");
+  });
 });
 
 describe("gateRedirect", () => {

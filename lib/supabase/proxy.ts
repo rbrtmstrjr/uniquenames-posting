@@ -7,13 +7,18 @@ export function isOwnerEmail(email?: string | null, admin?: string): boolean {
 
 // Only same-site relative paths. Browsers strip tab/CR/LF and treat "\" as "/",
 // so "/\t/evil.com" would become "//evil.com": reject control chars and
-// backslashes outright, then parse and require the URL to stay on our origin.
+// backslashes outright. URL parsing collapses dot segments ("/.//evil.com" -> "//evil.com"),
+// so also reject any "//" or dot segment (".", "..", or %2e forms) in the path part, then
+// parse, require our origin, and re-check that the result is not protocol-relative.
 export function safeNext(next?: string): string {
   if (!next || !next.startsWith("/") || /[\u0000-\u001F\u007F\\]/.test(next)) return "/";
+  const path = next.split(/[?#]/, 1)[0];
+  if (path.includes("//") || /(^|\/)\.{1,2}(\/|$)/.test(path.replace(/%2e/gi, "."))) return "/";
   let u: URL;
   try { u = new URL(next, "http://x"); } catch { return "/"; }
   if (u.origin !== "http://x") return "/";
-  return u.pathname + u.search + u.hash;
+  const out = u.pathname + u.search + u.hash;
+  return out.startsWith("//") || out.startsWith("/\\") ? "/" : out;
 }
 
 // Refreshes the session cookie on every request and sends anyone who is not
