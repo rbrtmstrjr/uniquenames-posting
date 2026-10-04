@@ -12,8 +12,10 @@ export function ThemeToggle() {
   const next = theme === "light" ? "dark" : theme === "dark" ? "system" : "light";
   const Icon = !mounted ? Monitor : theme === "light" ? Sun : theme === "dark" ? Moon : Monitor;
   const label = !mounted ? "Theme" : theme === "light" ? "Light" : theme === "dark" ? "Dark" : "Auto";
+  // The saved theme is only known in the browser: keep the server and first client render identical.
+  const aria = mounted ? `Theme: ${label}. Switch to ${next}` : "Switch theme";
   return (
-    <button type="button" onClick={() => setTheme(next)} aria-label={`Theme: ${label}. Switch to ${next}`}
+    <button type="button" onClick={() => setTheme(next)} aria-label={aria}
       className="inline-flex min-h-11 items-center gap-2 rounded-xl px-3 text-xs font-semibold text-muted hover:bg-surface-2 hover:text-ink">
       <Icon className="size-4" aria-hidden /> {label}
     </button>
