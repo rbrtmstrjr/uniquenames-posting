@@ -30,7 +30,7 @@ export function LoginForm({ next, denied = false }: { next: string; denied?: boo
   const shown = error ?? (denied ? DENIED : null);
 
   return (
-    <form onSubmit={submit} className="space-y-4 rounded-2xl border border-line bg-surface p-6 shadow-soft">
+    <form onSubmit={submit} className="space-y-4">
       <label className="block">
         <span className="text-sm font-semibold text-ink">Email</span>
         <input type="email" autoComplete="email" required value={email} onChange={(e) => setEmail(e.target.value)}
