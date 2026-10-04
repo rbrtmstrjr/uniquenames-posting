@@ -17,10 +17,11 @@ import { useSignedUrls } from "@/lib/realtime/signed-urls";
 import { useWorkerContext } from "@/components/shell/app-shell";
 import { createClient } from "@/lib/supabase/client";
 import { makePreviewAction, moveThemeNextAction, reorderThemesAction, setArchivedAction } from "@/lib/actions/themes";
+import { Dialog } from "@/components/ui/dialog";
 import { ThemeForm } from "./theme-form";
 
-function Row({ t, next, busy, preview, url, onEdit, onPreview, onArchive, onNext }: {
-  t: ThemeRow; next: boolean; busy: boolean; preview: CardRow | null; url?: string; onEdit: () => void; onPreview: () => void; onArchive: () => void; onNext: () => void;
+function Row({ t, next, busy, preview, url, onEdit, onOpen, onPreview, onArchive, onNext }: {
+  t: ThemeRow; next: boolean; busy: boolean; preview: CardRow | null; url?: string; onEdit: () => void; onOpen: () => void; onPreview: () => void; onArchive: () => void; onNext: () => void;
 }) {
   const { health } = useWorkerContext();
   const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({ id: t.id });
@@ -31,8 +32,8 @@ function Row({ t, next, busy, preview, url, onEdit, onPreview, onArchive, onNext
         aria-label={`Reorder ${t.title}. Press space, then the arrow keys, then space again.`} {...attributes} {...listeners}>
         <GripVertical className="size-5" aria-hidden />
       </button>
-      <div className="w-24 shrink-0 sm:w-28">
-        {preview ? <CardTile card={preview} url={url} health={health} queuePos={0} />
+      <div className={preview?.status === "failed" ? "w-36 shrink-0 sm:w-40" : "w-24 shrink-0 sm:w-28"}>
+        {preview ? <CardTile card={preview} url={url} health={health} queuePos={0} onOpen={onOpen} onRetry={onPreview} />
           : <button type="button" onClick={onPreview} disabled={busy} className="grid aspect-square w-full place-items-center rounded-xl border-2 border-dashed border-line text-[11px] font-semibold text-muted hover:border-accent hover:text-accent disabled:opacity-55"><span className="flex flex-col items-center gap-1"><Sparkles className="size-4" aria-hidden /> Make preview</span></button>}
       </div>
       <div className="min-w-0 flex-1">
@@ -58,6 +59,7 @@ export function ThemeList({ themes, previews: initialPreviews }: { themes: Theme
   const [form, setForm] = useState<{ open: boolean; editing: ThemeRow | null }>({ open: false, editing: null });
   const [order, setOrder] = useState<string[] | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [openPreviewId, setOpenPreviewId] = useState<string | null>(null);
   // Drop the optimistic drag order once the server hands us fresh themes (adjust state during render).
   const [seedThemes, setSeedThemes] = useState(themes);
   if (seedThemes !== themes) { setSeedThemes(themes); setOrder(null); }
@@ -87,6 +89,8 @@ export function ThemeList({ themes, previews: initialPreviews }: { themes: Theme
   const used = mine.filter((t) => t.status === "used").sort((a, b) => (b.used_on ?? "").localeCompare(a.used_on ?? ""));
   const archived = mine.filter((t) => t.status === "archived");
 
+const openTheme = themes.find((t) => t.id === openPreviewId) ?? null;
+  const openCard = openTheme ? latestPreview.get(openTheme.id) ?? null : null;
   const act = async (id: string, fn: () => Promise<{ ok: boolean; error?: string }>, ok: string) => {
     if (busyId) return;
     setBusyId(id);
@@ -97,12 +101,19 @@ export function ThemeList({ themes, previews: initialPreviews }: { themes: Theme
   };
   const onDragEnd = async (e: DragEndEvent) => {
     if (!e.over || e.active.id === e.over.id || busyId) return;
+    const previous = order;
     const ids = available.map((t) => t.id);
     const next = arrayMove(ids, ids.indexOf(String(e.active.id)), ids.indexOf(String(e.over.id)));
     setOrder(next);
-    // sort_order is only ever compared within one gender, so numbering this gender's list 1..n is safe.
-    const r = await reorderThemesAction(next);
-    if (!r.ok) { toast.error(r.error); setOrder(null); } else router.refresh();
+    setBusyId("reorder");
+    try {
+      // sort_order is only ever compared within one gender, so numbering this gender's list 1..n is safe.
+      const r = await reorderThemesAction(next);
+      if (!r.ok) { toast.error(r.error); setOrder(previous); } else router.refresh();
+    } catch {
+      toast.error("Could not save the new order. Check your connection and try again.");
+      setOrder(previous);
+    } finally { setBusyId(null); }
   };
 
   return (
@@ -116,7 +127,7 @@ export function ThemeList({ themes, previews: initialPreviews }: { themes: Theme
         {available.length === 0 ? (
           <Empty icon={<Palette className="size-6" />} title={`No ${gender} themes left`} text="Add a new photoshoot theme, or restore an archived one." action={<Button onClick={() => setForm({ open: true, editing: null })}><Plus className="size-4" aria-hidden /> New theme</Button>} />
         ) : (
-          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+          <DndContext id="themes-dnd" sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
             <SortableContext items={available.map((t) => t.id)} strategy={verticalListSortingStrategy}>
               <ul className="space-y-2">
                 {available.map((t, i) => {
@@ -124,6 +135,7 @@ export function ThemeList({ themes, previews: initialPreviews }: { themes: Theme
                   return (
                     <Row key={t.id} t={t} next={i === 0} busy={busyId !== null} preview={p} url={urlFor(p?.card_path)}
                       onEdit={() => setForm({ open: true, editing: t })}
+                      onOpen={() => setOpenPreviewId(t.id)}
                       onPreview={() => act(t.id, () => makePreviewAction(t.id), "Making a preview… it appears here in about 30 s")}
                       onArchive={() => act(t.id, () => setArchivedAction(t.id, true), `${t.title} archived. Restore it from the Archived list.`)}
                       onNext={() => act(t.id, () => moveThemeNextAction(t.id), `${t.title} is next`)} />
@@ -149,6 +161,21 @@ export function ThemeList({ themes, previews: initialPreviews }: { themes: Theme
           ))}</ul>
         </details>
       )}
+      <Dialog open={!!openTheme} onOpenChange={(o) => !o && setOpenPreviewId(null)} title={openTheme ? `${openTheme.title} preview` : "Preview"} description="One test picture of this theme, to check the look before it is used.">
+        {openTheme && (
+          <div className="space-y-4">
+            {openCard && urlFor(openCard.card_path) ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={urlFor(openCard.card_path)} alt={`Preview of the ${openTheme.title} theme`} className="mx-auto aspect-square w-full max-w-md rounded-2xl object-cover" />
+            ) : (
+              <p className="rounded-2xl bg-surface-2 p-6 text-center text-sm text-muted">This preview is not ready yet.</p>
+            )}
+            <div className="flex justify-end">
+              <Button loading={busyId === openTheme.id} disabled={busyId !== null} onClick={() => act(openTheme.id, () => makePreviewAction(openTheme.id), "Making a preview… it appears here in about 30 s")}><Sparkles className="size-4" aria-hidden /> Make a new preview</Button>
+            </div>
+          </div>
+        )}
+      </Dialog>
       <ThemeForm open={form.open} editing={form.editing} defaultGender={gender} onOpenChange={(o) => setForm((f) => ({ ...f, open: o }))} onSaved={() => router.refresh()} />
     </div>
   );

@@ -25,19 +25,28 @@ export function CardTile({ card, url, health, queuePos, onOpen, onRetry, selecti
     try { await onRetry(); } finally { setRetrying(false); }
   };
 
+  const media = (
+    <>
+      {showImage && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img key={url} src={url} alt="" loading="lazy" decoding="async"
+          className={cn("size-full object-cover animate-pop transition duration-500", v === "regenerating" && "scale-[1.02] opacity-30 blur-[2px]", selection && !selection.selected && "opacity-45 saturate-50")} />
+      )}
+      {(v === "generating" || v === "regenerating") && <div className={cn("absolute inset-0 shimmer animate-shimmer", v === "regenerating" && "opacity-60")} aria-hidden />}
+    </>
+  );
+
   return (
     <div className={cn("group relative aspect-square overflow-hidden rounded-xl bg-surface-2", v === "queued" && "border border-dashed border-line bg-surface-2/40", v === "failed" && "ring-2 ring-bad", className)}>
       {/* one polite live region: announces state changes only, never the ticking timer */}
       <span className="sr-only" role="status" aria-live="polite">{label}</span>
-      <button type="button" onClick={onOpen} aria-label={`Open ${label}`}
-        className="absolute inset-0 z-[1] block size-full">
-        {showImage && (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img key={url} src={url} alt="" loading="lazy" decoding="async"
-            className={cn("size-full object-cover animate-pop transition duration-500", v === "regenerating" && "scale-[1.02] opacity-30 blur-[2px]", selection && !selection.selected && "opacity-45 saturate-50")} />
-        )}
-        {(v === "generating" || v === "regenerating") && <div className={cn("absolute inset-0 shimmer animate-shimmer", v === "regenerating" && "opacity-60")} aria-hidden />}
-      </button>
+      {onOpen ? (
+        <button type="button" onClick={onOpen} aria-label={`Open ${label}`} className="absolute inset-0 z-[1] block size-full">
+          {media}
+        </button>
+      ) : (
+        <div className="absolute inset-0 z-[1] block size-full">{media}</div>
+      )}
 
       {/* state overlay */}
       <div className="pointer-events-none absolute inset-0 z-[2] flex flex-col items-center justify-center gap-1.5 p-2 text-center">

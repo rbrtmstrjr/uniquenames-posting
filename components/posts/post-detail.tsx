@@ -164,7 +164,7 @@ export function PostDetail({ post: initialPost, theme, initialCards }: { post: P
             <Button variant="ghost" size="sm" onClick={selectAll}>{allSelected ? "Select none" : "Select all"}</Button>
           </div>}>
           <p className="mb-3 text-xs text-muted">Tap a picture to open it. Tap the number to select or unselect. Drag to change the upload order (press and hold on a phone).</p>
-          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+          <DndContext id="cards-dnd" sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
             <SortableContext items={visible.map((c) => c.id)} strategy={rectSortingStrategy}>
               <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 xl:grid-cols-4">
                 {visible.map((c) => (

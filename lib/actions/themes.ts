@@ -30,7 +30,13 @@ export async function saveThemeAction(input: ThemeInput & { id?: string }): Prom
 export async function setArchivedAction(id: string, archived: boolean): Promise<ActionResult> {
   await requireOwner();
   const sb = await createClient();
-  const { data, error } = await sb.from("themes").update({ status: archived ? "archived" : "available" }).eq("id", id).neq("status", "used").select("id");
+  // Restoring puts the theme at the END of the queue so it does not jump to "Next".
+  const patch: { status: string; sort_order?: number } = { status: archived ? "archived" : "available" };
+  if (!archived) {
+    const { data: last } = await sb.from("themes").select("sort_order").order("sort_order", { ascending: false }).limit(1);
+    patch.sort_order = ((last?.[0]?.sort_order as number) ?? 0) + 1;
+  }
+  const { data, error } = await sb.from("themes").update(patch).eq("id", id).neq("status", "used").select("id");
   if (error) return fail(error.message);
   if (!data?.length) return fail("Themes that were used in a post cannot be archived or restored.");
   revalidatePath("/", "layout");
