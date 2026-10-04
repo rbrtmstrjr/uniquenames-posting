@@ -109,13 +109,17 @@ end $$;
 
 -- ---------------------------------------------------------------- post status follows its cards
 create or replace function public.refresh_post(p_post uuid) returns void language plpgsql as $$
-declare v_status text; v_open int; v_total int;
+declare v_status text; v_open int;
 begin
   if p_post is null then return; end if;
   select status into v_status from public.posts where id = p_post;
   if not found or v_status = 'posted' then return; end if;
-  select count(*) filter (where status <> 'done'), count(*) into v_open, v_total from public.cards where post_id = p_post;
-  if v_open = 0 and v_total > 0 then
+  -- A text-only restamp of a card that already has an image does not block readiness:
+  -- the post stays ready (no "Post ready" chime on every text edit) while the text updates.
+  -- A post with no cards left (v_open = 0) has nothing to wait for, so it is ready, not stuck generating.
+  select count(*) filter (where status <> 'done' and not (status = 'restamp' and card_path is not null))
+    into v_open from public.cards where post_id = p_post;
+  if v_open = 0 then
     update public.posts set status = 'ready' where id = p_post and status <> 'ready';
     update public.names set status = 'used' where post_id = p_post and status = 'reserved';
   else
@@ -296,6 +300,12 @@ end $$;
 drop policy if exists owner_read on public.worker_status;
 create policy owner_read on public.worker_status for select to authenticated using (true);
 
+-- Explicit grants (idempotent): the app runs as authenticated, the worker as service_role.
+-- RLS above still limits what each role can see; anon gets no table access.
+grant usage on schema public to authenticated, service_role;
+grant select, insert, update, delete on all tables in schema public to authenticated, service_role;
+revoke all on all tables in schema public from anon;
+
 revoke execute on function public.claim_next_card(boolean) from public, anon, authenticated;
 revoke execute on function public.requeue_stuck_cards() from public, anon, authenticated;
 grant execute on function public.claim_next_card(boolean) to service_role;
@@ -305,7 +315,8 @@ revoke execute on function public.add_card(uuid, jsonb) from public, anon;
 revoke execute on function public.delete_card(uuid) from public, anon;
 revoke execute on function public.delete_post(uuid) from public, anon;
 revoke execute on function public.refresh_post(uuid) from public, anon;
-grant execute on function public.refresh_post(uuid) to authenticated;
+grant execute on function public.create_post(jsonb), public.add_card(uuid, jsonb), public.delete_card(uuid),
+  public.delete_post(uuid), public.refresh_post(uuid) to authenticated, service_role;
 
 -- ---------------------------------------------------------------- storage
 insert into storage.buckets (id, name, public) values ('cards', 'cards', false) on conflict (id) do nothing;

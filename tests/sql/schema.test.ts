@@ -74,6 +74,32 @@ describe("post status follows cards", () => {
     await db.query(`update cards set status='queued' where post_id=$1 and position=1`, [r.post_id]);
     expect((await one<{ status: string }>(db, `select status from posts where id=$1`, [r.post_id])).status).toBe("generating");
   });
+  it("a text-only restamp of a finished card keeps the post ready", async () => {
+    const r = await createPost(plan(nameIds.slice(0, 9)));
+    await db.query(`update cards set status='done', card_path='cards/x/v1.jpg' where post_id=$1`, [r.post_id]);
+    expect((await one<{ status: string }>(db, `select status from posts where id=$1`, [r.post_id])).status).toBe("ready");
+    await db.query(`update cards set status='restamp' where post_id=$1 and position=3`, [r.post_id]);
+    expect((await one<{ status: string }>(db, `select status from posts where id=$1`, [r.post_id])).status).toBe("ready");
+    expect((await claim(true))?.job).toBe("restamp");
+    expect((await one<{ status: string }>(db, `select status from posts where id=$1`, [r.post_id])).status).toBe("ready");
+    // A restamp with no image yet still blocks readiness.
+    await db.query(`update cards set status='restamp', card_path=null, claimed_at=null where post_id=$1 and position=4`, [r.post_id]);
+    expect((await one<{ status: string }>(db, `select status from posts where id=$1`, [r.post_id])).status).toBe("generating");
+  });
+  it("deleting the last card leaves the post ready, not stuck generating", async () => {
+    const r = await createPost(plan(nameIds.slice(0, 1)));
+    expect((await one<{ status: string }>(db, `select status from posts where id=$1`, [r.post_id])).status).toBe("generating");
+    const card = await one<{ id: string }>(db, `select id from cards where post_id=$1`, [r.post_id]);
+    await db.query(`select delete_card($1)`, [card.id]);
+    expect((await one<{ status: string }>(db, `select status from posts where id=$1`, [r.post_id])).status).toBe("ready");
+  });
+  it("deleting the last card of a posted post keeps it posted", async () => {
+    const r = await createPost(plan(nameIds.slice(0, 1)));
+    await db.query(`update posts set status='posted' where id=$1`, [r.post_id]);
+    const card = await one<{ id: string }>(db, `select id from cards where post_id=$1`, [r.post_id]);
+    await db.query(`select delete_card($1)`, [card.id]);
+    expect((await one<{ status: string }>(db, `select status from posts where id=$1`, [r.post_id])).status).toBe("posted");
+  });
   it("posted stays posted", async () => {
     const r = await createPost(plan(nameIds.slice(0, 9)));
     await db.query(`update posts set status='posted' where id=$1`, [r.post_id]);
@@ -153,5 +179,30 @@ describe("add / delete", () => {
       `insert into cards (theme_id, kind, name, meaning, shot, prompt, seed) values ($1,'preview','Sample Name','m','s','p',1) returning id`, [themeId]);
     await db.query(`update cards set status='done' where id=$1`, [c.id]);
     expect((await one<{ preview_card_id: string }>(db, `select preview_card_id from themes where id=$1`, [themeId])).preview_card_id).toBe(c.id);
+  });
+});
+
+describe("supabase security block", () => {
+  it("applies twice (idempotent) and grants the right roles", async () => {
+    const { readFileSync } = await import("node:fs");
+    const sql = readFileSync("supabase/schema.sql", "utf8");
+    const block = sql.match(/-- @supabase-only begin([\s\S]*?)-- -+ storage/)![1];
+    await db.exec("create role anon; create role authenticated; create role service_role;");
+    await db.exec(block);
+    await db.exec(block);
+    const can = async (role: string, fn: string) =>
+      (await one<{ ok: boolean }>(db, `select has_function_privilege($1, $2, 'execute') ok`, [role, fn])).ok;
+    for (const fn of ["public.create_post(jsonb)", "public.add_card(uuid, jsonb)", "public.delete_card(uuid)", "public.delete_post(uuid)", "public.refresh_post(uuid)"]) {
+      expect(await can("authenticated", fn), fn).toBe(true);
+      expect(await can("anon", fn), fn).toBe(false);
+    }
+    for (const fn of ["public.claim_next_card(boolean)", "public.requeue_stuck_cards()"]) {
+      expect(await can("service_role", fn), fn).toBe(true);
+      expect(await can("authenticated", fn), fn).toBe(false);
+      expect(await can("anon", fn), fn).toBe(false);
+    }
+    const t = await one<{ a: boolean; s: boolean; x: boolean }>(db,
+      `select has_table_privilege('authenticated','public.cards','insert') a, has_table_privilege('service_role','public.posts','update') s, has_table_privilege('anon','public.cards','select') x`);
+    expect(t).toEqual({ a: true, s: true, x: false });
   });
 });
