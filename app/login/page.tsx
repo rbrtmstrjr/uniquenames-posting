@@ -1,4 +1,5 @@
 import { LoginForm } from "./login-form";
+import { safeNext } from "@/lib/supabase/proxy";
 
 export default async function LoginPage({ searchParams }: { searchParams: Promise<{ next?: string }> }) {
   const { next } = await searchParams;
@@ -10,7 +11,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
           <h1 className="mt-2 font-display text-3xl text-ink">Unique Names</h1>
           <p className="mt-1 text-sm text-muted">Daily name-card posts</p>
         </div>
-        <LoginForm next={next && next.startsWith("/") ? next : "/"} />
+        <LoginForm next={safeNext(next)} />
       </div>
     </main>
   );

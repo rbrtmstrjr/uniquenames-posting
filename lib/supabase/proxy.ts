@@ -5,6 +5,11 @@ export function isOwnerEmail(email?: string | null, admin?: string): boolean {
   return !!email && !!admin && email.toLowerCase() === admin.toLowerCase();
 }
 
+// Only same-site relative paths: a single leading "/", no "//" and no backslash.
+export function safeNext(next?: string): string {
+  return next && next.startsWith("/") && !next.startsWith("//") && !next.includes("\\") ? next : "/";
+}
+
 // Refreshes the session cookie on every request and sends anyone who is not
 // the owner to /login (sign-ups are off; the email check is defense in depth).
 export async function updateSession(request: NextRequest) {
