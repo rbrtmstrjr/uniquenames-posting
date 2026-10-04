@@ -8,13 +8,15 @@ export const STOCK_KEYS = [
 
 export async function getTodayData() {
   const sb = await createClient();
-  const [{ data: settings }, { data: themes }, { data: names }, { data: active }] = await Promise.all([
+  const [{ data: settings, error: settingsErr }, { data: themes }, counts, { data: active }] = await Promise.all([
     sb.from("settings").select("*").eq("id", 1).single(),
     sb.from("themes").select("*").eq("status", "available").order("sort_order").order("title"),
-    sb.from("names").select("gender, style").eq("status", "available"),
+    // head count queries: exact counts, no 1000-row cap
+    Promise.all(STOCK_KEYS.map((k) => sb.from("names").select("id", { count: "exact", head: true }).eq("status", "available").eq("gender", k.gender).eq("style", k.style))),
     sb.from("posts").select("*").order("created_at", { ascending: false }).limit(1),
   ]);
-  const stock = STOCK_KEYS.map((k) => ({ ...k, count: (names ?? []).filter((n) => n.gender === k.gender && n.style === k.style).length }));
+  if (settingsErr || !settings) throw new Error("Settings are missing. Run supabase/schema.sql.");
+  const stock = STOCK_KEYS.map((k, i) => ({ ...k, count: counts[i].count ?? 0 }));
   const latest = (active?.[0] ?? null) as PostRow | null;
   // Show the latest post on Today while it is generating, or for 12 h after it finished.
   const show = latest && (latest.status === "generating" || Date.now() - Date.parse(latest.updated_at) < 12 * 3600_000) ? latest : null;

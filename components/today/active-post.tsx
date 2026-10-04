@@ -1,6 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useCallback } from "react";
+import { useRouter } from "next/navigation";
 import { ArrowRight } from "lucide-react";
 import { toast } from "sonner";
 import type { CardRow, PostRow } from "@/lib/db/types";
@@ -16,6 +17,7 @@ import { createClient } from "@/lib/supabase/client";
 import { regenerateCardAction } from "@/lib/actions/cards";
 
 export function ActivePost({ post, initialCards }: { post: PostRow; initialCards: CardRow[] }) {
+  const router = useRouter();
   const { health } = useWorkerContext();
   const refetch = useCallback(async () => {
     const { data, error } = await createClient().from("cards").select("*").eq("post_id", post.id).order("position");
@@ -49,7 +51,7 @@ export function ActivePost({ post, initialCards }: { post: PostRow; initialCards
       <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 lg:grid-cols-5">
         {cards.map((c) => (
           <CardTile key={c.id} card={c} url={urlFor(c.card_path)} health={health} queuePos={queuePosition(c, cards)}
-            onOpen={() => { window.location.href = `/posts/${post.id}?card=${c.id}`; }}
+            onOpen={() => { router.push(`/posts/${post.id}?card=${c.id}`); }}
             onRetry={async () => { const r = await regenerateCardAction(c.id); if (!r.ok) toast.error(r.error); }} />
         ))}
       </div>

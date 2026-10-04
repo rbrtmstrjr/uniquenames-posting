@@ -1,4 +1,5 @@
 "use client";
+import { useState } from "react";
 import { AlertTriangle, Clock3, Loader2, PenLine, PlugZap, RotateCw } from "lucide-react";
 import type { CardRow } from "@/lib/db/types";
 import { cardVisual } from "@/lib/status/card-state";
@@ -8,17 +9,26 @@ import { useNow } from "@/lib/realtime/hooks";
 import { cn } from "@/lib/utils/cn";
 
 export function CardTile({ card, url, health, queuePos, onOpen, onRetry, selection, className }: {
-  card: CardRow; url?: string; health: WorkerHealth; queuePos: number; onOpen?: () => void; onRetry?: () => void;
+  card: CardRow; url?: string; health: WorkerHealth; queuePos: number; onOpen?: () => void; onRetry?: () => void | Promise<void>;
   selection?: { selected: boolean; order: number | null; onToggle: () => void }; className?: string;
 }) {
+  const [retrying, setRetrying] = useState(false);
   const v = cardVisual(card, health);
   const now = useNow(1000);
   const elapsed = card.started_at ? Math.max(0, (now - Date.parse(card.started_at)) / 1000) : 0;
   const showImage = !!url && (v === "done" || v === "restamp" || v === "regenerating" || (v === "waiting" && !!card.card_path) || (v === "failed" && !!card.card_path));
   const label = `${card.name}: ${({ queued: "in line", generating: "being made", regenerating: "being remade", restamp: "updating text", done: "ready", failed: "failed", waiting: "waiting for your PC" } as const)[v]}`;
 
+  const retry = async () => {
+    if (retrying || !onRetry) return;
+    setRetrying(true);
+    try { await onRetry(); } finally { setRetrying(false); }
+  };
+
   return (
-    <div className={cn("group relative aspect-square overflow-hidden rounded-xl bg-surface-2", v === "failed" && "ring-2 ring-bad", className)}>
+    <div className={cn("group relative aspect-square overflow-hidden rounded-xl bg-surface-2", v === "queued" && "border border-dashed border-line bg-surface-2/40", v === "failed" && "ring-2 ring-bad", className)}>
+      {/* one polite live region: announces state changes only, never the ticking timer */}
+      <span className="sr-only" role="status" aria-live="polite">{label}</span>
       <button type="button" onClick={onOpen} aria-label={`Open ${label}`}
         className="absolute inset-0 z-[1] block size-full">
         {showImage && (
@@ -26,19 +36,19 @@ export function CardTile({ card, url, health, queuePos, onOpen, onRetry, selecti
           <img key={url} src={url} alt="" loading="lazy" decoding="async"
             className={cn("size-full object-cover animate-pop transition duration-500", v === "regenerating" && "scale-[1.02] opacity-30 blur-[2px]", selection && !selection.selected && "opacity-45 saturate-50")} />
         )}
-        {!showImage && (v === "generating" || v === "regenerating") && <div className="absolute inset-0 shimmer animate-shimmer" />}
+        {(v === "generating" || v === "regenerating") && <div className={cn("absolute inset-0 shimmer animate-shimmer", v === "regenerating" && "opacity-60")} aria-hidden />}
       </button>
 
       {/* state overlay */}
       <div className="pointer-events-none absolute inset-0 z-[2] flex flex-col items-center justify-center gap-1.5 p-2 text-center">
-        {v === "queued" && <><Clock3 className="size-5 text-muted" /><span className="text-xs font-semibold text-muted">#{queuePos || "…"} in line</span></>}
+        {v === "queued" && <><Clock3 className="size-5 text-ink" /><span className="text-xs font-semibold text-ink">#{queuePos || "…"} in line</span></>}
         {(v === "generating" || v === "regenerating") && (
-          <span className="inline-flex items-center gap-1.5 rounded-full bg-surface/90 px-2.5 py-1 text-xs font-bold text-ink shadow-soft" aria-live="polite">
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-surface/90 px-2.5 py-1 text-xs font-bold text-ink shadow-soft">
             <Loader2 className="size-3.5 animate-spin text-accent" /> {v === "regenerating" ? "Remaking" : "Making"}… {formatElapsed(elapsed)}
           </span>
         )}
         {v === "waiting" && (
-          <span className="inline-flex items-center gap-1.5 rounded-full bg-warn/90 px-2.5 py-1 text-xs font-bold text-white shadow-soft">
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-warn px-2.5 py-1 text-xs font-bold text-warn-ink shadow-soft">
             <PlugZap className="size-3.5" /> Waiting for your PC
           </span>
         )}
@@ -53,8 +63,8 @@ export function CardTile({ card, url, health, queuePos, onOpen, onRetry, selecti
           <div className="flex items-center gap-1.5 text-xs font-bold text-bad"><AlertTriangle className="size-3.5" /> Failed</div>
           <p className="mt-0.5 line-clamp-2 text-[11px] text-muted">{card.error ?? "Unknown error"}</p>
           {onRetry && (
-            <button type="button" onClick={onRetry} className="pointer-events-auto mt-1.5 inline-flex min-h-8 items-center gap-1 rounded-md bg-bad px-2 text-[11px] font-bold text-white">
-              <RotateCw className="size-3" /> Retry
+            <button type="button" onClick={retry} disabled={retrying} className="mt-1.5 inline-flex min-h-11 w-full items-center justify-center gap-1.5 rounded-md bg-bad px-2 text-xs font-bold text-bad-ink disabled:opacity-70">
+              {retrying ? <Loader2 className="size-3.5 animate-spin" /> : <RotateCw className="size-3.5" />} {retrying ? "Retrying…" : "Retry"}
             </button>
           )}
         </div>

@@ -33,12 +33,13 @@ export function NewPostPanel({ settings, themes, stock, busy }: {
   const theme = genderThemes.find((t) => t.id === themeId) ?? genderThemes[0];
   const left = stock.find((s) => s.gender === gender && s.style === style)?.count ?? 0;
   const counts = Array.from({ length: settings.max_images - settings.min_images + 1 }, (_, i) => String(settings.min_images + i));
-  const blocked = left < settings.min_images ? `Only ${left} ${gender} ${style} names left. Add names first.` : !theme ? `No ${gender} theme left. Add a theme first.` : null;
+  const wanted = count === "auto" ? settings.min_images : Number(count);
+  const blocked = left < wanted ? `Only ${left} ${gender} ${style} names left${count === "auto" ? "" : `, but you chose ${count} cards`}. Add names or pick fewer cards.` : !theme ? `No ${gender} theme left. Add a theme first.` : null;
 
   const generate = () => {
     if (blocked || pending) return;
     start(async () => {
-      const r = await createPostAction({ gender, style, count: count === "auto" ? null : Number(count), postDate: date, themeId: theme?.id, requestId: crypto.randomUUID() });
+      const r = await createPostAction({ gender, style, count: count === "auto" ? null : Number(count), postDate: date || manilaToday(), themeId: theme?.id, requestId: crypto.randomUUID() });
       if (!r.ok) { toast.error(r.error); return; }
       toast.success(health === "ready" ? "Post queued. Cards will appear as they are made." : `Post queued. ${PC_TEXT[health].fix}`);
       router.refresh();
@@ -47,7 +48,7 @@ export function NewPostPanel({ settings, themes, stock, busy }: {
   useHotkey("g", generate);
 
   return (
-    <Panel title={`New post · ${new Date(date + "T00:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}`}>
+    <Panel title={`New post · ${new Date((date || manilaToday()) + "T00:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}`}>
       <div className="space-y-4">
         <div className="flex flex-wrap gap-2">
           <Segmented label="Gender" value={gender} onChange={(v) => { setGender(v); setThemeId(""); }} options={[{ value: "boy", label: "Boy" }, { value: "girl", label: "Girl" }]} />
@@ -79,7 +80,7 @@ export function NewPostPanel({ settings, themes, stock, busy }: {
           <Button size="lg" onClick={generate} loading={pending} disabled={!!blocked} className="w-full sm:w-auto">
             <Sparkles className="size-4" /> Generate post
           </Button>
-          <span className="text-xs text-muted">{blocked ?? (busy ? "Another post is still generating; this one will wait in line." : `${left} names left for this style · press G`)}</span>
+          <span className="text-xs text-muted">{blocked ?? (busy ? "If a post is still being made, the new cards wait in line." : `${left} names left for this style · press G`)}</span>
         </div>
       </div>
     </Panel>

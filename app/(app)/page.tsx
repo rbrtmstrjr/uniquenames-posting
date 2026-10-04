@@ -2,6 +2,8 @@ import { getTodayData } from "@/lib/data/today";
 import { NewPostPanel } from "@/components/today/new-post-panel";
 import { ActivePost } from "@/components/today/active-post";
 import { Stock } from "@/components/today/stock";
+import { Empty } from "@/components/ui/empty";
+import { ImageIcon } from "lucide-react";
 import { PageHeader } from "@/components/ui/page-header";
 
 export default async function TodayPage() {
@@ -14,7 +16,11 @@ export default async function TodayPage() {
         <NewPostPanel settings={d.settings} themes={d.themes} stock={d.stock} busy={d.activePost?.status === "generating"} />
         <Stock stock={d.stock} themes={themesLeft} min={d.settings.min_images} />
       </div>
-      {d.activePost && <div className="mt-4"><ActivePost key={d.activePost.id} post={d.activePost} initialCards={d.activeCards} /></div>}
+      <div className="mt-4">
+        {d.activePost
+          ? <ActivePost key={d.activePost.id} post={d.activePost} initialCards={d.activeCards} />
+          : <Empty icon={<ImageIcon className="size-6" />} title="No post in progress" text="Pick Boy or Girl above and press Generate post." />}
+      </div>
     </>
   );
 }
