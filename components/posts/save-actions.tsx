@@ -30,7 +30,9 @@ export function SaveActions({ post, cards, caption }: { post: PostRow; cards: Ca
     if (why) toast.warning(why);
     setBusy("zip");
     try {
-      await zipCards(items.map((i) => ({ name: i.name, blob: blobs.get(i.card.card_path!)! })), caption, zipName);
+      // Fetch any picture the prefetch missed, so the zip works even if preparing failed.
+      const got = await blobs.ensure(items.map((i) => i.card.card_path!));
+      await zipCards(items.map((i, n) => ({ name: i.name, blob: got[n] })), caption, zipName);
       toast.success(`Downloaded ${items.length} cards + caption.txt`);
     } catch (e) {
       toast.error(`Could not make the zip: ${(e as Error).message}`);
@@ -54,21 +56,22 @@ export function SaveActions({ post, cards, caption }: { post: PostRow; cards: Ca
     });
   };
 
-  const disabled = !prepared || busy !== null;
+  // Only Share needs the prefetched set (it must open inside the tap); Zip fetches on demand.
+  const canSave = !notReady && ready.length > 0 && busy === null;
   const preparing = !notReady && ready.length > 0 && !prepared;
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap gap-2">
-        <Button onClick={share} loading={busy === "share"} disabled={disabled} className="md:hidden">
+        <Button onClick={share} loading={busy === "share"} disabled={!canSave || !prepared} className="md:hidden">
           <Share2 className="size-4" /> {preparing ? `Preparing ${blobs.ready}/${blobs.total}…` : batches.length ? batchLabel(items.length, MAX_SHARE_FILES, idx) : "Save to phone"}
         </Button>
-        <Button onClick={() => void zip()} loading={busy === "zip"} disabled={disabled} variant="subtle" className="max-md:hidden"><Download className="size-4" /> Download {items.length} as zip</Button>
-        <Button onClick={() => void zip()} loading={busy === "zip"} disabled={disabled} variant="ghost" size="sm" className="md:hidden">Zip instead</Button>
+        <Button onClick={() => void zip()} loading={busy === "zip"} disabled={!canSave} variant="subtle" className="max-md:hidden"><Download className="size-4" /> Download {items.length} as zip</Button>
+        <Button onClick={() => void zip()} loading={busy === "zip"} disabled={!canSave} variant="ghost" size="sm" className="md:hidden">Zip instead</Button>
       </div>
       {!picked.length && <p className="text-xs text-muted">Select at least one card to save.</p>}
       {notReady > 0 && <p className="text-xs text-bad" role="status">{notReady} selected card{notReady === 1 ? " is" : "s are"} not ready yet. Wait for {notReady === 1 ? "it" : "them"} to finish (or unselect), then save.</p>}
       {blobs.failed && !notReady && (
-        <p className="text-xs text-bad" role="status">Could not prepare some pictures. <button type="button" onClick={blobs.retry} className="inline-flex min-h-11 items-center font-bold underline">Try again</button></p>
+        <p className="text-xs text-bad" role="status">Could not prepare some pictures for sharing (the zip still works). <button type="button" onClick={blobs.retry} className="inline-flex min-h-11 items-center font-bold underline">Try again</button></p>
       )}
       {batches.length > 1 && !notReady && <p className="text-xs text-muted">{items.length} cards: your phone shares at most {MAX_SHARE_FILES} at a time, so save in {batches.length} taps, in order.</p>}
     </div>

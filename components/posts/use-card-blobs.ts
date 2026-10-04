@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useReducer, useState } from "react";
 import { signedUrlsNow } from "@/lib/realtime/signed-urls";
+import { fetchMissingBlobs } from "@/lib/files/fetch-blobs";
 
 // Image bytes of the selected cards, keyed by card_path (paths include the card version,
 // so a remade card never serves the old picture). Prefetched so the share sheet can open
@@ -18,25 +19,9 @@ export function useCardBlobs(paths: string[]) {
     const timer = setTimeout(async () => {
       const want = key ? key.split("|") : [];
       for (const k of [...blobs.keys()]) if (!want.includes(k)) blobs.delete(k);
-      const need = want.filter((p) => !blobs.has(p));
-      if (!need.length) { setFailed(false); bump(); return; }
-      let urls: Record<string, string>;
-      try { urls = await signedUrlsNow(need); } catch { if (alive) setFailed(true); return; }
-      let bad = false;
-      let next = 0;
-      const worker = async () => {
-        while (alive && next < need.length) {
-          const p = need[next++];
-          try {
-            const res = await fetch(urls[p]);
-            if (!res.ok) throw new Error("bad response");
-            blobs.set(p, await res.blob());
-          } catch { bad = true; }
-          if (alive) bump();
-        }
-      };
-      await Promise.all([worker(), worker(), worker()]);
-      if (alive) setFailed(bad);
+      if (want.every((p) => blobs.has(p))) { setFailed(false); bump(); return; }
+      const r = await fetchMissingBlobs(want, blobs, signedUrlsNow, undefined, { alive: () => alive, onProgress: bump });
+      if (alive) setFailed(r.failed.length > 0);
     }, 300);
     return () => { alive = false; clearTimeout(timer); };
   }, [key, attempt]);
@@ -44,6 +29,14 @@ export function useCardBlobs(paths: string[]) {
   const wanted = key ? key.split("|") : [];
   return {
     get: (p: string) => blobs.get(p),
+    // The zip path does not depend on the prefetch: it fetches whatever is still
+    // missing on demand (fresh signed URLs) and throws if a picture can't be loaded.
+    ensure: async (want: string[]): Promise<Blob[]> => {
+      const r = await fetchMissingBlobs(want, blobs, signedUrlsNow, undefined, { onProgress: bump });
+      if (r.failed.length) throw new Error(`${r.failed.length} picture${r.failed.length === 1 ? "" : "s"} could not be downloaded`);
+      setFailed(false);
+      return want.map((p) => blobs.get(p)!);
+    },
     ready: wanted.filter((p) => blobs.has(p)).length,
     total: wanted.length,
     failed,
