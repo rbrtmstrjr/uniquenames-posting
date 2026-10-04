@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  BABY_SHOTS, buildCaption, buildPrompt, buildShots, hashSeed, isPropsOnly, planExtraCard, planPost, seededRandom,
+  BABY_SHOTS, LOOKS, NEWBORN_SHOTS, PROPS_SPECS, SITTER_SHOTS, buildCaption, buildPrompt, buildShotSpecs, buildShots, hashSeed,
+  isPropsOnly, pickSubject, planExtraCard, planPost, seededRandom, sessionShots, shotSpec, subjectKey,
 } from "@/lib/planner";
 import type { NameRow, ThemeRow } from "@/lib/db/types";
 
@@ -28,12 +29,56 @@ describe("random", () => {
 });
 
 describe("shots", () => {
-  it.each([9, 10, 11, 12, 13])("%i shots: first is a baby, right props-only count, never adjacent", (count) => {
-    const s = buildShots(count, seededRandom(count));
-    expect(s).toHaveLength(count);
-    expect(s[0]).toBe(BABY_SHOTS[0]);
-    expect(s.filter(isPropsOnly)).toHaveLength(count >= 11 ? 2 : 1);
-    s.forEach((x, i) => { if (i > 0) expect(isPropsOnly(x) && isPropsOnly(s[i - 1])).toBe(false); });
+  const sessions = ["sitter", "newborn"] as const;
+  const cases = sessions.flatMap((session) => [9, 10, 11, 12, 13].map((count) => [session, count] as const));
+
+  it.each(cases)("%s, %i cards: cover first, 3-4 props-only shots spread out, every frame different", (session, count) => {
+    for (let seed = 1; seed <= 40; seed++) {
+      const specs = buildShotSpecs(count, session, seededRandom(seed * 97 + count));
+      expect(specs).toHaveLength(count);
+      expect(specs[0]).toBe(sessionShots(session)[0]);
+      const propsIdx = specs.map((s, i) => (s.kind === "props" ? i : -1)).filter((i) => i >= 0);
+      expect(propsIdx).toHaveLength(count >= 11 ? 4 : 3);
+      expect(propsIdx[0]).toBeGreaterThan(1);
+      propsIdx.forEach((p, i) => { if (i > 0) expect(p - propsIdx[i - 1]).toBeGreaterThan(1); });
+      expect(specs[propsIdx[0]]).toBe(PROPS_SPECS[0]); // the empty set comes before the other props frames
+      expect(new Set(specs.map((s) => s.text)).size).toBe(count); // no frame repeats
+      expect(specs.filter((s) => s.kind === "baby").every((s) => sessionShots(session).includes(s))).toBe(true);
+    }
+  });
+
+  it.each(sessions)("%s: neighbouring frames never share a camera angle", (session) => {
+    for (let seed = 1; seed <= 60; seed++) {
+      for (const count of [9, 11, 13]) {
+        const specs = buildShotSpecs(count, session, seededRandom(seed * 31 + count));
+        specs.forEach((s, i) => { if (i > 0) expect(s.angle).not.toBe(specs[i - 1].angle); });
+      }
+    }
+  });
+
+  it("each library covers the requested camera angles", () => {
+    for (const session of sessions) {
+      const angles = new Set(sessionShots(session).map((s) => s.angle));
+      for (const a of ["eye", "wide", "high", "closeup", "macro", "low", "profile"] as const) expect(angles.has(a)).toBe(true);
+    }
+    expect(new Set(SITTER_SHOTS.map((s) => s.angle)).has("pov")).toBe(true);
+    expect(new Set(NEWBORN_SHOTS.map((s) => s.angle)).has("overhead")).toBe(true);
+    expect(PROPS_SPECS.every((s) => isPropsOnly(s.text))).toBe(true);
+  });
+
+  it("buildShots returns the texts and keeps the old preview shot", () => {
+    expect(buildShots(9, seededRandom(1))[0]).toBe(BABY_SHOTS[0]);
+    expect(shotSpec(BABY_SHOTS[0])?.angle).toBe("eye");
+    expect(shotSpec("an old shot from a previous version")).toBeUndefined();
+  });
+});
+
+describe("subject", () => {
+  it("is the same for the same post and varies between posts", () => {
+    expect(pickSubject("2026-10-05|boy|two-word")).toEqual(pickSubject("2026-10-05|boy|two-word"));
+    const all = Array.from({ length: 200 }, (_, i) => pickSubject(`2026-01-01|girl|single|${i}`));
+    expect(new Set(all.map((s) => s.session))).toEqual(new Set(["newborn", "sitter"]));
+    expect(new Set(all.map((s) => s.look)).size).toBe(LOOKS.length);
   });
 });
 
@@ -50,6 +95,31 @@ describe("prompt", () => {
     expect(p).not.toContain("baby photoshoot");
     expect(p).toMatch(/no baby, no child, no person/);
     expect(p).toContain("wicker basket");
+  });
+  it("uses each shot's own camera and reserves the title space it names", () => {
+    const high = SITTER_SHOTS.find((s) => s.angle === "high")!;
+    const p = buildPrompt(themes[0], high.text, "boy", { session: "sitter", look: LOOKS[0] });
+    expect(p).toContain(`Photography: ${high.camera}`);
+    expect(p).toContain("keep the lower third of the frame calm and empty");
+    expect(p).not.toContain("lower 60 percent");
+    const flat = PROPS_SPECS[1];
+    expect(buildPrompt(themes[0], flat.text, "boy")).toContain(`Photography: ${flat.camera}`);
+  });
+  it("never asks for a title or mentions a camera position (the model would draw them)", () => {
+    for (const s of [...SITTER_SHOTS, ...NEWBORN_SHOTS, ...PROPS_SPECS]) {
+      const p = buildPrompt(themes[0], s.text, "boy", { session: "sitter", look: LOOKS[0] });
+      expect(p).not.toMatch(/title/i);
+      expect(s.text + " " + s.camera).not.toMatch(/camera/i);
+      expect(p).not.toMatch(/tripod|stand|paper roll/i);
+    }
+  });
+  it("names the same baby, with session age and look, in every baby frame", () => {
+    const s = { session: "newborn" as const, look: LOOKS[2] };
+    const p = buildPrompt(themes[0], NEWBORN_SHOTS[3].text, "girl", s);
+    expect(p).toContain("the same baby in every photo of this session");
+    expect(p).toContain("newborn baby girl, about 10 days old");
+    expect(p).toContain(LOOKS[2]);
+    expect(buildPrompt(themes[0], PROPS_SPECS[0].text, "girl", s)).not.toContain(LOOKS[2]);
   });
 });
 
@@ -102,6 +172,20 @@ describe("planPost", () => {
   it("rejects a chosen theme of the wrong gender", () => {
     const r = planPost({ request: req, names: boys, themes, settings, themeId: "t-Blush Floral" });
     expect(r.ok).toBe(false);
+  });
+});
+
+describe("one baby per post", () => {
+  it("every baby card of a post describes the same baby, and an added card matches it", () => {
+    const r = planPost({ request: { ...req, count: 13 }, names: boys, themes, settings });
+    if (!r.ok) throw new Error(r.reason);
+    const subjectLines = r.cards.filter((c) => !isPropsOnly(c.shot)).map((c) => c.prompt.split("\n")[1]);
+    expect(new Set(subjectLines).size).toBe(1);
+    expect(subjectLines[0]).toContain("the same baby in every photo");
+    const extra = planExtraCard({ theme: themes[0], gender: "boy", style: "two-word", names: boys, usedNameIds: r.cards.map((c) => c.name_id),
+      nextPosition: 14, salt: "post-1|123", subjectKey: subjectKey(req.postDate, "boy", "two-word") });
+    if (!extra.ok) throw new Error(extra.reason);
+    expect(extra.card.prompt.split("\n")[1]).toBe(subjectLines[0]);
   });
 });
 

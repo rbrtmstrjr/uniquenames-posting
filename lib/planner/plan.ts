@@ -1,8 +1,11 @@
 import type { Gender, NameRow, NameStyle, SettingsRow, ThemeRow } from "@/lib/db/types";
 import { buildCaption } from "./caption";
-import { buildPrompt } from "./prompt";
+import { buildPrompt, pickSubject } from "./prompt";
 import { hashSeed, seededRandom, shuffle } from "./random";
-import { BABY_SHOTS, buildShots } from "./shots";
+import { buildShots, sessionShots } from "./shots";
+
+/** One key per post for its baby (session + look): add-a-card reuses it so extra cards match. */
+export const subjectKey = (postDate: string, gender: Gender, style: NameStyle) => `${postDate}|${gender}|${style}`;
 
 export interface PlannedCard { position: number; name_id: string; name: string; meaning: string; shot: string; prompt: string; seed: number }
 export interface PlanInput {
@@ -56,16 +59,19 @@ export function planPost(input: PlanInput): PlanResult {
     return { ok: false, reason: `Number of cards must be ${s.min_images} to ${s.max_images}.` };
   }
   const chosen = shuffle(pool, rng).slice(0, Math.min(want, pool.length));
-  const shots = buildShots(chosen.length, seededRandom(hashSeed(`${r.postDate}|${r.gender}|${r.style}|shots`)));
+  const subject = pickSubject(subjectKey(r.postDate, r.gender, r.style));
+  const shots = buildShots(chosen.length, seededRandom(hashSeed(`${r.postDate}|${r.gender}|${r.style}|shots`)), subject.session);
   const cards = chosen.map((n, k) => ({
     position: k + 1, name_id: n.id, name: n.name.trim(), meaning: n.meaning.trim(), shot: shots[k],
-    prompt: buildPrompt(theme!, shots[k], r.gender), seed: cardSeed(r.postDate, n.name, k),
+    prompt: buildPrompt(theme!, shots[k], r.gender, subject), seed: cardSeed(r.postDate, n.name, k),
   }));
   return { ok: true, theme_id: theme.id, caption: buildCaption(r.gender, s), cards };
 }
 
 export interface ExtraCardInput {
   theme: ThemeRow; gender: Gender; style: NameStyle; names: NameRow[]; usedNameIds: string[]; nextPosition: number; salt: string;
+  /** subjectKey(post_date, gender, style) of the post, so the extra card shows the same baby. */
+  subjectKey?: string;
 }
 export type ExtraCardResult = { ok: true; card: PlannedCard } | { ok: false; reason: string };
 
@@ -74,10 +80,12 @@ export function planExtraCard(i: ExtraCardInput): ExtraCardResult {
   if (!pool.length) return { ok: false, reason: `No unused ${i.gender} ${i.style} names left. Add names on the Names page.` };
   const rng = seededRandom(hashSeed(i.salt));
   const pick = pool[Math.floor(rng() * pool.length)];
-  const shot = BABY_SHOTS[1 + Math.floor(rng() * (BABY_SHOTS.length - 1))];
+  const subject = pickSubject(i.subjectKey ?? i.salt);
+  const lib = sessionShots(subject.session);
+  const shot = lib[1 + Math.floor(rng() * (lib.length - 1))].text;
   return {
     ok: true,
     card: { position: i.nextPosition, name_id: pick.id, name: pick.name.trim(), meaning: pick.meaning.trim(), shot,
-      prompt: buildPrompt(i.theme, shot, i.gender), seed: cardSeed(i.salt, pick.name, i.nextPosition) },
+      prompt: buildPrompt(i.theme, shot, i.gender, subject), seed: cardSeed(i.salt, pick.name, i.nextPosition) },
   };
 }

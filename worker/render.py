@@ -217,19 +217,37 @@ def compose_card(photo, name, meaning, handle, fonts, band=None):
     mean_xy = ((W - _text_w(mean_font, meaning)) / 2 - mb[0], top + name_h + gap - mb[1])
     mark_xy = (W - _text_w(mark_font, handle) - int(W * 0.035), H - int(H * 0.045) - mark_font.getbbox(handle)[3])
 
-    # soft shadow so white text reads on light and dark backdrops alike
-    shadow = Image.new("RGBA", img.size, (0, 0, 0, 0))
-    sd = ImageDraw.Draw(shadow)
+    # White text with a soft dark shadow on darker backdrops; warm dark-brown text with a
+    # soft light glow on bright ones (pale mint, cream, ivory), where white would wash out.
+    block = (int(W * 0.08), max(0, top - gap), int(W * 0.92), min(H, top + block_h + gap))
+    mark_box = (int(mark_xy[0]) - 4, int(mark_xy[1]) - 4, W, H)
+    title_ink, title_halo = text_colors(img, block)
+    mark_ink, mark_halo = text_colors(img, mark_box)
+
+    halo = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    sd = ImageDraw.Draw(halo)
     off = max(2, W // 400)
-    sd.text((name_xy[0], name_xy[1] + off), title, font=name_font, fill=(0, 0, 0, 120))
-    sd.text((mean_xy[0], mean_xy[1] + off), meaning, font=mean_font, fill=(0, 0, 0, 120))
-    sd.text((mark_xy[0], mark_xy[1] + 1), handle, font=mark_font, fill=(0, 0, 0, 110))
-    out = Image.alpha_composite(img.convert("RGBA"), shadow.filter(ImageFilter.GaussianBlur(max(3, W // 220))))
+    sd.text((name_xy[0], name_xy[1] + off), title, font=name_font, fill=title_halo)
+    sd.text((mean_xy[0], mean_xy[1] + off), meaning, font=mean_font, fill=title_halo)
+    sd.text((mark_xy[0], mark_xy[1] + 1), handle, font=mark_font, fill=mark_halo)
+    out = Image.alpha_composite(img.convert("RGBA"), halo.filter(ImageFilter.GaussianBlur(max(3, W // 220))))
     d = ImageDraw.Draw(out)
-    d.text(name_xy, title, font=name_font, fill=(255, 255, 255, 255))
-    d.text(mean_xy, meaning, font=mean_font, fill=(255, 255, 255, 240))
-    d.text(mark_xy, handle, font=mark_font, fill=(255, 255, 255, 200))
+    d.text(name_xy, title, font=name_font, fill=title_ink + (255,))
+    d.text(mean_xy, meaning, font=mean_font, fill=title_ink + (240,))
+    d.text(mark_xy, handle, font=mark_font, fill=mark_ink + (200,))
     return out.convert("RGB"), band, scores
+
+
+LIGHT_BACKDROP = 175  # mean luminance (0-255) above which white text stops reading well
+DARK_INK = (59, 42, 32)  # the brand's warm dark brown
+
+
+def text_colors(img, box):
+    """(ink RGB, halo RGBA) for text placed over `box` of the photo."""
+    lum = ImageStat.Stat(img.convert("L").crop(box)).mean[0]
+    if lum > LIGHT_BACKDROP:
+        return DARK_INK, (255, 255, 255, 110)
+    return (255, 255, 255), (0, 0, 0, 120)
 
 
 def fit_to_size(img, width, height):
