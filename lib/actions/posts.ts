@@ -3,12 +3,15 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { planExtraCard, planPost } from "@/lib/planner";
 import type { Gender, NameRow, NameStyle, PostRow, SettingsRow, ThemeRow } from "@/lib/db/types";
+import { validateCreatePost } from "./helpers";
 import { fail, requireOwner, type ActionResult } from "./result";
 
 export async function createPostAction(input: {
   gender: Gender; style: NameStyle; count: number | null; postDate: string; themeId?: string; requestId: string;
 }): Promise<ActionResult<{ postId: string }>> {
   await requireOwner();
+  const badInput = validateCreatePost(input);
+  if (badInput) return fail(badInput);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(input.postDate)) return fail("Pick a valid date.");
   const sb = await createClient();
   for (let attempt = 0; attempt < 2; attempt++) {
@@ -45,6 +48,7 @@ export async function setPostedAction(postId: string, posted: boolean): Promise<
     : await sb.from("posts").update({ status: "ready", posted_at: null }).eq("id", postId);
   if (error) return fail(error.message);
   if (!posted) await sb.rpc("refresh_post", { p_post: postId });
+  revalidatePath("/", "layout");
   revalidatePath("/posts");
   return { ok: true };
 }
@@ -52,8 +56,9 @@ export async function setPostedAction(postId: string, posted: boolean): Promise<
 export async function updateCaptionAction(postId: string, caption: string): Promise<ActionResult> {
   await requireOwner();
   if (caption.length > 5000) return fail("The caption is too long.");
-  const { error } = await (await createClient()).from("posts").update({ caption }).eq("id", postId);
-  return error ? fail(error.message) : { ok: true };
+  const { data, error } = await (await createClient()).from("posts").update({ caption }).eq("id", postId).select("id");
+  if (error) return fail(error.message);
+  return data?.length ? { ok: true } : fail("Post not found.");
 }
 
 export async function deletePostAction(postId: string): Promise<ActionResult> {
@@ -62,7 +67,10 @@ export async function deletePostAction(postId: string): Promise<ActionResult> {
   const { data, error } = await sb.rpc("delete_post", { p_post: postId });
   if (error) return fail(error.message);
   const paths = (data as { paths: string[] }).paths ?? [];
-  if (paths.length) await sb.storage.from("cards").remove(paths);
+  if (paths.length) {
+    const { error: re } = await sb.storage.from("cards").remove(paths);
+    if (re) console.error("deletePostAction: storage cleanup failed", re.message);
+  }
   revalidatePath("/", "layout");
   return { ok: true };
 }

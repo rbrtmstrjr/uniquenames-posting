@@ -15,12 +15,14 @@ export async function saveThemeAction(input: ThemeInput & { id?: string }): Prom
   if (input.id) {
     const { error } = await sb.from("themes").update(row).eq("id", input.id);
     if (error) return fail(error.message.includes("title") ? "Another theme already has that title." : error.message);
+    revalidatePath("/", "layout");
     revalidatePath("/themes");
     return { ok: true, id: input.id };
   }
   const { data: last } = await sb.from("themes").select("sort_order").order("sort_order", { ascending: false }).limit(1);
   const { data, error } = await sb.from("themes").insert({ ...row, sort_order: ((last?.[0]?.sort_order as number) ?? 0) + 1 }).select("id").single();
   if (error) return fail(error.message.includes("title") ? "Another theme already has that title." : error.message);
+  revalidatePath("/", "layout");
   revalidatePath("/themes");
   return { ok: true, id: data.id as string };
 }
@@ -28,8 +30,10 @@ export async function saveThemeAction(input: ThemeInput & { id?: string }): Prom
 export async function setArchivedAction(id: string, archived: boolean): Promise<ActionResult> {
   await requireOwner();
   const sb = await createClient();
-  const { error } = await sb.from("themes").update({ status: archived ? "archived" : "available" }).eq("id", id).neq("status", "used");
+  const { data, error } = await sb.from("themes").update({ status: archived ? "archived" : "available" }).eq("id", id).neq("status", "used").select("id");
   if (error) return fail(error.message);
+  if (!data?.length) return fail("Themes that were used in a post cannot be archived or restored.");
+  revalidatePath("/", "layout");
   revalidatePath("/themes");
   return { ok: true };
 }
