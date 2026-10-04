@@ -4,39 +4,73 @@ import { Download, Share2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import type { CardRow, PostRow } from "@/lib/db/types";
-import { orderedSelection, saveCards } from "@/lib/files/save";
+import { MAX_SHARE_FILES, batchLabel, nextBatchIndex, orderedSelection, shareBatches, shareFiles, zipCards } from "@/lib/files/save";
 import { downloadName } from "@/lib/files/download-name";
-import { signedUrlsNow } from "@/lib/realtime/signed-urls";
+import { useCardBlobs } from "./use-card-blobs";
 
 export function SaveActions({ post, cards, caption }: { post: PostRow; cards: CardRow[]; caption: string }) {
   const [busy, setBusy] = useState<"share" | "zip" | null>(null);
   const picked = orderedSelection(cards);
   const ready = picked.filter((c) => c.status === "done" && c.card_path);
+  const notReady = picked.length - ready.length;
+  // File numbers are the tiles' upload numbers (position in the full selection).
+  const items = ready.map((c) => ({ card: c, name: downloadName(picked.indexOf(c) + 1, c.name) }));
+  const blobs = useCardBlobs(notReady ? [] : ready.map((c) => c.card_path!));
+  const prepared = !notReady && ready.length > 0 && blobs.ready === blobs.total;
 
-  const run = async (mode: "share" | "zip") => {
-    if (!ready.length) { toast.error("Select at least one finished card."); return; }
-    if (ready.length < picked.length) toast.warning(`${picked.length - ready.length} selected card(s) are not ready yet and are left out.`);
-    setBusy(mode);
+  const batches = shareBatches(items, MAX_SHARE_FILES);
+  const selKey = items.map((i) => i.card.card_path).join("|");
+  const [sentFor, setSentFor] = useState({ key: "", n: 0 });
+  const sent = sentFor.key === selKey ? sentFor.n : 0; // a new selection starts at batch 1
+  const idx = nextBatchIndex(batches.length, sent);
+
+  const zipName = `unique-names-${post.post_date}-${post.gender}.zip`;
+
+  const zip = async (why?: string) => {
+    if (why) toast.warning(why);
+    setBusy("zip");
     try {
-      const urls = await signedUrlsNow(ready.map((c) => c.card_path!));
-      const files = await Promise.all(ready.map(async (c, i) => {
-        const res = await fetch(urls[c.card_path!]);
-        if (!res.ok) throw new Error(`${c.name} could not be downloaded`);
-        return { name: downloadName(i + 1, c.name), blob: await res.blob() };
-      }));
-      const r = await saveCards(files, caption, mode, `unique-names-${post.post_date}-${post.gender}.zip`);
-      if (r === "shared") toast.success(`Shared ${files.length} cards`);
-      if (r === "zipped") toast.success(`Downloaded ${files.length} cards + caption.txt`);
+      await zipCards(items.map((i) => ({ name: i.name, blob: blobs.get(i.card.card_path!)! })), caption, zipName);
+      toast.success(`Downloaded ${items.length} cards + caption.txt`);
     } catch (e) {
-      toast.error(`Could not save the cards: ${(e as Error).message}`);
+      toast.error(`Could not make the zip: ${(e as Error).message}`);
     } finally { setBusy(null); }
   };
 
+  // No await before shareFiles: iOS needs the share call inside the tap.
+  const share = () => {
+    const files = batches[idx].map((i) => new File([blobs.get(i.card.card_path!)!], i.name, { type: "image/jpeg" }));
+    setBusy("share");
+    void shareFiles(files).then(async (r) => {
+      setBusy(null);
+      if (r.result === "shared") {
+        setSentFor({ key: selKey, n: sent + 1 });
+        toast.success(`Shared ${files.length} cards. Copy the caption with its own button.`);
+      } else if (r.result !== "cancelled") {
+        await zip(r.result === "unsupported"
+          ? "Your browser can't share images, so a zip was downloaded instead."
+          : `Sharing failed (${r.message}), so a zip was downloaded instead.`);
+      }
+    });
+  };
+
+  const disabled = !prepared || busy !== null;
+  const preparing = !notReady && ready.length > 0 && !prepared;
   return (
-    <div className="flex flex-wrap gap-2">
-      <Button onClick={() => run("share")} loading={busy === "share"} className="md:hidden"><Share2 className="size-4" /> Save {ready.length} to phone</Button>
-      <Button onClick={() => run("zip")} loading={busy === "zip"} variant="subtle" className="max-md:hidden"><Download className="size-4" /> Download {ready.length} as zip</Button>
-      <Button onClick={() => run("zip")} loading={busy === "zip"} variant="ghost" size="sm" className="md:hidden">Zip instead</Button>
+    <div className="space-y-2">
+      <div className="flex flex-wrap gap-2">
+        <Button onClick={share} loading={busy === "share"} disabled={disabled} className="md:hidden">
+          <Share2 className="size-4" /> {preparing ? `Preparing ${blobs.ready}/${blobs.total}…` : batches.length ? batchLabel(items.length, MAX_SHARE_FILES, idx) : "Save to phone"}
+        </Button>
+        <Button onClick={() => void zip()} loading={busy === "zip"} disabled={disabled} variant="subtle" className="max-md:hidden"><Download className="size-4" /> Download {items.length} as zip</Button>
+        <Button onClick={() => void zip()} loading={busy === "zip"} disabled={disabled} variant="ghost" size="sm" className="md:hidden">Zip instead</Button>
+      </div>
+      {!picked.length && <p className="text-xs text-muted">Select at least one card to save.</p>}
+      {notReady > 0 && <p className="text-xs text-bad" role="status">{notReady} selected card{notReady === 1 ? " is" : "s are"} not ready yet. Wait for {notReady === 1 ? "it" : "them"} to finish (or unselect), then save.</p>}
+      {blobs.failed && !notReady && (
+        <p className="text-xs text-bad" role="status">Could not prepare some pictures. <button type="button" onClick={blobs.retry} className="inline-flex min-h-11 items-center font-bold underline">Try again</button></p>
+      )}
+      {batches.length > 1 && !notReady && <p className="text-xs text-muted">{items.length} cards: your phone shares at most {MAX_SHARE_FILES} at a time, so save in {batches.length} taps, in order.</p>}
     </div>
   );
 }

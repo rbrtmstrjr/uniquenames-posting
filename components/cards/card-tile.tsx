@@ -75,7 +75,7 @@ export function CardTile({ card, url, health, queuePos, onOpen, onRetry, selecti
           aria-label={selection.selected ? `Unselect ${card.name} (upload number ${selection.order})` : `Select ${card.name}`}
           className="absolute left-0 top-0 z-[3] grid size-11 place-items-center">
           <span className={cn("grid size-7 place-items-center rounded-lg text-xs font-extrabold shadow-soft",
-            selection.selected ? "bg-accent text-accent-ink" : "border-2 border-white/90 bg-black/25")}>
+            selection.selected ? "bg-accent text-accent-ink" : showImage ? "border-2 border-white/90 bg-black/25" : "border-2 border-ink/50 bg-surface/70")}>
             {selection.selected ? selection.order : ""}
           </span>
         </button>

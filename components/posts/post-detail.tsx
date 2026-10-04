@@ -2,10 +2,10 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, CheckCircle2, CircleDashed, Plus, Trash2 } from "lucide-react";
+import { ArrowLeft, CheckCircle2, CircleDashed, GripVertical, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
-import { DndContext, PointerSensor, TouchSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
-import { SortableContext, arrayMove, rectSortingStrategy, useSortable } from "@dnd-kit/sortable";
+import { DndContext, KeyboardSensor, PointerSensor, TouchSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
+import { SortableContext, arrayMove, rectSortingStrategy, sortableKeyboardCoordinates, useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import type { CardRow, PostRow, ThemeRow } from "@/lib/db/types";
 import { Button } from "@/components/ui/button";
@@ -28,12 +28,21 @@ import { deleteCardAction, regenerateCardAction, reorderCardsAction, selectAllAc
 
 const byOrder = (a: CardRow, b: CardRow) => a.order_index - b.order_index || a.position - b.position;
 
-function Sortable({ id, children }: { id: string; children: React.ReactNode }) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
+// The tile wrapper takes pointer/touch drags (press and hold on a phone). Keyboard reordering
+// lives on a dedicated 44 px handle, so the tile never becomes a focusable role=button that
+// nests the open/select buttons, and Space/Enter on those buttons cannot start a drag.
+function Sortable({ id, name, children }: { id: string; name: string; children: React.ReactNode }) {
+  const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({ id });
+  const { onKeyDown, ...pointerListeners } = (listeners ?? {}) as Record<string, React.KeyboardEventHandler & React.EventHandler<never>>;
   return (
     <div ref={setNodeRef} style={{ transform: CSS.Transform.toString(transform), transition, zIndex: isDragging ? 10 : undefined }}
-      className={isDragging ? "scale-[1.03] opacity-90 shadow-soft" : ""} {...attributes} {...listeners}>
+      className={`relative select-none [-webkit-touch-callout:none] ${isDragging ? "scale-[1.03] opacity-90 shadow-soft" : ""}`} {...pointerListeners}>
       {children}
+      <button type="button" ref={setActivatorNodeRef} {...attributes} onKeyDown={onKeyDown}
+        aria-label={`Reorder ${name}. Press space, then the arrow keys, then space again.`}
+        className="absolute right-0 top-0 z-[4] grid size-11 place-items-center text-white focus-visible:outline-2 focus-visible:outline-accent">
+        <span className="grid size-7 place-items-center rounded-lg bg-black/30 shadow-soft"><GripVertical className="size-4" aria-hidden /></span>
+      </button>
     </div>
   );
 }
@@ -61,7 +70,7 @@ export function PostDetail({ post: initialPost, theme, initialCards }: { post: P
   const urlFor = useSignedUrls(visible.map((c) => c.card_path));
   const open = visible.find((c) => c.id === openId) ?? null;
   const allSelected = visible.length > 0 && visible.every((c) => c.selected);
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }), useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 6 } }));
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }), useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 6 } }), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }));
 
   const toggle = async (c: CardRow) => {
     setCards((prev) => prev.map((x) => (x.id === c.id ? { ...x, selected: !x.selected } : x)));
@@ -74,7 +83,7 @@ export function PostDetail({ post: initialPost, theme, initialCards }: { post: P
     const r = await selectAllAction(post.id, next);
     if (!r.ok) toast.error(r.error);
   };
-  useHotkey("a", selectAll);
+  useHotkey("a", () => { if (!open && !confirmDelete) void selectAll(); });
 
   const retry = async (c: CardRow) => {
     const r = await regenerateCardAction(c.id);
@@ -97,15 +106,18 @@ export function PostDetail({ post: initialPost, theme, initialCards }: { post: P
 
   const deleteCard = (c: CardRow) => {
     setHidden((h) => new Set(h).add(c.id));
+    const toastId = `delete-${c.id}`;
     const t = setTimeout(async () => {
       timers.current.delete(c.id);
+      toast.dismiss(toastId); // sonner pauses on hover / hidden tab: never leave a dead Undo behind
       const r = await deleteCardAction(c.id);
       if (!r.ok) { toast.error(r.error); setHidden((h) => { const n = new Set(h); n.delete(c.id); return n; }); }
     }, 5000);
     timers.current.set(c.id, t);
     toast(`Deleted ${c.name}`, {
+      id: toastId,
       duration: 5000,
-      action: { label: "Undo", onClick: () => { clearTimeout(timers.current.get(c.id)); timers.current.delete(c.id); setHidden((h) => { const n = new Set(h); n.delete(c.id); return n; }); } },
+      action: { label: "Undo", onClick: () => { if (!timers.current.has(c.id)) { toast.error("Already deleted"); return; } clearTimeout(timers.current.get(c.id)); timers.current.delete(c.id); setHidden((h) => { const n = new Set(h); n.delete(c.id); return n; }); } },
     });
   };
 
@@ -156,7 +168,7 @@ export function PostDetail({ post: initialPost, theme, initialCards }: { post: P
             <SortableContext items={visible.map((c) => c.id)} strategy={rectSortingStrategy}>
               <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 xl:grid-cols-4">
                 {visible.map((c) => (
-                  <Sortable key={c.id} id={c.id}>
+                  <Sortable key={c.id} id={c.id} name={c.name}>
                     <CardTile card={c} url={urlFor(c.card_path)} health={health} queuePos={queuePosition(c, visible)}
                       onOpen={() => setOpenId(c.id)} onRetry={() => retry(c)}
                       selection={{ selected: c.selected, order: numbers.get(c.id) ?? null, onToggle: () => void toggle(c) }} />

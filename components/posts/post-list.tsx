@@ -31,6 +31,7 @@ export function PostList({ posts }: { posts: PostListItem[] }) {
   return (
     <div className="space-y-4">
       <Segmented label="Filter posts" value={filter} onChange={setFilter} options={[{ value: "all", label: "All" }, { value: "ready", label: "Not posted" }, { value: "posted", label: "Posted" }]} />
+      {!shown.length && <Empty icon={<Images className="size-6" />} title={filter === "posted" ? "Nothing posted yet" : "Nothing waiting to post"} text={filter === "posted" ? "Posts you mark as posted show up here." : "Every post has been marked as posted."} />}
       <ul className="grid gap-3 md:grid-cols-2">
         {shown.map((p) => (
           <li key={p.id}>

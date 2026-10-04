@@ -20,7 +20,7 @@ export function CardDialog({ card, url, health, onClose, onDelete }: {
   // Re-seed the fields when a different card opens (adjust state during render).
   const [seededId, setSeededId] = useState<string | null>(null);
   if (card && card.id !== seededId) { setSeededId(card.id); setName(card.name); setMeaning(card.meaning); }
-  if (!card) return null;
+  if (!card) { if (seededId !== null) setSeededId(null); return null; }
   const v = cardVisual(card, health);
   const working = card.status === "generating";
   const changed = name.trim() !== card.name || meaning.trim().toLowerCase() !== card.meaning;
