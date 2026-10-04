@@ -27,6 +27,8 @@ export function BulkPaste({ open, onOpenChange, existing, onSaved }: { open: boo
     return { fresh, dupes };
   }, [parsed, existing]);
 
+  const tooMany = fresh.length > 1000;
+
   const save = async () => {
     setBusy(true);
     const r = await addNamesAction(fresh);
@@ -54,9 +56,10 @@ export function BulkPaste({ open, onOpenChange, existing, onSaved }: { open: boo
             {parsed.issues.map((i) => <li key={i.line}><span className="font-bold text-bad">Line {i.line}:</span> {i.reason} <span className="text-muted">({i.text})</span></li>)}
           </ul>
         )}
+        {tooMany && <p className="text-sm text-bad">Paste at most 1000 names at a time.</p>}
         <div className="flex justify-end gap-2">
           <Button variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button onClick={save} loading={busy} disabled={!fresh.length}>Add {fresh.length} names</Button>
+          <Button onClick={save} loading={busy} disabled={!fresh.length || tooMany}>Add {fresh.length} names</Button>
         </div>
       </div>
     </Dialog>

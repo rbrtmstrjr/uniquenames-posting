@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Segmented } from "@/components/ui/segmented";
 import type { Gender, NameRow } from "@/lib/db/types";
 import { addNamesAction, updateNameAction } from "@/lib/actions/names";
+import { normalizeName } from "@/lib/actions/helpers";
 import { validateName } from "@/lib/actions/validate";
 
 export function NameForm({ open, onOpenChange, editing, defaultGender, onSaved }: {
@@ -35,9 +36,9 @@ export function NameForm({ open, onOpenChange, editing, defaultGender, onSaved }
       const r = await addNamesAction([{ name, meaning, gender }]);
       setBusy(false);
       if (!r.ok) { toast.error(r.error); return; }
-      if (r.skipped.length) { toast.error(`${name.trim()} is already in your list.`); return; }
+      if (r.skipped.length) { toast.error(`${normalizeName(name)} is already in your list.`); return; }
     }
-    toast.success(editing ? "Name updated" : `Added ${name.trim()}`);
+    toast.success(editing ? "Name updated" : `Added ${normalizeName(name)}`);
     onSaved();
     onOpenChange(false);
   };

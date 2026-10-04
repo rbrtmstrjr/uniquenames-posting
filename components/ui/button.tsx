@@ -3,7 +3,7 @@ import { Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 
 type Variant = "primary" | "subtle" | "ghost" | "danger";
-type Size = "sm" | "md" | "lg";
+type Size = "sm" | "md" | "lg" | "icon";
 export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> { variant?: Variant; size?: Size; loading?: boolean }
 
 const VARIANT: Record<Variant, string> = {
@@ -12,7 +12,7 @@ const VARIANT: Record<Variant, string> = {
   ghost: "text-ink hover:bg-surface-2",
   danger: "bg-bad/10 text-bad hover:bg-bad/15",
 };
-const SIZE: Record<Size, string> = { sm: "min-h-11 px-3 text-sm rounded-lg", md: "min-h-11 px-4 text-sm rounded-xl", lg: "min-h-12 px-5 text-base rounded-xl" };
+const SIZE: Record<Size, string> = { sm: "min-h-11 px-3 text-sm rounded-lg", md: "min-h-11 px-4 text-sm rounded-xl", lg: "min-h-12 px-5 text-base rounded-xl", icon: "size-11 p-0 rounded-xl" };
 
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(
   { variant = "primary", size = "md", loading, className, children, disabled, type = "button", ...rest }, ref,
