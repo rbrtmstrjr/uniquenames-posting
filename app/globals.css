@@ -3,19 +3,19 @@
 
 :root {
   --bg: #FBF6EF; --surface: #FFFFFF; --surface-2: #F5EDE3; --line: #EADFD2;
-  --ink: #3B2A20; --muted: #8C7768; --accent: #8A5A3B; --accent-ink: #FFFFFF; --accent-soft: #F1E4D6;
-  --ok: #2F7A45; --warn: #B7791F; --bad: #C2413B; --warn-ink: #1A1009; --bad-ink: #FFFFFF; --shadow: 0 1px 2px rgba(80, 50, 20, .06), 0 4px 16px rgba(80, 50, 20, .05);
+  --ink: #3B2A20; --muted: #75604F; --accent: #8A5A3B; --accent-ink: #FFFFFF; --accent-soft: #F1E4D6;
+  --ok: #2F7A45; --warn: #B7791F; --warn-text: #7F540E; --bad: #C2413B; --warn-ink: #1A1009; --bad-ink: #FFFFFF; --shadow: 0 1px 2px rgba(80, 50, 20, .06), 0 4px 16px rgba(80, 50, 20, .05);
 }
 .dark {
   --bg: #0F0E0D; --surface: #191715; --surface-2: #24201C; --line: #2A2622;
   --ink: #F1ECE6; --muted: #9A9087; --accent: #E8A87C; --accent-ink: #1A1009; --accent-soft: #2E241C;
-  --ok: #34D399; --warn: #F5B454; --bad: #F87171; --warn-ink: #1A1009; --bad-ink: #1A1009; --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 8px 24px rgba(0, 0, 0, .25);
+  --ok: #34D399; --warn: #F5B454; --warn-text: #F5B454; --bad: #F87171; --warn-ink: #1A1009; --bad-ink: #1A1009; --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 8px 24px rgba(0, 0, 0, .25);
 }
 
 @theme inline {
   --color-bg: var(--bg); --color-surface: var(--surface); --color-surface-2: var(--surface-2); --color-line: var(--line);
   --color-ink: var(--ink); --color-muted: var(--muted); --color-accent: var(--accent); --color-accent-ink: var(--accent-ink);
-  --color-accent-soft: var(--accent-soft); --color-ok: var(--ok); --color-warn: var(--warn); --color-bad: var(--bad); --color-warn-ink: var(--warn-ink); --color-bad-ink: var(--bad-ink);
+  --color-accent-soft: var(--accent-soft); --color-ok: var(--ok); --color-warn: var(--warn); --color-warn-text: var(--warn-text); --color-bad: var(--bad); --color-warn-ink: var(--warn-ink); --color-bad-ink: var(--bad-ink);
   --font-sans: var(--font-jakarta), ui-sans-serif, system-ui, sans-serif;
   --font-display: var(--font-fraunces), ui-serif, Georgia, serif;
   --shadow-soft: var(--shadow);

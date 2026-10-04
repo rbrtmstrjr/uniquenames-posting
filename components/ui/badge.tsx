@@ -1,6 +1,6 @@
 import { cn } from "@/lib/utils/cn";
 
-const TONE = { ok: "bg-ok/12 text-ok", warn: "bg-warn/15 text-warn", bad: "bg-bad/12 text-bad", muted: "bg-surface-2 text-muted", accent: "bg-accent-soft text-accent" };
+const TONE = { ok: "bg-ok/12 text-ok", warn: "bg-warn/15 text-warn-text", bad: "bg-bad/12 text-bad", muted: "bg-surface-2 text-muted", accent: "bg-accent-soft text-accent" };
 
 export function Badge({ tone = "muted", pulse, className, children }: { tone?: keyof typeof TONE; pulse?: boolean; className?: string; children: React.ReactNode }) {
   return (
