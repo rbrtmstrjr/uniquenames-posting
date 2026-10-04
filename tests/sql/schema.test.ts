@@ -26,7 +26,7 @@ const plan = (ids: string[], extra: Record<string, unknown> = {}) => ({
   ...extra,
 });
 const createPost = async (p: unknown) => (await one<{ r: { status: string; post_id?: string; reason?: string } }>(db, `select create_post($1::jsonb) as r`, [JSON.stringify(p)])).r;
-const claim = async () => (await one<{ r: { job: string; card: { id: string; status: string }; gender_label: string } | null }>(db, `select claim_next_card() as r`)).r;
+const claim = async (restampOnly = false) => (await one<{ r: { job: string; card: { id: string; status: string }; gender_label: string; style_label: string | null } | null }>(db, `select claim_next_card($1) as r`, [restampOnly])).r;
 
 beforeEach(async () => {
   db = await freshDb();
@@ -90,6 +90,7 @@ describe("worker queue", () => {
     const first = await claim();
     expect(first?.job).toBe("restamp");
     expect(first?.gender_label).toBe("Boy");
+    expect(first?.style_label).toBe("Two-word");
     const second = await claim();
     expect(second?.job).toBe("generate");
     expect(second?.card.status).toBe("generating");
@@ -98,6 +99,15 @@ describe("worker queue", () => {
     for (let i = 0; i < 7; i++) ids.add((await claim())!.card.id);
     expect(ids.size).toBe(9);
     expect(await claim()).toBeNull();
+  });
+  it("with restamp_only claims only restamp cards", async () => {
+    const r = await createPost(plan(nameIds.slice(0, 9)));
+    expect(await claim(true)).toBeNull();
+    await db.query(`update cards set status='restamp' where post_id=$1 and position=2`, [r.post_id]);
+    const c = await claim(true);
+    expect(c?.job).toBe("restamp");
+    expect(await claim(true)).toBeNull();
+    expect((await claim())?.job).toBe("generate");
   });
   it("requeues stuck cards and fails them after 3 attempts", async () => {
     await createPost(plan(nameIds.slice(0, 9)));

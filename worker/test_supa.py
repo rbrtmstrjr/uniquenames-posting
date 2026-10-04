@@ -94,6 +94,11 @@ class SupaTest(unittest.TestCase):
         self.assertEqual(SEEN[-1]["method"], "DELETE")
         self.assertEqual(json.loads(SEEN[-1]["body"]), {"prefixes": ["cards/abc/v1.jpg"]})
 
+    def test_update_returning_asks_for_the_matched_rows(self):
+        Supa(self.base, "k").update("cards", "id=eq.1&version=eq.2", {"status": "done"}, returning=True)
+        self.assertEqual(SEEN[-1]["path"], "/rest/v1/cards?id=eq.1&version=eq.2&select=id")
+        self.assertEqual(SEEN[-1]["headers"]["prefer"], "return=representation")
+
     def test_http_error_and_network_error(self):
         with self.assertRaises(SupaError) as cm:
             Supa(self.base, "k").rpc("boom")

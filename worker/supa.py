@@ -52,7 +52,11 @@ class Supa:
     def select(self, table, query):
         return self._req("GET", "/rest/v1/%s?%s" % (table, query))
 
-    def update(self, table, match, values):
+    def update(self, table, match, values, returning=False):
+        # PostgREST answers 204 even when the filter matched 0 rows. With
+        # returning=True the matched rows come back, so callers can tell.
+        if returning:
+            return self._req("PATCH", "/rest/v1/%s?%s&select=id" % (table, match), values, {"Prefer": "return=representation"})
         return self._req("PATCH", "/rest/v1/%s?%s" % (table, match), values, {"Prefer": "return=minimal"})
 
     def upload(self, bucket, path, data, content_type="image/jpeg"):

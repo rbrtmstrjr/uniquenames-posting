@@ -234,11 +234,13 @@ begin
 end $$;
 
 -- ---------------------------------------------------------------- worker: claim + stuck recovery
-create or replace function public.claim_next_card() returns jsonb language plpgsql as $$
-declare v_card public.cards%rowtype; v_job text; v_date date; v_gender text;
+drop function if exists public.claim_next_card();
+create or replace function public.claim_next_card(p_restamp_only boolean default false) returns jsonb language plpgsql as $$
+declare v_card public.cards%rowtype; v_job text; v_date date; v_gender text; v_style text;
 begin
   select * into v_card from public.cards
   where claimed_at is null and status in ('restamp', 'queued')
+    and (not p_restamp_only or status = 'restamp')
   order by (status = 'restamp') desc, queued_at
   limit 1 for update skip locked;
   if not found then return null; end if;
@@ -251,10 +253,11 @@ begin
   where id = v_card.id
   returning * into v_card;
 
-  select post_date, gender into v_date, v_gender from public.posts where id = v_card.post_id;
+  select post_date, gender, style into v_date, v_gender, v_style from public.posts where id = v_card.post_id;
   return jsonb_build_object(
     'job', v_job, 'card', to_jsonb(v_card), 'post_date', v_date,
-    'gender_label', case v_gender when 'boy' then 'Boy' when 'girl' then 'Girl' else null end);
+    'gender_label', case v_gender when 'boy' then 'Boy' when 'girl' then 'Girl' else null end,
+    'style_label', case v_style when 'two-word' then 'Two-word' when 'single' then 'Single' else null end);
 end $$;
 
 create or replace function public.requeue_stuck_cards() returns int language plpgsql as $$
@@ -293,9 +296,9 @@ end $$;
 drop policy if exists owner_read on public.worker_status;
 create policy owner_read on public.worker_status for select to authenticated using (true);
 
-revoke execute on function public.claim_next_card() from public, anon, authenticated;
+revoke execute on function public.claim_next_card(boolean) from public, anon, authenticated;
 revoke execute on function public.requeue_stuck_cards() from public, anon, authenticated;
-grant execute on function public.claim_next_card() to service_role;
+grant execute on function public.claim_next_card(boolean) to service_role;
 grant execute on function public.requeue_stuck_cards() to service_role;
 revoke execute on function public.create_post(jsonb) from public, anon;
 revoke execute on function public.add_card(uuid, jsonb) from public, anon;
