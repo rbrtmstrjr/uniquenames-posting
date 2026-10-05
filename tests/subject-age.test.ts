@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  AGE_CHOICES, KID_SHOTS, NEWBORN_SHOTS, PROPS_SPECS, SITTER_SHOTS, SUBJECT_AGES, TODDLER_SHOTS, buildMixedShotSpecs, buildPrompt,
+  AGE_CHOICES, KID_OUTFIT_WORDS, KID_SHOTS, NEWBORN_SHOTS, outfitFor, PROPS_SPECS, SITTER_SHOTS, SUBJECT_AGES, TODDLER_SHOTS, buildMixedShotSpecs, buildPrompt,
   buildShotSpecs, dealAges, isAgeChoice, isPropsOnly, planExtraCard, planPost, seededRandom, sessionFor, sessionShots, shotSpec, subjectKey,
   type AgeChoice, type SubjectAge,
 } from "@/lib/planner";
@@ -147,11 +147,41 @@ describe("fixed age", () => {
     expect(outfitLine("1")).toBe(`Outfit: ${theme.outfit}.`);
     expect(outfitLine("2")).toBe(`Outfit: ${theme.outfit}.`);
     expect(outfitLine("3")).toMatch(/^Outfit: a toddler-sized version of the cream shirt romper/);
-    expect(outfitLine("6")).toMatch(/^Outfit: a child-sized version of the cream shirt romper/);
+    expect(outfitLine("3")).toMatch(/^Outfit: a toddler-sized version of the cream shirt romper/); // 3 keeps "romper"
+    expect(outfitLine("6")).toBe("Outfit: a child-sized version of the cream shirt playsuit with a caramel bow tie and suspenders.");
     expect(outfitLine("6")).not.toContain("tiny");
     // props-only frames are untouched
     const propsLine = plan("6").cards.find((c) => isPropsOnly(c.shot))!.prompt;
     expect(propsLine).toContain(`Outfit (empty, no one wearing it): ${theme.outfit}.`);
+  });
+  it("outfitFor drops a leading article so it never reads 'the a …'", () => {
+    expect(outfitFor("a white knit romper", "3")).toBe("a toddler-sized version of the white knit romper");
+    expect(outfitFor("An ivory satin dress", "5")).toBe("a child-sized version of the ivory satin dress");
+    expect(outfitFor("the peach tulle dress", "7")).toBe("a child-sized version of the peach tulle dress");
+    expect(outfitFor("a white knit romper", "2")).toBe("a white knit romper"); // under 3: as written
+    expect(outfitFor("anchor-print romper", "5")).toBe("a child-sized version of the anchor-print playsuit");
+  });
+  it.each([
+    ["white knit romper with a sage collar", "white knit playsuit with a sage collar"],
+    ["pastel ivory soft knit onesie", "pastel ivory soft knit outfit"],
+    ["soft gray knit sleep suit with a nightcap", "soft gray knit pajamas with a nightcap"],
+    ["lilac knit sleepsuit", "lilac knit pajamas"],
+    ["cream muslin swaddle", "cream muslin drape"],
+    ["seafoam knit mermaid tail wrap with a shell headband", "seafoam knit mermaid tail drape with a shell headband"],
+    ["Rompers in rust", "playsuit in rust"],
+  ])("ages 4+ map baby-only words: %s", (outfit, kid) => {
+    for (const age of ["4", "5", "6", "7"] as const) expect(outfitFor(outfit, age)).toBe(`a child-sized version of the ${kid}`);
+    expect(outfitFor(outfit, "3")).toBe(`a toddler-sized version of the ${outfit}`);
+    expect(outfitFor(outfit, "1")).toBe(outfit);
+    expect(outfitFor(outfit, "newborn")).toBe(outfit);
+  });
+  it("the kid mapping table stays small and only maps baby-only garments", () => {
+    expect(KID_OUTFIT_WORDS).toHaveLength(5);
+    expect(outfitFor("pale pink leotard with a soft tulle tutu", "6")).toBe("a child-sized version of the pale pink leotard with a soft tulle tutu");
+  });
+  it("kid shots never name the light (the model would draw a lamp)", () => {
+    for (const s of KID_SHOTS) expect(s.text).not.toMatch(/\blight\b/i);
+    expect(KID_SHOTS.some((s) => s.text.includes("gazing off to the side, lost in thought"))).toBe(true);
   });
   it("kid frames say child photography, not baby photography", () => {
     const p = babyCards(plan("5"))[0].prompt;

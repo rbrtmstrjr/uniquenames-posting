@@ -88,7 +88,7 @@ export const KID_SHOTS: ShotSpec[] = [
   baby("over-the-shoulder view from behind the child, who sits looking at the props in front; the back of the head and the outfit are visible", `viewpoint just behind the child at the child's eye level, point of view, ${PORTRAIT}`, "pov"),
   baby("three-quarter view of the child looking back over the shoulder at the viewer with a soft smile", `eye level, three-quarter angle, ${PORTRAIT}`, "profile"),
   baby("candid moment of the child laughing with the head tilted back, holding one of the props", `slightly above eye level, candid, ${PORTRAIT}`, "eye"),
-  baby("side view of the child sitting on the main prop, hands resting in the lap, gazing off into the soft light", `eye level, side profile, ${PORTRAIT}`, "profile"),
+  baby("side view of the child sitting on the main prop, hands resting in the lap, gazing off to the side, lost in thought", `eye level, side profile, ${PORTRAIT}`, "profile"),
   baby("the child holding one of the props close to the chest with both arms, smiling at the viewer", `eye level, medium shot, ${PORTRAIT}`, "eye"),
 ];
 

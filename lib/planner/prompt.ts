@@ -81,10 +81,20 @@ const years = (age?: SubjectAge) => (!age || age === "newborn" ? 0 : Number(age)
  * model is asked for a toddler- or child-sized version of it, so a 6-year-old is not squeezed
  * into a baby romper; younger children wear it as written.
  */
+// From 4 years, baby-only garment words become their kid equivalents (ages below 4 keep them).
+export const KID_OUTFIT_WORDS: [RegExp, string][] = [
+  [/\brompers?\b/gi, "playsuit"],
+  [/\bonesies?\b/gi, "outfit"],
+  [/\bsleep ?suits?\b/gi, "pajamas"],
+  [/\bswaddle\b/gi, "drape"],
+  [/\bwrap\b/gi, "drape"],
+];
+
 export function outfitFor(outfit: string, age?: SubjectAge): string {
   const y = years(age);
   if (y < 3) return outfit;
-  const plain = outfit.replace(/\btiny\s+/gi, "").trim();
+  let plain = outfit.replace(/\btiny\s+/gi, "").replace(/^\s*(a|an|the)\s+/i, "").trim();
+  if (y >= 4) for (const [from, to] of KID_OUTFIT_WORDS) plain = plain.replace(from, to);
   return `a ${y <= 3 ? "toddler" : "child"}-sized version of the ${plain}`;
 }
 
