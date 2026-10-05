@@ -6,6 +6,8 @@ import { Sparkles, Palette } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Segmented } from "@/components/ui/segmented";
 import { Panel } from "@/components/ui/panel";
+import { DatePicker, formatDay } from "@/components/ui/date-picker";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/shadcn/select";
 import { useHotkey } from "@/lib/realtime/hotkey";
 import { createPostAction } from "@/lib/actions/posts";
 import { callAction } from "@/lib/actions/call";
@@ -47,7 +49,7 @@ export function NewPostPanel({ settings, themes, stock, busy }: {
   useHotkey("g", generate);
 
   return (
-    <Panel title={`New post · ${new Date((date || manilaToday()) + "T00:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}`}>
+    <Panel title={`New post · ${formatDay(date || manilaToday())}`}>
       <div className="space-y-4">
         <div className="flex flex-wrap gap-2">
           <Segmented label="Gender" value={gender} onChange={(v) => { setGender(v); setThemeId(""); }} options={[{ value: "boy", label: "Boy" }, { value: "girl", label: "Girl" }]} />
@@ -59,20 +61,25 @@ export function NewPostPanel({ settings, themes, stock, busy }: {
             options={[{ value: "auto", label: `Auto ${settings.min_images}–${settings.max_images}` }, ...counts.map((c) => ({ value: c, label: c }))]} />
         </div>
         <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
-          <label className="block">
-            <span className="mb-1.5 flex items-center justify-between gap-1.5 text-xs font-semibold text-muted">
-              <span className="flex items-center gap-1.5"><Palette className="size-3.5" /> Theme</span>
+          <div>
+            <div className="mb-1.5 flex items-center justify-between gap-1.5 text-xs font-semibold text-muted">
+              <span id="theme-label" className="flex items-center gap-1.5"><Palette className="size-3.5" aria-hidden /> Theme</span>
               <Link href="/themes" className="text-accent hover:underline">Preview / change order</Link>
-            </span>
-            <select value={theme?.id ?? ""} onChange={(e) => setThemeId(e.target.value)} disabled={!genderThemes.length}
-              className="h-11 w-full rounded-xl border border-line bg-bg px-3 text-sm font-semibold text-ink">
-              {genderThemes.map((t, i) => <option key={t.id} value={t.id}>{i === 0 ? `${t.title} (next)` : t.title}</option>)}
-            </select>
-          </label>
-          <label className="block">
-            <span className="mb-1.5 block text-xs font-semibold text-muted">Post date</span>
-            <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="h-11 rounded-xl border border-line bg-bg px-3 text-sm text-ink" />
-          </label>
+            </div>
+            <Select value={theme?.id ?? ""} onValueChange={setThemeId} disabled={!genderThemes.length}>
+              <SelectTrigger aria-labelledby="theme-label" className="w-full font-semibold">
+                <SelectValue placeholder={`No ${gender} theme left`} />
+              </SelectTrigger>
+              {/* Bottom padding keeps the list clear of the phone tab bar. */}
+              <SelectContent position="popper" collisionPadding={{ top: 8, bottom: 80 }} className="max-h-80">
+                {genderThemes.map((t, i) => <SelectItem key={t.id} value={t.id}>{i === 0 ? `${t.title} (next)` : t.title}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <div className="mb-1.5 text-xs font-semibold text-muted">Post date</div>
+            <DatePicker label="Post date" value={date} onChange={setDate} today={manilaToday()} />
+          </div>
         </div>
         {theme && <p className="text-xs text-muted">{theme.backdrop} · {theme.outfit} · {theme.props}</p>}
         <div className="flex flex-wrap items-center gap-3">

@@ -3,6 +3,7 @@ import { useState } from "react";
 import { Check, Copy, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/shadcn/textarea";
 import { updateCaptionAction } from "@/lib/actions/posts";
 import { optimistic } from "@/lib/actions/call";
 
@@ -41,8 +42,8 @@ export function CaptionBox({ postId, initial }: { postId: string; initial: strin
           {saving ? <><Loader2 className="size-3 animate-spin" aria-hidden /> Saving…</> : text !== saved ? "Unsaved" : null}
         </span>
       </div>
-      <textarea id="caption" value={text} onChange={(e) => setText(e.target.value)} onBlur={save} rows={4}
-        className="w-full resize-y rounded-xl border border-line bg-bg p-3 text-sm leading-relaxed text-ink outline-none focus:border-accent" />
+      <Textarea id="caption" value={text} onChange={(e) => setText(e.target.value)} onBlur={save} rows={4}
+        className="min-h-28 resize-y leading-relaxed" />
       <Button variant="subtle" size="sm" onClick={copy}>{copied ? <Check className="size-4" /> : <Copy className="size-4" />} Copy caption</Button>
     </div>
   );

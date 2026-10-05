@@ -1,7 +1,11 @@
 import { forwardRef } from "react";
 import { Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
+import { Button as ShadcnButton } from "@/components/ui/shadcn/button";
 
+// Our Button API (variant primary/subtle/ghost/danger, size sm/md/lg/icon, loading) on top of the
+// shadcn Button. shadcn's own variant/size are switched off (null) so only our warm classes apply;
+// every size keeps the 44px minimum touch target.
 type Variant = "primary" | "subtle" | "ghost" | "danger";
 type Size = "sm" | "md" | "lg" | "icon";
 export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> { variant?: Variant; size?: Size; loading?: boolean }
@@ -18,11 +22,12 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
   { variant = "primary", size = "md", loading, className, children, disabled, type = "button", ...rest }, ref,
 ) {
   return (
-    <button ref={ref} type={type} disabled={disabled || loading}
-      className={cn("inline-flex items-center justify-center gap-2 font-semibold transition active:scale-[.98] disabled:pointer-events-none disabled:opacity-55", VARIANT[variant], SIZE[size], className)}
+    <ShadcnButton ref={ref} type={type} disabled={disabled || loading} variant={null} size={null} aria-busy={loading || undefined}
+      // Keep the pre-shadcn layout behaviour: labels may wrap and buttons may shrink in tight rows.
+      className={cn("shrink gap-2 whitespace-normal font-semibold transition active:scale-[.98] disabled:opacity-55", VARIANT[variant], SIZE[size], className)}
       {...rest}>
       {loading && <Loader2 className="size-4 animate-spin" aria-hidden />}
       {children}
-    </button>
+    </ShadcnButton>
   );
 });

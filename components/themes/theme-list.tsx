@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Empty } from "@/components/ui/empty";
 import { Segmented } from "@/components/ui/segmented";
+import { Disclosure } from "@/components/ui/disclosure";
 import { FadeImage } from "@/components/ui/fade-image";
 import { CardTile } from "@/components/cards/card-tile";
 import { useRealtimeRows } from "@/lib/realtime/use-table";
@@ -171,19 +172,17 @@ export function ThemeList({ themes: serverThemes, previews: initialPreviews }: {
         )}
       </section>
       {used.length > 0 && (
-        <details className="rounded-2xl border border-line bg-surface p-4">
-          <summary className="flex min-h-11 cursor-pointer items-center text-sm font-semibold text-ink">Used · {used.length}</summary>
+        <Disclosure summary={`Used · ${used.length}`} className="rounded-2xl border border-line bg-surface p-4" triggerClassName="text-sm text-ink">
           <ul className="mt-3 space-y-1 text-sm">{used.map((t) => <li key={t.id} className="flex justify-between gap-2"><span className="text-ink">{t.title}</span><span className="text-muted">{t.used_on}</span></li>)}</ul>
-        </details>
+        </Disclosure>
       )}
       {archived.length > 0 && (
-        <details className="rounded-2xl border border-line bg-surface p-4">
-          <summary className="flex min-h-11 cursor-pointer items-center text-sm font-semibold text-ink">Archived · {archived.length}</summary>
+        <Disclosure summary={`Archived · ${archived.length}`} className="rounded-2xl border border-line bg-surface p-4" triggerClassName="text-sm text-ink">
           <ul className="mt-3 space-y-1">{archived.map((t) => (
             <li key={t.id} className="flex items-center justify-between gap-2 text-sm"><span className="text-ink">{t.title}</span>
               <Button variant="ghost" size="sm" disabled={pending.has(t.id)} onClick={() => void archive(t, false)}><ArchiveRestore className="size-4" aria-hidden /> Restore</Button></li>
           ))}</ul>
-        </details>
+        </Disclosure>
       )}
       <Dialog open={!!openTheme} onOpenChange={(o) => !o && setOpenPreviewId(null)} title={openTheme ? `${openTheme.title} preview` : "Preview"} description="One test picture of this theme, to check the look before it is used.">
         {openTheme && (

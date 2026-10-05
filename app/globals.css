@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "tw-animate-css";
 @custom-variant dark (&:where(.dark, .dark *));
 
 :root {
@@ -19,6 +20,23 @@
   --font-sans: var(--font-jakarta), ui-sans-serif, system-ui, sans-serif;
   --font-display: var(--font-fraunces), ui-serif, Georgia, serif;
   --shadow-soft: var(--shadow);
+
+  /* shadcn/ui bridge (components/ui/shadcn/*). OUR token names win: `accent` is our brand brown
+     and `muted` is our secondary TEXT colour, while shadcn means a subtle hover fill by `accent`
+     and a background by `muted`. So shadcn's `accent`, `accent-foreground`, `muted` and
+     `muted-foreground` are deliberately NOT defined here; the generated component files were
+     rewritten instead (bg-accent -> bg-surface-2, text-accent-foreground -> text-ink,
+     bg-muted -> bg-surface-2, text-muted-foreground -> text-muted). Every other shadcn colour is
+     an alias of a warm token, so light and dark follow automatically. The radius scale is left at
+     Tailwind's defaults (the app uses rounded-xl everywhere); the shadcn files we use were given
+     rounded-xl directly. After any `npx shadcn add`, re-run those four rewrites on the new file. */
+  --color-background: var(--bg); --color-foreground: var(--ink);
+  --color-card: var(--surface); --color-card-foreground: var(--ink);
+  --color-popover: var(--surface); --color-popover-foreground: var(--ink);
+  --color-primary: var(--accent); --color-primary-foreground: var(--accent-ink);
+  --color-secondary: var(--surface-2); --color-secondary-foreground: var(--ink);
+  --color-destructive: var(--bad);
+  --color-border: var(--line); --color-input: var(--line); --color-ring: var(--accent);
   --animate-shimmer: shimmer 1.4s linear infinite;
   --animate-pop: pop .35s cubic-bezier(.2, .9, .3, 1.2);
   @keyframes shimmer { from { background-position: -200% 0; } to { background-position: 200% 0; } }
@@ -31,7 +49,8 @@ body { font-family: var(--font-sans); -webkit-font-smoothing: antialiased; }
   background: linear-gradient(100deg, var(--surface-2) 30%, var(--accent-soft) 50%, var(--surface-2) 70%);
   background-size: 200% 100%;
 }
-:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* In the base layer so a shadcn control's own focus ring (outline-none + ring) can replace it. */
+@layer base { :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; } }
 
 /* Login: an empty baby-photoshoot set (public/login). Wide photos keep the props at the
    sides; tall photos (portrait phones) keep them low in the corners. */

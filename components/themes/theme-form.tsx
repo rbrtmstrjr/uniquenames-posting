@@ -4,6 +4,8 @@ import { toast } from "sonner";
 import { Dialog } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Segmented } from "@/components/ui/segmented";
+import { Input } from "@/components/ui/shadcn/input";
+import { Textarea } from "@/components/ui/shadcn/textarea";
 import type { Gender, ThemeRow } from "@/lib/db/types";
 import { saveThemeAction } from "@/lib/actions/themes";
 import { callAction } from "@/lib/actions/call";
@@ -51,12 +53,12 @@ export function ThemeForm({ open, onOpenChange, editing, defaultGender, onSaved 
       description="Every picture in a post repeats these words exactly, so the whole album looks like one photoshoot.">
       <form onSubmit={save} className="grid gap-4 sm:grid-cols-2">
         <label className="block sm:col-span-2"><span className="text-xs font-semibold text-muted">Title</span>
-          <input value={f.title} onChange={(e) => set("title", e.target.value)} placeholder="Autumn Harvest" className="mt-1 h-11 w-full rounded-xl border border-line bg-bg px-3 font-semibold text-ink" /></label>
+          <Input value={f.title} onChange={(e) => set("title", e.target.value)} placeholder="Autumn Harvest" className="mt-1 font-semibold" /></label>
         <div className="sm:col-span-2"><Segmented label="Gender" value={f.gender} onChange={(v) => set("gender", v)} options={[{ value: "boy", label: "Boy" }, { value: "girl", label: "Girl" }]} /></div>
         {FIELDS.map((x) => (
           <label key={x.key} className="block">
             <span className="text-xs font-semibold text-muted">{x.label}</span>
-            <textarea value={f[x.key]} onChange={(e) => set(x.key, e.target.value)} rows={2} placeholder={x.hint} className="mt-1 w-full rounded-xl border border-line bg-bg p-3 text-sm text-ink" />
+            <Textarea value={f[x.key]} onChange={(e) => set(x.key, e.target.value)} rows={2} placeholder={x.hint} className="mt-1" />
           </label>
         ))}
         <div className="flex justify-end gap-2 sm:col-span-2">

@@ -5,6 +5,8 @@ import { toast } from "sonner";
 import { Dialog } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Disclosure } from "@/components/ui/disclosure";
+import { Input } from "@/components/ui/shadcn/input";
 import type { CardRow } from "@/lib/db/types";
 import { cardVisual } from "@/lib/status/card-state";
 import type { WorkerHealth } from "@/lib/status/worker-health";
@@ -56,21 +58,20 @@ export function CardDialog({ card, url, health, onClose, onDelete }: {
           {card.error && <p className="rounded-xl bg-bad/10 p-3 text-sm text-bad">{card.error}</p>}
           <label className="block">
             <span className="text-xs font-semibold text-muted">Name</span>
-            <input value={name} onChange={(e) => setName(e.target.value)} className="mt-1 h-11 w-full rounded-xl border border-line bg-bg px-3 font-semibold text-ink" />
+            <Input value={name} onChange={(e) => setName(e.target.value)} className="mt-1 font-semibold" />
           </label>
           <label className="block">
             <span className="text-xs font-semibold text-muted">Meaning</span>
-            <input value={meaning} onChange={(e) => setMeaning(e.target.value)} className="mt-1 h-11 w-full rounded-xl border border-line bg-bg px-3 text-ink" />
+            <Input value={meaning} onChange={(e) => setMeaning(e.target.value)} className="mt-1" />
           </label>
           <div className="flex flex-wrap gap-2">
             <Button onClick={saveText} loading={busy === "text"} disabled={!changed || working}><Save className="size-4" /> Save text</Button>
             <Button variant="subtle" onClick={regen} loading={busy === "regen"} disabled={working}><RotateCw className="size-4" /> New picture</Button>
             <Button variant="danger" onClick={() => { onDelete(card); onClose(); }} disabled={working}><Trash2 className="size-4" /> Delete</Button>
           </div>
-          <details className="text-xs text-muted">
-            <summary className="flex min-h-11 cursor-pointer items-center font-semibold">Shot and prompt</summary>
+          <Disclosure summary="Shot and prompt" className="text-xs text-muted">
             <p className="mt-2 whitespace-pre-wrap">{card.prompt}</p>
-          </details>
+          </Disclosure>
         </div>
       </div>
     </Dialog>
