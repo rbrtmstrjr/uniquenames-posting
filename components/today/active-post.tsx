@@ -54,7 +54,8 @@ export function ActivePost({ post, initialCards }: { post: PostRow; initialCards
       <div className="my-4 h-2.5 overflow-hidden rounded-full bg-surface-2" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100} aria-label="Cards finished">
         <div className="h-full rounded-full bg-accent transition-[width] duration-700" style={{ width: `${pct}%` }} />
       </div>
-      <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 lg:grid-cols-5">
+      {/* Phones/tablets: full width. Desktop: the narrow right column next to New post. */}
+      <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 lg:grid-cols-3">
         {cards.map((c) => (
           <CardTile key={c.id} card={c} url={urlFor(c.card_path)} health={health} queuePos={queuePosition(c, cards)}
             onOpen={() => setOpenId(c.id)}

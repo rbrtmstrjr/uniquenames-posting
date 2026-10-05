@@ -41,7 +41,7 @@ export function TodaySkeleton() {
   return (
     <Frame label="Today">
       <HeaderSkeleton />
-      <div className="grid items-start gap-4 lg:grid-cols-[1fr_300px]">
+      <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_380px] xl:grid-cols-[minmax(0,1fr)_440px]">
         {/* New post: title + date, Who (3 fields), Look (theme, details tile, fonts row), Cards, footer. */}
         <div className="space-y-6 rounded-2xl border border-line bg-surface p-4 shadow-soft sm:p-5">
           <div className="flex items-center justify-between gap-3"><Skeleton className="h-7 w-28 rounded-md" /><Skeleton className="h-11 w-40" /></div>
@@ -64,7 +64,8 @@ export function TodaySkeleton() {
             <Skeleton className="h-12 w-full sm:w-44" />
           </div>
         </div>
-        {/* Stock left: 2×2 table, themes left, two links. */}
+        {/* Right column: Stock left (2×2 table, themes left, two links), then the post being made. */}
+        <div className="min-w-0 space-y-4">
         <PanelSkeleton>
           <div className="grid grid-cols-[5.25rem_1fr_1fr] gap-1">
             <span /><Skeleton className="mx-2 h-3 w-8 rounded-md" /><Skeleton className="mx-2 h-3 w-8 rounded-md" />
@@ -75,11 +76,12 @@ export function TodaySkeleton() {
             <div className="grid grid-cols-2 gap-2"><Skeleton className="h-11" /><Skeleton className="h-11" /></div>
           </div>
         </PanelSkeleton>
+        <PanelSkeleton>
+          <Skeleton className="mb-4 h-2.5 w-full rounded-full" />
+          <TileGrid count={9} className="grid-cols-3 gap-2 sm:grid-cols-4 lg:grid-cols-3" />
+        </PanelSkeleton>
+        </div>
       </div>
-      <PanelSkeleton className="mt-4">
-        <Skeleton className="mb-4 h-2.5 w-full rounded-full" />
-        <TileGrid count={10} className="grid-cols-3 gap-2 sm:grid-cols-4 lg:grid-cols-5" />
-      </PanelSkeleton>
     </Frame>
   );
 }
