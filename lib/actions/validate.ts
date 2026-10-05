@@ -2,7 +2,7 @@ import type { Gender } from "@/lib/db/types";
 import { NAME_RE, normalizeQuotes } from "@/lib/names/bulk-paste";
 
 export interface ThemeInput { title: string; gender: Gender; backdrop: string; outfit: string; props: string; lighting: string; palette: string }
-export interface SettingsInput { caption_template: string; hashtags: string; handle: string; min_images: number; max_images: number; sound_on: boolean }
+export interface SettingsInput { caption_template: string; hashtags: string; handle: string; min_images: number; max_images: number; sound_on: boolean; caption_ai: boolean }
 
 export function validateName(name: string, meaning: string): string | null {
   const n = normalizeQuotes(name).replace(/\s+/g, " ").trim();

@@ -3,8 +3,9 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { planExtraCard, planPost, subjectKey } from "@/lib/planner";
 import type { Gender, NameRow, NameStyle, PostRow, SettingsRow, ThemeRow } from "@/lib/db/types";
-import { validateCreatePost } from "./helpers";
+import { UUID_RE, validateCreatePost } from "./helpers";
 import { generateLockReason } from "./generate-guard";
+import { aiCaptionLine, captionAiOn, composeCaption, REWRITE_TIMEOUT_MS, withHashtags } from "@/lib/ai/caption";
 import { fail, requireOwner, type ActionResult } from "./result";
 
 export async function createPostAction(input: {
@@ -15,6 +16,15 @@ export async function createPostAction(input: {
   if (badInput) return fail(badInput);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(input.postDate)) return fail("Pick a valid date.");
   const sb = await createClient();
+  // The AI caption needs the theme the planner picks, so it runs right after the (parallel)
+  // reads and before create_post. It never throws and gives up after CAPTION_TIMEOUT_MS,
+  // falling back to the template: a post is never blocked or failed by AI. A conflict
+  // retry on the same theme reuses the line instead of asking Gemini twice.
+  const lines = new Map<string, Promise<string | null>>();
+  const lineFor = (theme: ThemeRow) => {
+    if (!lines.has(theme.id)) lines.set(theme.id, aiCaptionLine({ theme, gender: input.gender, style: input.style }));
+    return lines.get(theme.id)!;
+  };
   for (let attempt = 0; attempt < 2; attempt++) {
     // The Generate lock is read in parallel with the first round of reads (no extra round trip).
     const [{ data: settings }, { data: names }, { data: themes }, lock] = await Promise.all([
@@ -25,14 +35,19 @@ export async function createPostAction(input: {
     ]);
     if (lock) return fail(lock);
     if (!settings) return fail("Settings are missing. Run supabase/schema.sql.");
+    const s = settings as SettingsRow;
+    const themeRows = (themes ?? []) as ThemeRow[];
     const plan = planPost({
       request: { gender: input.gender, style: input.style, count: input.count, postDate: input.postDate },
-      names: (names ?? []) as NameRow[], themes: (themes ?? []) as ThemeRow[], settings: settings as SettingsRow, themeId: input.themeId,
+      names: (names ?? []) as NameRow[], themes: themeRows, settings: s, themeId: input.themeId,
     });
     if (!plan.ok) return fail(plan.reason);
+    const theme = themeRows.find((t) => t.id === plan.theme_id);
+    const line = theme && captionAiOn(s) ? await lineFor(theme) : null;
+    const caption = composeCaption(line, input.gender, s).caption;
     const { data, error } = await sb.rpc("create_post", { p: {
       request_id: input.requestId, post_date: input.postDate, gender: input.gender, style: input.style,
-      theme_id: plan.theme_id, caption: plan.caption, cards: plan.cards,
+      theme_id: plan.theme_id, caption, cards: plan.cards,
     } });
     if (error) return fail(`Could not create the post: ${error.message}`);
     const r = data as { status: string; post_id?: string; reason?: string };
@@ -63,6 +78,31 @@ export async function updateCaptionAction(postId: string, caption: string): Prom
   const { data, error } = await (await createClient()).from("posts").update({ caption }).eq("id", postId).select("id");
   if (error) return fail(error.message);
   return data?.length ? { ok: true } : fail("Post not found.");
+}
+
+/**
+ * "Rewrite caption": a fresh Gemini caption for the post's theme + the owner's hashtags,
+ * saved and returned. The owner asked for AI explicitly, so this works even with the
+ * "Write captions with AI" switch off. On any AI failure the saved caption is unchanged.
+ */
+export async function rewriteCaptionAction(postId: string): Promise<ActionResult<{ caption: string }>> {
+  await requireOwner();
+  if (!UUID_RE.test(postId ?? "")) return fail("Post not found.");
+  const sb = await createClient();
+  const [{ data: post }, { data: settings }] = await Promise.all([
+    sb.from("posts").select("id, gender, style, theme_id").eq("id", postId).maybeSingle(),
+    sb.from("settings").select("hashtags").eq("id", 1).maybeSingle(),
+  ]);
+  if (!post) return fail("Post not found.");
+  const p = post as Pick<PostRow, "id" | "gender" | "style" | "theme_id">;
+  const { data: theme } = await sb.from("themes").select("*").eq("id", p.theme_id).maybeSingle();
+  if (!theme) return fail("This post's theme was deleted, so there is nothing to write about.");
+  const line = await aiCaptionLine({ theme: theme as ThemeRow, gender: p.gender, style: p.style }, REWRITE_TIMEOUT_MS);
+  if (!line) return fail("Could not write a new caption right now. Your caption is unchanged — try again in a moment.");
+  const caption = withHashtags(line, (settings as { hashtags?: string } | null)?.hashtags ?? "");
+  const { data, error } = await sb.from("posts").update({ caption }).eq("id", postId).select("id");
+  if (error) return fail(error.message);
+  return data?.length ? { ok: true, caption } : fail("Post not found.");
 }
 
 export async function deletePostAction(postId: string): Promise<ActionResult> {

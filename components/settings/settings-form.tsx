@@ -3,7 +3,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Bell, LogOut } from "lucide-react";
-import type { SettingsRow } from "@/lib/db/types";
+import { TEXT_SETTINGS_DEFAULTS, type SettingsRow } from "@/lib/db/types";
 import { Panel } from "@/components/ui/panel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/shadcn/input";
@@ -24,7 +24,9 @@ const COUNT_MAX = 30;
 
 export function SettingsForm({ initial }: { initial: SettingsRow }) {
   const router = useRouter();
-  const [s, setS] = useState({ caption_template: initial.caption_template, hashtags: initial.hashtags, handle: initial.handle, min_images: initial.min_images, max_images: initial.max_images, sound_on: initial.sound_on });
+  const [s, setS] = useState({ caption_template: initial.caption_template, hashtags: initial.hashtags, handle: initial.handle, min_images: initial.min_images, max_images: initial.max_images, sound_on: initial.sound_on,
+    // undefined until migration 002 runs: the column default (on) is what the app uses then.
+    caption_ai: initial.caption_ai ?? TEXT_SETTINGS_DEFAULTS.caption_ai });
   const [busy, setBusy] = useState(false);
   const problem = validateSettings(s);
 
@@ -51,11 +53,19 @@ export function SettingsForm({ initial }: { initial: SettingsRow }) {
     <div className="space-y-4">
       <Panel title="Caption">
         <div className="space-y-3">
-          <label className="block"><span className="text-xs font-semibold text-muted">Caption template ({"{gender}"} becomes boy or girl)</span>
+          <div>
+            <label htmlFor="caption-ai" className="inline-flex min-h-11 cursor-pointer items-center gap-3 text-sm font-semibold text-ink">
+              <Switch id="caption-ai" checked={s.caption_ai} onCheckedChange={(v) => setS({ ...s, caption_ai: v })} /> Write captions with AI
+            </label>
+            <p className="text-xs text-muted">{s.caption_ai
+              ? "Each new post gets its own 1–2 sentences about its theme, then your hashtags. The fallback caption below is used if AI is unavailable."
+              : "New posts use the fallback caption below. You can still tap Rewrite caption on a post."}</p>
+          </div>
+          <label className="block"><span className="text-xs font-semibold text-muted">Fallback caption ({"{gender}"} becomes boy or girl)</span>
             <Textarea value={s.caption_template} onChange={(e) => setS({ ...s, caption_template: e.target.value })} rows={2} className="mt-1" /></label>
           <label className="block"><span className="text-xs font-semibold text-muted">Hashtags</span>
             <Input value={s.hashtags} onChange={(e) => setS({ ...s, hashtags: e.target.value })} className="mt-1" /></label>
-          <div className="rounded-xl bg-surface-2 p-3 text-sm whitespace-pre-wrap text-ink"><span className="mb-1 block text-xs font-semibold text-muted">Preview</span>{buildCaption("girl", s)}</div>
+          <div className="rounded-xl bg-surface-2 p-3 text-sm whitespace-pre-wrap text-ink"><span className="mb-1 block text-xs font-semibold text-muted">Fallback preview</span>{buildCaption("girl", s)}</div>
         </div>
       </Panel>
       <Panel title="Cards">

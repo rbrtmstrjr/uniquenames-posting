@@ -32,6 +32,19 @@ describe("SettingsForm (shadcn controls)", () => {
     expect(sw.getAttribute("aria-checked")).toBe("false");
   });
 
+  it("'Write captions with AI' is a Switch; undefined (migration not run) shows on; it is sent on Save", () => {
+    const { caption_ai: _drop, ...legacy } = initial;
+    void _drop;
+    render(<SettingsForm initial={legacy as SettingsRow} />);
+    const sw = screen.getByRole("switch", { name: /Write captions with AI/ });
+    expect(sw.getAttribute("aria-checked")).toBe("true");
+    expect(screen.getByText(/Fallback caption/)).toBeTruthy();
+    fireEvent.click(sw);
+    expect(sw.getAttribute("aria-checked")).toBe("false");
+    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+    expect(callAction).toHaveBeenCalledTimes(1);
+  });
+
   it("card counts are sliders with value labels; fewest above most blocks Save", () => {
     render(<SettingsForm initial={{ ...initial, min_images: 13, max_images: 13 }} />);
     const fewest = screen.getByRole("slider", { name: "Fewest cards (Auto)" });

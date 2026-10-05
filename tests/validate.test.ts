@@ -14,7 +14,7 @@ describe("validate", () => {
     expect(validateTheme({ ...t, props: " " })).toMatch(/props/);
   });
   it("settings", () => {
-    const s = { caption_template: "x {gender}", hashtags: "#a", handle: "@unique_names", min_images: 9, max_images: 13, sound_on: true };
+    const s = { caption_template: "x {gender}", hashtags: "#a", handle: "@unique_names", min_images: 9, max_images: 13, sound_on: true, caption_ai: true };
     expect(validateSettings(s)).toBeNull();
     expect(validateSettings({ ...s, min_images: 14 })).toMatch(/min/i);
     expect(validateSettings({ ...s, handle: "" })).toMatch(/handle/i);
