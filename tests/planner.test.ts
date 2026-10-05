@@ -113,6 +113,22 @@ describe("prompt", () => {
       expect(p).not.toMatch(/tripod|stand|paper roll/i);
     }
   });
+  it("every frame names a lens and an aperture, for real photoshoot depth (#5)", () => {
+    for (const s of [...SITTER_SHOTS, ...NEWBORN_SHOTS, ...PROPS_SPECS]) {
+      expect(s.camera).toMatch(/\bf\/\d(\.\d)?\b/);
+      expect(s.camera).toMatch(/\d+mm (portrait |macro )?lens/);
+    }
+  });
+  it("portrait frames use the 85mm f/1.8 look, macro 100mm f/2.8, wide and overhead stay shallow", () => {
+    const all = [...SITTER_SHOTS, ...NEWBORN_SHOTS];
+    for (const s of all.filter((x) => ["eye", "profile", "high", "low", "pov", "closeup"].includes(x.angle))) {
+      expect(s.camera).toContain("85mm portrait lens, f/1.8");
+    }
+    for (const s of all.filter((x) => x.angle === "closeup")) expect(s.camera).toContain("very shallow depth of field");
+    for (const s of [...all, ...PROPS_SPECS].filter((x) => x.angle === "macro")) expect(s.camera).toContain("100mm macro lens, f/2.8");
+    for (const s of all.filter((x) => x.angle === "wide")) expect(s.camera).toContain("35mm lens, f/2.0, soft background falloff");
+    for (const s of all.filter((x) => x.angle === "overhead")) expect(s.camera).toContain("50mm lens, f/2.8, soft focus falloff at the edges");
+  });
   it("names the same baby, with session age and look, in every baby frame", () => {
     const s = { session: "newborn" as const, look: LOOKS[2] };
     const p = buildPrompt(themes[0], NEWBORN_SHOTS[3].text, "girl", s);

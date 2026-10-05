@@ -66,7 +66,7 @@ export function buildPrompt(theme: ThemePromptFields, shot: string, gender: Gend
   const spec = shotSpec(shot);
   const babyWord = gender === "girl" ? "baby girl" : "baby boy";
   const shotLine = "Shot: " + shot.replace(/\{baby\}/g, babyWord) + ".";
-  const camera = spec?.camera ?? "85mm lens, shallow depth of field";
+  const camera = spec?.camera ?? "85mm lens, f/1.8, shallow depth of field";
   const where = spec?.space ?? "top";
 
   if (isPropsOnly(shot)) {
