@@ -26,7 +26,7 @@ export function DatePicker({ value, onChange, today, label, className }: {
         <span className="whitespace-nowrap">{formatDay(value)}</span>
         {value === today && <span className="text-xs font-normal text-muted">today</span>}
       </PopoverTrigger>
-      <PopoverContent align="end" className="w-auto p-0">
+      <PopoverContent align="end" collisionPadding={{ top: 8, bottom: 80 }} className="w-auto p-0">
         <Calendar mode="single" required selected={selected} defaultMonth={selected} today={toDate(today)}
           onSelect={(d: Date | undefined) => { if (d) { onChange(toYmd(d)); setOpen(false); } }} />
         <div className="border-t border-line p-2">

@@ -9,7 +9,7 @@ export function Segmented<T extends string>({ value, onChange, options, label, c
   value: T; onChange: (v: T) => void; options: { value: T; label: string }[]; label: string; className?: string;
 }) {
   return (
-    <ToggleGroup type="single" spacing={1} value={value} onValueChange={(v) => { if (v) onChange(v as T); }} aria-label={label}
+    <ToggleGroup type="single" spacing={1} value={value} onValueChange={(v) => { if (v) onChange(v as T); }} role="radiogroup" aria-label={label}
       className={cn("inline-flex w-auto flex-wrap rounded-xl bg-surface-2 p-1", className)}>
       {options.map((o) => (
         <ToggleGroupItem key={o.value} value={o.value}

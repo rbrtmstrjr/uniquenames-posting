@@ -71,7 +71,7 @@ export function NewPostPanel({ settings, themes, stock, busy }: {
                 <SelectValue placeholder={`No ${gender} theme left`} />
               </SelectTrigger>
               {/* Bottom padding keeps the list clear of the phone tab bar. */}
-              <SelectContent position="popper" collisionPadding={{ top: 8, bottom: 80 }} className="max-h-80">
+              <SelectContent position="popper" collisionPadding={{ top: 8, bottom: 80 }} className="max-h-[min(20rem,var(--radix-select-content-available-height))]">
                 {genderThemes.map((t, i) => <SelectItem key={t.id} value={t.id}>{i === 0 ? `${t.title} (next)` : t.title}</SelectItem>)}
               </SelectContent>
             </Select>
