@@ -64,21 +64,25 @@ export function TodaySkeleton() {
             <Skeleton className="h-12 w-full sm:w-44" />
           </div>
         </div>
-        {/* Right column: Stock left (2×2 table, themes left, two links), then the post being made. */}
+        {/* Right column: the post being made, then the compact Stock strip (2×2 table beside themes left). */}
         <div className="min-w-0 space-y-4">
-        <PanelSkeleton>
-          <div className="grid grid-cols-[5.25rem_1fr_1fr] gap-1">
-            <span /><Skeleton className="mx-2 h-3 w-8 rounded-md" /><Skeleton className="mx-2 h-3 w-8 rounded-md" />
-            {range(2).map((r) => [<Skeleton key={`l${r}`} className="my-auto h-4 w-16 rounded-md" />, <Skeleton key={`a${r}`} className="h-16" />, <Skeleton key={`b${r}`} className="h-16" />])}
-          </div>
-          <div className="mt-4 space-y-2 border-t border-line pt-4">
-            <Skeleton className="h-3 w-20 rounded-md" />
-            <div className="grid grid-cols-2 gap-2"><Skeleton className="h-11" /><Skeleton className="h-11" /></div>
-          </div>
-        </PanelSkeleton>
         <PanelSkeleton>
           <Skeleton className="mb-4 h-2.5 w-full rounded-full" />
           <TileGrid count={9} className="grid-cols-3 gap-2 sm:grid-cols-4 lg:grid-cols-3 2xl:grid-cols-5" />
+        </PanelSkeleton>
+        <PanelSkeleton>
+          <div className="@container">
+            <div className="grid gap-3 @lg:grid-cols-[3fr_2fr] @lg:gap-5">
+              <div className="grid grid-cols-[4.75rem_1fr_1fr] gap-1">
+                <span /><Skeleton className="mx-2 h-3 w-8 rounded-md" /><Skeleton className="mx-2 h-3 w-8 rounded-md" />
+                {range(2).map((r) => [<Skeleton key={`l${r}`} className="my-auto h-4 w-16 rounded-md" />, <Skeleton key={`a${r}`} className="h-11" />, <Skeleton key={`b${r}`} className="h-11" />])}
+              </div>
+              <div className="space-y-1">
+                <Skeleton className="h-3 w-20 rounded-md" />
+                <div className="grid grid-cols-2 gap-1 @lg:grid-cols-1"><Skeleton className="h-11" /><Skeleton className="h-11" /></div>
+              </div>
+            </div>
+          </div>
         </PanelSkeleton>
         </div>
       </div>
