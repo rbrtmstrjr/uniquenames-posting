@@ -60,7 +60,7 @@ export interface ReelCast { adult: string; child: string }
 /** One Whisper word with its times in seconds. */
 export interface ReelWord { word: string; start: number; end: number }
 export interface ReelRow {
-  id: string; title: string; topic: string | null; cast: ReelCast; status: ReelStatus; error: string | null;
+  id: string; title: string; topic: string | null; doll_cast: ReelCast; status: ReelStatus; error: string | null;
   voice_path: string | null; words: ReelWord[] | null; preview_path: string | null; pc_path: string | null;
   /** numeric in Postgres; PostgREST returns it as a number. */
   duration_s: number | null;

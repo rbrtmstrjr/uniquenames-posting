@@ -15,7 +15,7 @@ create table if not exists public.reels (
   id uuid primary key default gen_random_uuid(),
   title text not null,
   topic text,
-  "cast" jsonb not null default '{}'::jsonb,
+  doll_cast jsonb not null default '{}'::jsonb,
   status text not null default 'script' check (status in (
     'script', 'queued', 'voicing', 'imaging', 'rendering', 'ready', 'needs_attention', 'failed')),
   error text,
@@ -61,10 +61,16 @@ end $$;
 -- ---------------------------------------------------------------- worker: reel claim + stuck recovery
 -- The next unit of reel work: {step: voice|timing|image|render, reel, scene (image only, else null)}, or null.
 -- Nothing while a card is waiting or being made (a card claim younger than requeue_stuck_cards' 5 minutes).
--- Oldest reel first; a reel whose next step can't run (a scene failed 3 times, scenes still pending) is passed over.
--- The worker clears reels.claimed_at when its step is saved; results are version-guarded by the worker.
+-- Oldest reel first; a reel whose next step can't run (a scene failed 3 times, scenes still pending,
+-- every image skipped) is passed over. Render only runs when at least one scene is done.
+-- WORKER CONTRACT:
+--   * after each step, save its result version-guarded AND clear reels.claimed_at (and the scene's claimed_at);
+--     until then the reel is not claimable again.
+--   * during long sub-steps (Chatterbox chunks, ffmpeg passes) re-touch reels.claimed_at = now() as a heartbeat:
+--     requeue_stuck_reels() releases any claim older than 10 minutes.
+--   * on an image's 3rd failure set the reel needs_attention; after render set it ready.
 create or replace function public.claim_next_reel_step() returns jsonb language plpgsql as $$
-declare v_reel public.reels%rowtype; v_scene jsonb; v_step text; v_open int; v_id uuid;
+declare v_reel public.reels%rowtype; v_scene jsonb; v_step text; v_open int; v_done int; v_id uuid;
 begin
   perform 1 from public.cards
     where status in ('queued', 'generating', 'restamp')
@@ -91,8 +97,9 @@ begin
       if v_id is not null then
         v_step := 'image';
       else
-        select count(*) into v_open from public.reel_scenes where reel_id = v_reel.id and status not in ('done', 'skipped');
-        if v_open = 0 and v_reel.preview_path is null then v_step := 'render'; end if;
+        select count(*) filter (where status not in ('done', 'skipped')), count(*) filter (where status = 'done')
+          into v_open, v_done from public.reel_scenes where reel_id = v_reel.id;
+        if v_open = 0 and v_done > 0 and v_reel.preview_path is null then v_step := 'render'; end if;
       end if;
     end if;
     continue when v_step is null;
@@ -114,8 +121,9 @@ end $$;
 
 -- Releases reel and scene claims older than 10 minutes (the PC was switched off mid-step); the worker then
 -- resumes at the first unfinished step. A scene stuck on its 3rd try fails and its reel needs attention.
+-- Also settles unclaimed reels that can't progress (needs_attention / failed). Returns the rows changed.
 create or replace function public.requeue_stuck_reels() returns int language plpgsql as $$
-declare v_scenes int; v_reels int;
+declare v_scenes int; v_reels int; v_flagged int; v_empty int;
   v_gave_up constant text := 'Gave up after 3 tries: the PC stopped responding in the middle of this image.';
 begin
   with stuck as (
@@ -146,7 +154,19 @@ begin
       then v_gave_up else r.error end
   from stuck k where r.id = k.id;
   get diagnostics v_reels = row_count;
-  return v_scenes + v_reels;
+
+  -- Unclaimed working reels that can never move on: an image failed 3 times (the worker didn't flag it) ...
+  update public.reels r set status = 'needs_attention', error = 'An image failed 3 times.'
+  where r.claimed_at is null and r.status in ('queued', 'voicing', 'imaging', 'rendering')
+    and exists (select 1 from public.reel_scenes s where s.reel_id = r.id and s.status = 'failed' and s.attempts >= 3);
+  get diagnostics v_flagged = row_count;
+  -- ... or, once timed, nothing is left to show (every image skipped, or no scenes at all).
+  update public.reels r set status = 'failed', error = 'Every image was skipped.'
+  where r.claimed_at is null and r.status in ('queued', 'voicing', 'imaging', 'rendering')
+    and r.words is not null and r.preview_path is null
+    and not exists (select 1 from public.reel_scenes s where s.reel_id = r.id and s.status <> 'skipped');
+  get diagnostics v_empty = row_count;
+  return v_scenes + v_reels + v_flagged + v_empty;
 end $$;
 
 -- @supabase-only begin

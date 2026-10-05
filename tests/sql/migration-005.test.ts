@@ -35,7 +35,7 @@ const release = (db: PGlite, reel: string) => db.query(`update reels set claimed
 
 async function addReel(db: PGlite, scenes = 3, extra: { status?: string; created?: string } = {}) {
   const reel = (await one<{ id: string }>(db,
-    `insert into reels (title, "cast", status, created_at) values ($1, '{"adult":"a","child":"c"}', $2, coalesce($3::timestamptz, now())) returning id`,
+    `insert into reels (title, doll_cast, status, created_at) values ($1, '{"adult":"a","child":"c"}', $2, coalesce($3::timestamptz, now())) returning id`,
     [`Reel ${crypto.randomUUID()}`, extra.status ?? "queued", extra.created ?? null])).id;
   for (let i = 1; i <= scenes; i++) {
     await db.query(`insert into reel_scenes (reel_id, position, beat, narration, image_prompt, seed, status) values ($1,$2::int,'b','n','p',$2::int,'queued')`, [reel, i]);
@@ -72,7 +72,7 @@ describe("005_reels.sql on the live schema (v1 + 002 + 003 + 004)", () => {
 
   it("new reels default to script / pending, version 1; deleting a reel deletes its scenes", async () => {
     const db = await migratedDb();
-    const r = await one<{ id: string; status: string; version: number }>(db, `insert into reels (title, "cast") values ('T', '{}') returning id, status, version`);
+    const r = await one<{ id: string; status: string; version: number }>(db, `insert into reels (title, doll_cast) values ('T', '{}') returning id, status, version`);
     expect(r).toMatchObject({ status: "script", version: 1 });
     const s = await one<{ status: string; attempts: number; version: number }>(db,
       `insert into reel_scenes (reel_id, position, narration, image_prompt, seed) values ($1, 1, 'n', 'p', 1) returning status, attempts, version`, [r.id]);
@@ -116,7 +116,7 @@ describe("claim_next_reel_step", () => {
     expect(voice).toMatchObject({ step: "voice", scene: null, reel: { id: reel, status: "voicing" } });
     expect(voice!.reel.claimed_at).not.toBeNull();
     expect(voice!.reel.started_at).not.toBeNull();
-    expect(voice!.reel).toHaveProperty("cast", { adult: "a", child: "c" });
+    expect(voice!.reel).toHaveProperty("doll_cast", { adult: "a", child: "c" });
     expect(await claimStep(db)).toBeNull(); // the reel is claimed: never the same step twice
 
     await db.query(`update reels set voice_path='reels/x/voice.wav', claimed_at=null where id=$1`, [reel]);
@@ -191,9 +191,49 @@ describe("claim_next_reel_step", () => {
     await db.query(`update reel_scenes set status='pending' where reel_id=$1`, [reel]);
     expect(await claimStep(db)).toBeNull();
   });
+
+  it("render needs at least one done scene: all skipped or no scenes is not claimable", async () => {
+    const db = await migratedDb();
+    const skipped = await addReel(db, 2, { created: "2026-10-01" });
+    const empty = await addReel(db, 0, { created: "2026-10-02" });
+    await db.query(`update reels set voice_path='v', words='[]' where id in ($1, $2)`, [skipped, empty]);
+    await db.query(`update reel_scenes set status='skipped' where reel_id=$1`, [skipped]);
+    expect(await claimStep(db)).toBeNull();
+    await db.query(`update reel_scenes set status='done' where reel_id=$1 and position=1`, [skipped]);
+    expect(await claimStep(db)).toMatchObject({ step: "render", reel: { id: skipped } });
+  });
 });
 
 describe("requeue_stuck_reels", () => {
+  it("fails an unclaimed timed reel whose images were all skipped (or that has no scenes)", async () => {
+    const db = await migratedDb();
+    const skipped = await addReel(db, 2);
+    const empty = await addReel(db, 0);
+    const notTimed = await addReel(db, 0); // before timing: left alone
+    await db.query(`update reels set voice_path='v', words='[]' where id in ($1, $2)`, [skipped, empty]);
+    await db.query(`update reel_scenes set status='skipped' where reel_id=$1`, [skipped]);
+    expect((await one<{ n: number }>(db, `select requeue_stuck_reels() n`)).n).toBe(2);
+    for (const id of [skipped, empty]) {
+      expect(await one(db, `select status, error from reels where id=$1`, [id])).toEqual({ status: "failed", error: "Every image was skipped." });
+    }
+    expect(await one(db, `select status, error from reels where id=$1`, [notTimed])).toEqual({ status: "queued", error: null });
+  });
+
+  it("flags an unclaimed working reel with a scene failed 3 times as needs_attention", async () => {
+    const db = await migratedDb();
+    const bad = await addReel(db, 2);
+    const fine = await addReel(db, 2);
+    await db.query(`update reels set voice_path='v', words='[]', status='imaging'`);
+    await db.query(`update reel_scenes set status='failed', attempts=3, error='boom' where reel_id=$1 and position=1`, [bad]);
+    await db.query(`update reel_scenes set status='failed', attempts=2 where reel_id=$1 and position=1`, [fine]);
+    expect((await one<{ n: number }>(db, `select requeue_stuck_reels() n`)).n).toBe(1);
+    expect(await one(db, `select status, error from reels where id=$1`, [bad])).toEqual({ status: "needs_attention", error: "An image failed 3 times." });
+    expect(await one(db, `select status, error from reels where id=$1`, [fine])).toEqual({ status: "imaging", error: null });
+    // a claimed reel is left to its worker
+    await db.query(`update reels set status='imaging', claimed_at=now() where id=$1`, [bad]);
+    expect((await one<{ n: number }>(db, `select requeue_stuck_reels() n`)).n).toBe(0);
+  });
+
   it("releases reel and scene claims older than 10 minutes, keeps fresh ones", async () => {
     const db = await migratedDb();
     const reel = await addReel(db, 2);
