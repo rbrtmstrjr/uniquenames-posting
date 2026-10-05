@@ -1,6 +1,5 @@
 "use client";
 import { useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
 import { Ban, ClipboardPaste, Pencil, Plus, Search, Trash2, Undo2, Type } from "lucide-react";
 import { toast } from "sonner";
 import type { Gender, NameRow, NameStatus, NameStyle } from "@/lib/db/types";
@@ -9,6 +8,8 @@ import { Badge } from "@/components/ui/badge";
 import { Empty } from "@/components/ui/empty";
 import { Segmented } from "@/components/ui/segmented";
 import { deleteNameAction, setSkipAction } from "@/lib/actions/names";
+import { optimistic } from "@/lib/actions/call";
+import type { ActionResult } from "@/lib/actions/result";
 import { nameKey } from "@/lib/actions/helpers";
 import { Dialog } from "@/components/ui/dialog";
 import { NameForm } from "./name-form";
@@ -17,15 +18,19 @@ import { BulkPaste } from "./bulk-paste";
 const STATUS_TONE: Record<NameStatus, "ok" | "accent" | "muted" | "warn"> = { available: "ok", reserved: "accent", used: "muted", skip: "warn" };
 const STATUS_TEXT: Record<NameStatus, string> = { available: "Available", reserved: "In a post", used: "Used", skip: "Skip" };
 
-export function NamesTable({ names }: { names: NameRow[] }) {
-  const router = useRouter();
+export function NamesTable({ names: serverNames }: { names: NameRow[] }) {
+  // Local copy for optimistic updates; re-seeded whenever the server sends fresh rows
+  // (each action's revalidatePath re-renders this page in the same response).
+  const [names, setNames] = useState(serverNames);
+  const [seed, setSeed] = useState(serverNames);
+  if (seed !== serverNames) { setSeed(serverNames); setNames(serverNames); }
   const [q, setQ] = useState("");
   const [gender, setGender] = useState<"all" | Gender>("all");
   const [style, setStyle] = useState<"all" | NameStyle>("all");
   const [status, setStatus] = useState<"all" | NameStatus>("available");
   const [form, setForm] = useState<{ open: boolean; editing: NameRow | null }>({ open: false, editing: null });
   const [bulk, setBulk] = useState(false);
-  const [busyId, setBusyId] = useState<string | null>(null);
+  const [busy, setBusy] = useState<Set<string>>(new Set());
   const [confirmDel, setConfirmDel] = useState<NameRow | null>(null);
   const existing = useMemo(() => new Set(names.map((n) => nameKey(n.name))), [names]);
 
@@ -34,13 +39,16 @@ export function NamesTable({ names }: { names: NameRow[] }) {
     (!q || n.name.toLowerCase().includes(q.toLowerCase()) || n.meaning.toLowerCase().includes(q.toLowerCase())),
   ).sort((a, b) => a.name.localeCompare(b.name)), [names, q, gender, style, status]);
 
-  const act = async (id: string, fn: () => Promise<{ ok: boolean; error?: string }>, ok: string) => {
-    if (busyId) return;
-    setBusyId(id);
-    let r: { ok: boolean; error?: string };
-    try { r = await fn(); } catch { r = { ok: false, error: "Something went wrong." }; }
-    setBusyId(null);
-    if (r.ok) { toast.success(ok); router.refresh(); } else toast.error(r.error ?? "Something went wrong.");
+  // Optimistic row change: `next` (or null = removed) shows at once; a failure puts the row back.
+  const act = async (n: NameRow, next: NameRow | null, fn: () => Promise<ActionResult>, ok: string) => {
+    if (busy.has(n.id)) return;
+    setBusy((b) => new Set(b).add(n.id));
+    const r = await optimistic(
+      () => setNames((list) => (next ? list.map((x) => (x.id === n.id ? next : x)) : list.filter((x) => x.id !== n.id))),
+      () => setNames((list) => (list.some((x) => x.id === n.id) ? list.map((x) => (x.id === n.id ? n : x)) : [...list, n])),
+      fn);
+    setBusy((b) => { const s = new Set(b); s.delete(n.id); return s; });
+    if (r.ok) toast.success(ok); else toast.error(r.error);
   };
 
   return (
@@ -77,11 +85,11 @@ export function NamesTable({ names }: { names: NameRow[] }) {
               <div className="ml-auto flex gap-1">
                 {(n.status === "available" || n.status === "skip") && (
                   <>
-                    <Button variant="ghost" size="icon" disabled={!!busyId} loading={busyId === n.id} aria-label={`Edit ${n.name}`} onClick={() => setForm({ open: true, editing: n })}><Pencil className="size-4" /></Button>
+                    <Button variant="ghost" size="icon" disabled={busy.has(n.id)} aria-label={`Edit ${n.name}`} onClick={() => setForm({ open: true, editing: n })}><Pencil className="size-4" /></Button>
                     {n.status === "available"
-                      ? <Button variant="ghost" size="icon" disabled={!!busyId} loading={busyId === n.id} aria-label={`Skip ${n.name}`} onClick={() => act(n.id, () => setSkipAction(n.id, true), `${n.name} will be skipped`)}><Ban className="size-4" /></Button>
-                      : <Button variant="ghost" size="icon" disabled={!!busyId} loading={busyId === n.id} aria-label={`Use ${n.name} again`} onClick={() => act(n.id, () => setSkipAction(n.id, false), `${n.name} is available again`)}><Undo2 className="size-4" /></Button>}
-                    <Button variant="ghost" size="icon" disabled={!!busyId} loading={busyId === n.id} aria-label={`Delete ${n.name}`} onClick={() => setConfirmDel(n)}><Trash2 className="size-4 text-bad" /></Button>
+                      ? <Button variant="ghost" size="icon" disabled={busy.has(n.id)} aria-label={`Skip ${n.name}`} onClick={() => act(n, { ...n, status: "skip" }, () => setSkipAction(n.id, true), `${n.name} will be skipped`)}><Ban className="size-4" /></Button>
+                      : <Button variant="ghost" size="icon" disabled={busy.has(n.id)} aria-label={`Use ${n.name} again`} onClick={() => act(n, { ...n, status: "available" }, () => setSkipAction(n.id, false), `${n.name} is available again`)}><Undo2 className="size-4" /></Button>}
+                    <Button variant="ghost" size="icon" disabled={busy.has(n.id)} aria-label={`Delete ${n.name}`} onClick={() => setConfirmDel(n)}><Trash2 className="size-4 text-bad" /></Button>
                   </>
                 )}
               </div>
@@ -92,12 +100,13 @@ export function NamesTable({ names }: { names: NameRow[] }) {
       <Dialog open={!!confirmDel} onOpenChange={(o) => { if (!o) setConfirmDel(null); }} title={`Delete ${confirmDel?.name ?? ""}?`} description="This can't be undone. Mark it Skip instead to keep it out of posts.">
         <div className="flex justify-end gap-2">
           <Button variant="ghost" onClick={() => setConfirmDel(null)}>Cancel</Button>
-          <Button variant="danger" loading={!!confirmDel && busyId === confirmDel.id}
-            onClick={async () => { const d = confirmDel; if (!d) return; await act(d.id, () => deleteNameAction(d.id), `Deleted ${d.name}`); setConfirmDel(null); }}>Delete</Button>
+          <Button variant="danger"
+            onClick={() => { const d = confirmDel; if (!d) return; setConfirmDel(null); void act(d, null, () => deleteNameAction(d.id), `Deleted ${d.name}`); }}>Delete</Button>
         </div>
       </Dialog>
-      <NameForm open={form.open} editing={form.editing} defaultGender={gender === "girl" ? "girl" : "boy"} onOpenChange={(o) => setForm((f) => ({ ...f, open: o }))} onSaved={() => router.refresh()} />
-      <BulkPaste open={bulk} onOpenChange={setBulk} existing={existing} onSaved={() => router.refresh()} />
+      {/* add/edit/paste actions revalidate /names, which re-renders this list in the same response */}
+      <NameForm open={form.open} editing={form.editing} defaultGender={gender === "girl" ? "girl" : "boy"} onOpenChange={(o) => setForm((f) => ({ ...f, open: o }))} onSaved={() => {}} />
+      <BulkPaste open={bulk} onOpenChange={setBulk} existing={existing} onSaved={() => {}} />
     </div>
   );
 }

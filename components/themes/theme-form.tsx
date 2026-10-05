@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Segmented } from "@/components/ui/segmented";
 import type { Gender, ThemeRow } from "@/lib/db/types";
 import { saveThemeAction } from "@/lib/actions/themes";
+import { callAction } from "@/lib/actions/call";
 
 const FIELDS = [
   { key: "backdrop", label: "Backdrop", hint: "Always a seamless studio backdrop, e.g. smooth seamless sage green studio backdrop" },
@@ -37,7 +38,7 @@ export function ThemeForm({ open, onOpenChange, editing, defaultGender, onSaved 
     e.preventDefault();
     if (busy) return;
     setBusy(true);
-    const r = await saveThemeAction({ ...f, id: editing?.id });
+    const r = await callAction(() => saveThemeAction({ ...f, id: editing?.id }));
     setBusy(false);
     if (!r.ok) { toast.error(r.error); return; }
     toast.success(editing ? "Theme saved" : "Theme added to the end of the line");

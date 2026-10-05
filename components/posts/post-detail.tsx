@@ -1,8 +1,8 @@
 "use client";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, CheckCircle2, CircleDashed, GripVertical, Plus, Trash2 } from "lucide-react";
+import { ArrowLeft, CheckCircle2, CircleDashed, GripVertical, Loader2, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { DndContext, KeyboardSensor, PointerSensor, TouchSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, arrayMove, rectSortingStrategy, sortableKeyboardCoordinates, useSortable } from "@dnd-kit/sortable";
@@ -24,7 +24,10 @@ import { createClient } from "@/lib/supabase/client";
 import { queuePosition } from "@/lib/status/card-state";
 import { uploadNumbers } from "@/lib/files/save";
 import { addCardAction, deletePostAction, setPostedAction } from "@/lib/actions/posts";
-import { deleteCardAction, regenerateCardAction, reorderCardsAction, selectAllAction, setSelectedAction } from "@/lib/actions/cards";
+import { regenerateCardAction, reorderCardsAction, selectAllAction, setSelectedAction } from "@/lib/actions/cards";
+import { callAction, optimistic } from "@/lib/actions/call";
+import type { ActionResult } from "@/lib/actions/result";
+import { useUndoableDelete } from "@/components/cards/use-undoable-delete";
 
 const byOrder = (a: CardRow, b: CardRow) => a.order_index - b.order_index || a.position - b.position;
 
@@ -57,13 +60,12 @@ export function PostDetail({ post: initialPost, theme, initialCards }: { post: P
   }, [initialPost.id]);
   const [cards, setCards] = useRealtimeRows<CardRow>("cards", initialCards, { key: `post-${initialPost.id}`, filter: `post_id=eq.${initialPost.id}`, sort: byOrder, refetch });
   const initialPostRows = useMemo(() => [initialPost], [initialPost]);
-  const [posts] = useRealtimeRows<PostRow>("posts", initialPostRows, { key: `post-row-${initialPost.id}`, filter: `id=eq.${initialPost.id}` });
+  const [posts, setPosts] = useRealtimeRows<PostRow>("posts", initialPostRows, { key: `post-row-${initialPost.id}`, filter: `id=eq.${initialPost.id}` });
   const post = posts[0] ?? initialPost;
-  const [hidden, setHidden] = useState<Set<string>>(new Set());
+  const { hidden, remove: deleteCard } = useUndoableDelete();
   const [openId, setOpenId] = useState<string | null>(params.get("card"));
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
-  const timers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
 
   const visible = useMemo(() => [...cards].sort(byOrder).filter((c) => !hidden.has(c.id)), [cards, hidden]);
   const numbers = uploadNumbers(visible);
@@ -72,25 +74,32 @@ export function PostDetail({ post: initialPost, theme, initialCards }: { post: P
   const allSelected = visible.length > 0 && visible.every((c) => c.selected);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }), useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 6 } }), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }));
 
+  // Optimistic: the tile flips at once; a failed save puts it back and says why.
   const toggle = async (c: CardRow) => {
-    setCards((prev) => prev.map((x) => (x.id === c.id ? { ...x, selected: !x.selected } : x)));
-    const r = await setSelectedAction(c.id, !c.selected);
+    const next = !c.selected;
+    const set = (v: boolean) => setCards((prev) => prev.map((x) => (x.id === c.id ? { ...x, selected: v } : x)));
+    const r = await optimistic(() => set(next), () => set(!next), () => setSelectedAction(c.id, next));
     if (!r.ok) toast.error(r.error);
   };
   const selectAll = async () => {
     const next = !allSelected;
-    setCards((prev) => prev.map((x) => ({ ...x, selected: next })));
-    const r = await selectAllAction(post.id, next);
+    const before = new Map(cards.map((c) => [c.id, c.selected]));
+    const r = await optimistic(
+      () => setCards((prev) => prev.map((x) => ({ ...x, selected: next }))),
+      () => setCards((prev) => prev.map((x) => (before.has(x.id) ? { ...x, selected: before.get(x.id)! } : x))),
+      () => selectAllAction(post.id, next));
     if (!r.ok) toast.error(r.error);
   };
   useHotkey("a", () => { if (!open && !confirmDelete) void selectAll(); });
 
   const retry = async (c: CardRow) => {
-    const r = await regenerateCardAction(c.id);
+    const r = await callAction(() => regenerateCardAction(c.id));
     if (!r.ok) toast.error(r.error);
   };
   const retryAll = async (list: CardRow[]) => {
-    const results = await Promise.all(list.map((c) => regenerateCardAction(c.id)));
+    setBusy("retry-all");
+    const results = await Promise.all(list.map((c) => callAction(() => regenerateCardAction(c.id))));
+    setBusy(null);
     const bad = results.find((r) => !r.ok);
     if (bad && !bad.ok) toast.error(bad.error);
   };
@@ -99,33 +108,30 @@ export function PostDetail({ post: initialPost, theme, initialCards }: { post: P
     if (!e.over || e.active.id === e.over.id) return;
     const ids = visible.map((c) => c.id);
     const next = arrayMove(ids, ids.indexOf(String(e.active.id)), ids.indexOf(String(e.over.id)));
-    setCards((prev) => prev.map((c) => ({ ...c, order_index: next.indexOf(c.id) + 1 || c.order_index })));
-    const r = await reorderCardsAction(post.id, next);
+    const before = new Map(cards.map((c) => [c.id, c.order_index]));
+    const r = await optimistic(
+      () => setCards((prev) => prev.map((c) => ({ ...c, order_index: next.indexOf(c.id) + 1 || c.order_index }))),
+      () => setCards((prev) => prev.map((c) => (before.has(c.id) ? { ...c, order_index: before.get(c.id)! } : c))),
+      () => reorderCardsAction(post.id, next));
     if (!r.ok) toast.error(r.error);
   };
 
-  const deleteCard = (c: CardRow) => {
-    setHidden((h) => new Set(h).add(c.id));
-    const toastId = `delete-${c.id}`;
-    const t = setTimeout(async () => {
-      timers.current.delete(c.id);
-      toast.dismiss(toastId); // sonner pauses on hover / hidden tab: never leave a dead Undo behind
-      const r = await deleteCardAction(c.id);
-      if (!r.ok) { toast.error(r.error); setHidden((h) => { const n = new Set(h); n.delete(c.id); return n; }); }
-    }, 5000);
-    timers.current.set(c.id, t);
-    toast(`Deleted ${c.name}`, {
-      id: toastId,
-      duration: 5000,
-      action: { label: "Undo", onClick: () => { if (!timers.current.has(c.id)) { toast.error("Already deleted"); return; } clearTimeout(timers.current.get(c.id)); timers.current.delete(c.id); setHidden((h) => { const n = new Set(h); n.delete(c.id); return n; }); } },
-    });
+  // Posted / not posted flips the badge and button at once (realtime confirms it).
+  const setPosted = async (posted: boolean) => {
+    if (busy === "posted") return;
+    const prevStatus = post.status;
+    const set = (status: PostRow["status"]) => setPosts((prev) => prev.map((p) => (p.id === post.id ? { ...p, status } : p)));
+    setBusy("posted");
+    const r = await optimistic(() => set(posted ? "posted" : "ready"), () => set(prevStatus), () => setPostedAction(post.id, posted));
+    setBusy(null);
+    if (r.ok) toast.success(posted ? "Marked as posted" : "Marked as not posted"); else toast.error(r.error);
   };
 
-  const run = async (key: string, fn: () => Promise<{ ok: boolean; error?: string }>, ok: string) => {
+  const run = async (key: string, fn: () => Promise<ActionResult>, ok: string) => {
     setBusy(key);
-    const r = await fn();
+    const r = await callAction(fn);
     setBusy(null);
-    if (r.ok) toast.success(ok); else toast.error(r.error ?? "Something went wrong.");
+    if (r.ok) toast.success(ok); else toast.error(r.error);
     return r.ok;
   };
 
@@ -145,15 +151,15 @@ export function PostDetail({ post: initialPost, theme, initialCards }: { post: P
         <div className="flex items-center gap-2">
           {statusBadge({ status: post.status, cards: visible })}
           {post.status === "posted"
-            ? <Button variant="ghost" size="sm" loading={busy === "posted"} onClick={() => run("posted", () => setPostedAction(post.id, false), "Marked as not posted")}><CircleDashed className="size-4" /> Undo posted</Button>
-            : <Button variant="subtle" size="sm" loading={busy === "posted"} disabled={post.status !== "ready"} onClick={() => run("posted", () => setPostedAction(post.id, true), "Marked as posted")}><CheckCircle2 className="size-4" /> Mark posted</Button>}
+            ? <Button variant="ghost" size="sm" aria-busy={busy === "posted"} onClick={() => void setPosted(false)}><CircleDashed className="size-4" /> Undo posted</Button>
+            : <Button variant="subtle" size="sm" aria-busy={busy === "posted"} disabled={post.status !== "ready" && busy !== "posted"} onClick={() => void setPosted(true)}><CheckCircle2 className="size-4" /> Mark posted</Button>}
         </div>
       </div>
 
       {failed.length > 0 && (
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-bad/30 bg-bad/10 p-3 text-sm text-bad">
           <span>{failed.length} card(s) failed. {failed[0].error}</span>
-          <Button variant="danger" size="sm" onClick={() => void retryAll(failed)}>Retry all</Button>
+          <Button variant="danger" size="sm" loading={busy === "retry-all"} onClick={() => void retryAll(failed)}>Retry all</Button>
         </div>
       )}
 
@@ -174,9 +180,11 @@ export function PostDetail({ post: initialPost, theme, initialCards }: { post: P
                       selection={{ selected: c.selected, order: numbers.get(c.id) ?? null, onToggle: () => void toggle(c) }} />
                   </Sortable>
                 ))}
-                <button type="button" onClick={() => run("add", () => addCardAction(post.id), "Adding one more card…")} disabled={busy === "add"}
-                  className="grid aspect-square place-items-center rounded-xl border-2 border-dashed border-line text-sm font-semibold text-muted hover:border-accent hover:text-accent">
-                  <span className="flex flex-col items-center gap-1"><Plus className="size-5" /> Add a card</span>
+                <button type="button" onClick={() => run("add", () => addCardAction(post.id), "Adding one more card…")} disabled={busy === "add"} aria-busy={busy === "add"}
+                  className="grid aspect-square place-items-center rounded-xl border-2 border-dashed border-line text-sm font-semibold text-muted transition hover:border-accent hover:text-accent active:scale-[.98] disabled:border-accent disabled:text-accent">
+                  <span className="flex flex-col items-center gap-1">
+                    {busy === "add" ? <Loader2 className="size-5 animate-spin" aria-hidden /> : <Plus className="size-5" aria-hidden />} {busy === "add" ? "Adding…" : "Add a card"}
+                  </span>
                 </button>
               </div>
             </SortableContext>

@@ -8,6 +8,7 @@ import type { Gender, NameRow } from "@/lib/db/types";
 import { addNamesAction, updateNameAction } from "@/lib/actions/names";
 import { normalizeName } from "@/lib/actions/helpers";
 import { validateName } from "@/lib/actions/validate";
+import { callAction } from "@/lib/actions/call";
 
 export function NameForm({ open, onOpenChange, editing, defaultGender, onSaved }: {
   open: boolean; onOpenChange: (o: boolean) => void; editing: NameRow | null; defaultGender: Gender; onSaved: () => void;
@@ -29,11 +30,11 @@ export function NameForm({ open, onOpenChange, editing, defaultGender, onSaved }
     e.preventDefault();
     setBusy(true);
     if (editing) {
-      const r = await updateNameAction(editing.id, { name, meaning, gender });
+      const r = await callAction(() => updateNameAction(editing.id, { name, meaning, gender }));
       setBusy(false);
       if (!r.ok) { toast.error(r.error); return; }
     } else {
-      const r = await addNamesAction([{ name, meaning, gender }]);
+      const r = await callAction(() => addNamesAction([{ name, meaning, gender }]));
       setBusy(false);
       if (!r.ok) { toast.error(r.error); return; }
       if (r.skipped.length) { toast.error(`${normalizeName(name)} is already in your list.`); return; }

@@ -9,6 +9,7 @@ import type { CardRow } from "@/lib/db/types";
 import { cardVisual } from "@/lib/status/card-state";
 import type { WorkerHealth } from "@/lib/status/worker-health";
 import { regenerateCardAction, restampCardAction } from "@/lib/actions/cards";
+import { callAction } from "@/lib/actions/call";
 import { CardTile } from "./card-tile";
 
 export function CardDialog({ card, url, health, onClose, onDelete }: {
@@ -28,14 +29,14 @@ export function CardDialog({ card, url, health, onClose, onDelete }: {
 
   const saveText = async () => {
     setBusy("text");
-    const r = await restampCardAction(card.id, name, meaning);
+    const r = await callAction(() => restampCardAction(card.id, name, meaning));
     setBusy(null);
     if (!r.ok) { toast.error(r.error); return; }
     toast.success(r.mode === "restamp" ? "Updating the text… (about a second once your PC picks it up)" : "This older card has no clean photo, so it is being remade with the new text.");
   };
   const regen = async () => {
     setBusy("regen");
-    const r = await regenerateCardAction(card.id);
+    const r = await callAction(() => regenerateCardAction(card.id));
     setBusy(null);
     if (r.ok) toast.success("Making a new picture for this card…"); else toast.error(r.error);
   };

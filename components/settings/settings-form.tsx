@@ -8,6 +8,7 @@ import { Panel } from "@/components/ui/panel";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/shell/theme-toggle";
 import { saveSettingsAction } from "@/lib/actions/settings";
+import { callAction } from "@/lib/actions/call";
 import { validateSettings } from "@/lib/actions/validate";
 import { buildCaption } from "@/lib/planner";
 import { createClient } from "@/lib/supabase/client";
@@ -27,14 +28,11 @@ export function SettingsForm({ initial }: { initial: SettingsRow }) {
   const save = async () => {
     if (validateSettings(s)) return;
     setBusy(true);
-    try {
-      const r = await saveSettingsAction(s);
-      if (r.ok) { toast.success("Settings saved"); router.refresh(); } else toast.error(r.error);
-    } catch {
-      toast.error("Could not save. Check your connection and try again.");
-    } finally {
-      setBusy(false);
-    }
+    // The form already shows the new values; the action's revalidatePath refreshes the
+    // layout (chime setting) in the same response, so no extra router.refresh() round trip.
+    const r = await callAction(() => saveSettingsAction(s));
+    setBusy(false);
+    if (r.ok) toast.success("Settings saved"); else toast.error(r.error);
   };
   const enableNotifications = async () => {
     // Undefined on iOS Safari outside a home-screen app.
@@ -43,7 +41,8 @@ export function SettingsForm({ initial }: { initial: SettingsRow }) {
     if (p === "granted") toast.success("You will get a notification when a post is ready.");
     else toast.error("Notifications are blocked in this browser.");
   };
-  const signOut = async () => { await createClient().auth.signOut(); router.replace("/login"); };
+  const [signingOut, setSigningOut] = useState(false);
+  const signOut = async () => { setSigningOut(true); await createClient().auth.signOut(); router.replace("/login"); };
 
   return (
     <div className="space-y-4">
@@ -79,7 +78,7 @@ export function SettingsForm({ initial }: { initial: SettingsRow }) {
       {problem && <p role="alert" className="rounded-xl border border-bad bg-bad/10 p-3 text-sm font-semibold text-ink">{problem}</p>}
       <div className="flex flex-wrap justify-between gap-2">
         <Button onClick={save} loading={busy} disabled={!!problem}>Save settings</Button>
-        <Button variant="ghost" onClick={signOut}><LogOut className="size-4" aria-hidden /> Sign out</Button>
+        <Button variant="ghost" loading={signingOut} onClick={signOut}><LogOut className="size-4" aria-hidden /> Sign out</Button>
       </div>
     </div>
   );

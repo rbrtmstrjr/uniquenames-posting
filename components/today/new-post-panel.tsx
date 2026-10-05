@@ -1,7 +1,6 @@
 "use client";
 import { useMemo, useState, useTransition } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Sparkles, Palette } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -9,6 +8,7 @@ import { Segmented } from "@/components/ui/segmented";
 import { Panel } from "@/components/ui/panel";
 import { useHotkey } from "@/lib/realtime/hotkey";
 import { createPostAction } from "@/lib/actions/posts";
+import { callAction } from "@/lib/actions/call";
 import type { Gender, NameStyle, SettingsRow, ThemeRow } from "@/lib/db/types";
 import { useWorkerContext } from "@/components/shell/app-shell";
 import { PC_TEXT } from "@/components/shell/pc-status";
@@ -20,7 +20,6 @@ function manilaToday() {
 export function NewPostPanel({ settings, themes, stock, busy }: {
   settings: SettingsRow; themes: ThemeRow[]; stock: { gender: Gender; style: NameStyle; count: number }[]; busy: boolean;
 }) {
-  const router = useRouter();
   const { health } = useWorkerContext();
   const [gender, setGender] = useState<Gender>("boy");
   const [style, setStyle] = useState<NameStyle>("two-word");
@@ -39,10 +38,10 @@ export function NewPostPanel({ settings, themes, stock, busy }: {
   const generate = () => {
     if (blocked || pending) return;
     start(async () => {
-      const r = await createPostAction({ gender, style, count: count === "auto" ? null : Number(count), postDate: date || manilaToday(), themeId: theme?.id, requestId: crypto.randomUUID() });
+      const r = await callAction(() => createPostAction({ gender, style, count: count === "auto" ? null : Number(count), postDate: date || manilaToday(), themeId: theme?.id, requestId: crypto.randomUUID() }));
       if (!r.ok) { toast.error(r.error); return; }
+      // The action's revalidatePath re-renders Today with the new post in the same response.
       toast.success(health === "ready" ? "Post queued. Cards will appear as they are made." : `Post queued. ${PC_TEXT[health].fix}`);
-      router.refresh();
     });
   };
   useHotkey("g", generate);

@@ -8,6 +8,7 @@ import type { Gender } from "@/lib/db/types";
 import { parseBulkNames } from "@/lib/names/bulk-paste";
 import { addNamesAction } from "@/lib/actions/names";
 import { nameKey } from "@/lib/actions/helpers";
+import { callAction } from "@/lib/actions/call";
 
 /** `existing` holds nameKey() values (normalized, lower-case) so the preview matches the server's dedup. */
 export function BulkPaste({ open, onOpenChange, existing, onSaved }: { open: boolean; onOpenChange: (o: boolean) => void; existing: Set<string>; onSaved: () => void }) {
@@ -31,7 +32,7 @@ export function BulkPaste({ open, onOpenChange, existing, onSaved }: { open: boo
 
   const save = async () => {
     setBusy(true);
-    const r = await addNamesAction(fresh);
+    const r = await callAction(() => addNamesAction(fresh));
     setBusy(false);
     if (!r.ok) { toast.error(r.error); return; }
     toast.success(`Added ${r.added} names${r.skipped.length ? `, skipped ${r.skipped.length} already in the list` : ""}`);
