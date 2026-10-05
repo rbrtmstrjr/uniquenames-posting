@@ -71,4 +71,4 @@ PC switched off mid-reel: finished steps stay done; `requeue_stuck_reels` releas
 - SQL (PGlite): 005 migration twice on v1+002+003+004, claim order (cards before reels), version guards, requeue.
 - Worker (python unittest): word→line timing, ASS caption build, ffmpeg command build, preview size targeting, step resume logic; ComfyUI and Whisper mocked.
 - Browser: Reels list, new reel, review, progress, preview — 390 + 1440, light + dark.
-- Real end-to-end on the owner's PC: install Chatterbox node + faster-whisper + imageio-ffmpeg; confirm Chatterbox runs on the AMD GPU (or report before going further); a 3-image reel, then one full reel for the owner to judge.
+- Real end-to-end on the owner's PC: install Chatterbox node + faster-whisper + imageio-ffmpeg; confirm Chatterbox runs on the AMD GPU (or report before going further); a short 10-image test reel (the minimum setting), then one full reel for the owner to judge.
