@@ -60,7 +60,10 @@ export interface ReelCast { adult: string; child: string }
 /** One Whisper word with its times in seconds. */
 export interface ReelWord { word: string; start: number; end: number }
 export interface ReelRow {
-  id: string; title: string; topic: string | null; doll_cast: ReelCast; status: ReelStatus; error: string | null;
+  id: string; title: string; topic: string | null;
+  /** The early-childhood stage the script targets (newborn | baby | toddler | preschooler). */
+  stage: string | null;
+  doll_cast: ReelCast; status: ReelStatus; error: string | null;
   voice_path: string | null; words: ReelWord[] | null; preview_path: string | null; pc_path: string | null;
   /** numeric in Postgres; PostgREST returns it as a number. */
   duration_s: number | null;
@@ -68,7 +71,10 @@ export interface ReelRow {
   created_at: string; updated_at: string;
 }
 export interface ReelSceneRow {
-  id: string; reel_id: string; position: number; beat: string; narration: string; image_prompt: string; seed: number;
+  id: string; reel_id: string; position: number; beat: string;
+  /** The script's plain picture idea (the review page edits it; image_prompt is built from it). */
+  idea: string;
+  narration: string; image_prompt: string; seed: number;
   status: ReelSceneStatus; photo_path: string | null; attempts: number; error: string | null;
   start_s: number | null; end_s: number | null; version: number; claimed_at: string | null;
   created_at: string; updated_at: string;

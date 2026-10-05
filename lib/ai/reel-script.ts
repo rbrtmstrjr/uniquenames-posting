@@ -85,7 +85,7 @@ export function reelScriptPrompt({ topic, maxScenes, alreadyMade }: ReelScriptIn
     "THE IMAGE IDEA for each scene (the knitted style and the cast details are added later by the image system, so keep the idea plain):",
     "- One or two sentences of plain visual description: who is in frame (by their short names, e.g. 'the mom doll', 'the toddler doll'), what they are doing, where, and the emotion. It must visually MATCH that scene's line and advance the story.",
     "- Vary the scenes by ACTION and SETTING: different rooms and places (bedroom, kitchen, sala, garden, a jeepney ride, a market, a church, lola's house, a bath, a park) and different activities. Use mostly medium and wide views of the dolls in their setting; never rely on extreme close-ups or tiny details filling the frame.",
-    "- Describe only what IS in the picture (never mention what is absent). Leave out style words (knitted, crochet, yarn, wool, felt, amigurumi, doll materials), lighting, colours of the art style, lenses and framing jargon.",
+    "- Describe only what IS in the picture (never mention what is absent). Leave out style words (knitted, crochet, yarn, wool, felt, amigurumi, doll materials), lighting, colours of the art style, lenses, picture-taking gear and framing jargon.",
     "- Pictures carry no writing: never ask for signs, labels, books with words, screens with text, letters or numbers.",
     "",
     "Return ONLY JSON in EXACTLY this shape:",
@@ -129,7 +129,7 @@ const SCHEMA: GeminiSchema = {
 const str = (v: unknown) => (typeof v === "string" ? oneLine(v) : "");
 const words = (s: string) => s.split(" ").filter(Boolean).length;
 // "camera" in an image prompt summons one: the usual "looks at the camera" becomes "toward the viewer".
-const lightClean = (s: string) => s.replace(/\b(?:at|into|towards?) (?:the |a )?camera\b/gi, "toward the viewer");
+export const lightClean = (s: string) => s.replace(/\b(?:at|into|towards?) (?:the |a )?camera\b/gi, "toward the viewer");
 
 /** Check and normalise Gemini's JSON into a script, or say what is wrong. */
 export function validateReelScript(raw: unknown, maxScenes: number): ReelScriptResult {

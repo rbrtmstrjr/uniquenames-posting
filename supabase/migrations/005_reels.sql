@@ -15,6 +15,7 @@ create table if not exists public.reels (
   id uuid primary key default gen_random_uuid(),
   title text not null,
   topic text,
+  stage text,
   doll_cast jsonb not null default '{}'::jsonb,
   status text not null default 'script' check (status in (
     'script', 'queued', 'voicing', 'imaging', 'rendering', 'ready', 'needs_attention', 'failed')),
@@ -36,6 +37,7 @@ create table if not exists public.reel_scenes (
   reel_id uuid not null references public.reels (id) on delete cascade,
   position int not null check (position >= 1),
   beat text not null default '',
+  idea text not null default '',
   narration text not null,
   image_prompt text not null,
   seed bigint not null,
@@ -50,6 +52,9 @@ create table if not exists public.reel_scenes (
   updated_at timestamptz not null default now(),
   unique (reel_id, position)
 );
+-- columns added after the first draft of this file (no-ops when the tables were just created)
+alter table public.reels add column if not exists stage text;
+alter table public.reel_scenes add column if not exists idea text not null default '';
 
 do $$ declare t text; begin
   foreach t in array array['reels', 'reel_scenes'] loop
