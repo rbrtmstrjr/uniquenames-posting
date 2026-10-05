@@ -2,8 +2,8 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { planExtraCard, planPost, subjectKey } from "@/lib/planner";
-import type { Gender, NameRow, NameStyle, PostRow, SettingsRow, ThemeRow } from "@/lib/db/types";
-import { UUID_RE, validateCreatePost } from "./helpers";
+import type { CardRow, Gender, NameRow, NameStyle, PostRow, SettingsRow, ThemeRow } from "@/lib/db/types";
+import { restampSelection, UUID_RE, validateCreatePost } from "./helpers";
 import { generateLockReason } from "./generate-guard";
 import { aiCaptionLine, CAPTION_TIMEOUT_MS, captionAiOn, composeCaption, REWRITE_TIMEOUT_MS, withHashtags } from "@/lib/ai/caption";
 import { fail, requireOwner, type ActionResult } from "./result";
@@ -125,6 +125,30 @@ export async function deletePostAction(postId: string): Promise<ActionResult> {
   }
   revalidatePath("/", "layout");
   return { ok: true };
+}
+
+/**
+ * Re-stamp every finished card of a post with the current text settings, keeping each
+ * photo. Only Pillow is needed, so this is not locked by the PC / ComfyUI state (the cards
+ * wait in line while the PC is off). Each card update is version-guarded and only takes a
+ * card that is still done/failed, so a card that changed meanwhile is simply skipped.
+ */
+export async function restampPostAction(postId: string): Promise<ActionResult<{ restamped: number; noPhoto: number; skipped: number }>> {
+  await requireOwner();
+  if (!UUID_RE.test(postId ?? "")) return fail("Post not found.");
+  const sb = await createClient();
+  const { data, error } = await sb.from("cards").select("id, status, photo_path, version").eq("post_id", postId);
+  if (error) return fail(error.message);
+  const { restamp, noPhoto } = restampSelection((data ?? []) as Pick<CardRow, "id" | "status" | "photo_path" | "version">[]);
+  if (!restamp.length) return fail(noPhoto ? "These cards have no clean photo to re-stamp. Use New picture on a card instead." : "No finished cards to re-stamp yet.");
+  const now = new Date().toISOString();
+  const results = await Promise.all(restamp.map((c) =>
+    sb.from("cards").update({ status: "restamp", claimed_at: null, error: null, version: c.version + 1, queued_at: now })
+      .eq("id", c.id).eq("version", c.version).in("status", ["done", "failed"]).select("id")));
+  const failed = results.find((r) => r.error)?.error;
+  const restamped = results.filter((r) => !r.error && r.data?.length).length;
+  if (failed && !restamped) return fail(failed.message);
+  return { ok: true, restamped, noPhoto, skipped: restamp.length - restamped };
 }
 
 export async function addCardAction(postId: string): Promise<ActionResult<{ cardId: string }>> {

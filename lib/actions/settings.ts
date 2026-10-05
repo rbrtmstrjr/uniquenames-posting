@@ -1,11 +1,14 @@
 "use server";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
-import { validateSettings, type SettingsInput } from "./validate";
+import { TEXT_SETTINGS_DEFAULTS } from "@/lib/db/types";
+import { TEXT_SETTING_KEYS, validateSettings, type SettingsInput } from "./validate";
 import { fail, requireOwner, type ActionResult } from "./result";
 
-const CAPTION_AI_NEEDS_MIGRATION =
-  "Saved, except \"Write captions with AI\": the database needs the v2 update first (run supabase/migrations/002_v2.sql). AI captions stay on until then.";
+/** The settings columns added by migration 002; a database without them refuses an update naming them. */
+const V2_COLUMNS = ["caption_ai", ...TEXT_SETTING_KEYS] as const;
+const NEEDS_MIGRATION = (what: string) =>
+  `Saved, except ${what}: the database needs the v2 update first (run supabase/migrations/002_v2.sql). The defaults stay in use until then.`;
 
 export async function saveSettingsAction(s: SettingsInput): Promise<ActionResult> {
   await requireOwner();
@@ -16,16 +19,22 @@ export async function saveSettingsAction(s: SettingsInput): Promise<ActionResult
     caption_template: s.caption_template.trim(), hashtags: s.hashtags.trim(), handle: s.handle.trim(),
     min_images: s.min_images, max_images: s.max_images, sound_on: s.sound_on,
   };
-  const { error } = await sb.from("settings").update({ ...base, caption_ai: s.caption_ai !== false }).eq("id", 1);
+  const text = Object.fromEntries(TEXT_SETTING_KEYS.map((k) => [k, s[k]]));
+  const { error } = await sb.from("settings").update({ ...base, ...text, caption_ai: s.caption_ai !== false }).eq("id", 1);
   if (error) {
-    // Before migration 002 the caption_ai column does not exist: save everything else so the
-    // owner's other changes are not lost, and say what is missing (AI stays on, the default).
-    const missingColumn = /caption_ai/.test(error.message) && (error.code === "PGRST204" || /schema cache/i.test(error.message));
+    // Before migration 002 these columns do not exist: save everything else so the owner's
+    // other changes are not lost, and say what did not stick (the defaults stay in use).
+    const named = V2_COLUMNS.some((c) => error.message.includes(c));
+    const missingColumn = named && (error.code === "PGRST204" || /schema cache/i.test(error.message));
     if (!missingColumn) return fail(error.message);
     const { error: again } = await sb.from("settings").update(base).eq("id", 1);
     if (again) return fail(again.message);
     revalidatePath("/", "layout");
-    return s.caption_ai === false ? fail(CAPTION_AI_NEEDS_MIGRATION) : { ok: true };
+    const lost = [
+      s.caption_ai === false && "\"Write captions with AI\"",
+      TEXT_SETTING_KEYS.some((k) => s[k] !== TEXT_SETTINGS_DEFAULTS[k]) && "the card text settings",
+    ].filter(Boolean);
+    return lost.length ? fail(NEEDS_MIGRATION(lost.join(" and "))) : { ok: true };
   }
   revalidatePath("/", "layout");
   return { ok: true };

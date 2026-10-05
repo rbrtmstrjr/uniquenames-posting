@@ -16,17 +16,25 @@ import { callAction } from "@/lib/actions/call";
 import { validateSettings } from "@/lib/actions/validate";
 import { buildCaption } from "@/lib/planner";
 import { createClient } from "@/lib/supabase/client";
+import { TEXT_SETTING_KEYS, type TextSettings } from "@/lib/actions/validate";
+import { CardTextSettings, type PreviewSample } from "./card-text";
 
 // Card counts are picked on sliders, so a value is always a whole number in range;
 // validateSettings still rejects "fewest" above "most" with a clear message.
 const COUNT_MIN = 1;
 const COUNT_MAX = 30;
 
-export function SettingsForm({ initial }: { initial: SettingsRow }) {
+const DEFAULT_SAMPLE: PreviewSample = { photoUrl: null, name: "Arlo Zenith", meaning: "peak strength with calm" };
+
+/** The text settings of a row; every field is undefined until migration 002 runs, so the column defaults apply. */
+const textOf = (row: Partial<SettingsRow>): TextSettings =>
+  Object.fromEntries(TEXT_SETTING_KEYS.map((k) => [k, row[k] ?? TEXT_SETTINGS_DEFAULTS[k]])) as unknown as TextSettings;
+
+export function SettingsForm({ initial, sample = DEFAULT_SAMPLE }: { initial: SettingsRow; sample?: PreviewSample }) {
   const router = useRouter();
   const [s, setS] = useState({ caption_template: initial.caption_template, hashtags: initial.hashtags, handle: initial.handle, min_images: initial.min_images, max_images: initial.max_images, sound_on: initial.sound_on,
     // undefined until migration 002 runs: the column default (on) is what the app uses then.
-    caption_ai: initial.caption_ai ?? TEXT_SETTINGS_DEFAULTS.caption_ai });
+    caption_ai: initial.caption_ai ?? TEXT_SETTINGS_DEFAULTS.caption_ai, ...textOf(initial) });
   const [busy, setBusy] = useState(false);
   const problem = validateSettings(s);
 
@@ -76,6 +84,10 @@ export function SettingsForm({ initial }: { initial: SettingsRow }) {
           <CountSlider label="Most cards (Auto)" value={s.max_images} onChange={(v) => setS({ ...s, max_images: v })} />
         </div>
         <p className="mt-2 text-xs text-muted">The handle change applies to cards made from now on.</p>
+      </Panel>
+      <Panel title="Card text">
+        <CardTextSettings value={textOf(s)} onChange={(t) => setS({ ...s, ...t })} sample={sample}
+          aspect={initial.height / initial.width || 1} handle={s.handle.trim() || "@unique_names"} />
       </Panel>
       <Panel title="App">
         <div className="flex flex-wrap items-center gap-3">

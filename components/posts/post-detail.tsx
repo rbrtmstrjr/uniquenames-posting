@@ -2,7 +2,7 @@
 import { useCallback, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, CheckCircle2, CircleDashed, GripVertical, Loader2, PlugZap, Plus, Trash2 } from "lucide-react";
+import { ArrowLeft, CheckCircle2, CircleDashed, GripVertical, Loader2, PlugZap, Plus, Trash2, Type } from "lucide-react";
 import { toast } from "sonner";
 import { DndContext, KeyboardSensor, PointerSensor, TouchSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, arrayMove, rectSortingStrategy, sortableKeyboardCoordinates, useSortable } from "@dnd-kit/sortable";
@@ -24,7 +24,8 @@ import { createClient } from "@/lib/supabase/client";
 import { queuePosition } from "@/lib/status/card-state";
 import { canGenerate } from "@/lib/status/worker-health";
 import { uploadNumbers } from "@/lib/files/save";
-import { addCardAction, deletePostAction, setPostedAction } from "@/lib/actions/posts";
+import { addCardAction, deletePostAction, restampPostAction, setPostedAction } from "@/lib/actions/posts";
+import { restampSelection } from "@/lib/actions/helpers";
 import { regenerateCardAction, reorderCardsAction, selectAllAction, setSelectedAction } from "@/lib/actions/cards";
 import { callAction, optimistic } from "@/lib/actions/call";
 import type { ActionResult } from "@/lib/actions/result";
@@ -67,6 +68,7 @@ export function PostDetail({ post: initialPost, theme, initialCards }: { post: P
   const { hidden, remove: deleteCard } = useUndoableDelete();
   const [openId, setOpenId] = useState<string | null>(params.get("card"));
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [confirmRestamp, setConfirmRestamp] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
 
   const visible = useMemo(() => [...cards].sort(byOrder).filter((c) => !hidden.has(c.id)), [cards, hidden]);
@@ -137,6 +139,25 @@ export function PostDetail({ post: initialPost, theme, initialCards }: { post: P
     return r.ok;
   };
 
+  // Re-stamp the whole post with the current text settings: finished cards flip to
+  // "updating text" at once; a failed request puts them back.
+  const restampAll = async () => {
+    const ids = new Set(restampSelection(visible).restamp.map((c) => c.id));
+    const before = new Map(cards.filter((c) => ids.has(c.id)).map((c) => [c.id, c.status]));
+    setBusy("restamp");
+    const r = await optimistic(
+      () => setCards((prev) => prev.map((c) => (ids.has(c.id) ? { ...c, status: "restamp" } : c))),
+      () => setCards((prev) => prev.map((c) => (before.has(c.id) && c.status === "restamp" ? { ...c, status: before.get(c.id)! } : c))),
+      () => restampPostAction(post.id));
+    setBusy(null);
+    setConfirmRestamp(false);
+    if (!r.ok) { toast.error(r.error); return; }
+    const extra = [r.noPhoto && `${r.noPhoto} older card${r.noPhoto === 1 ? " has" : "s have"} no clean photo and stay${r.noPhoto === 1 ? "s" : ""} as ${r.noPhoto === 1 ? "it is" : "they are"}.`,
+      r.skipped && `${r.skipped} changed meanwhile and ${r.skipped === 1 ? "was" : "were"} skipped.`].filter(Boolean).join(" ");
+    toast.success(`Re-stamping ${r.restamped} card${r.restamped === 1 ? "" : "s"} with your text settings…`, extra ? { description: extra } : undefined);
+  };
+  const restampable = restampSelection(visible);
+
   const label = post.gender === "girl" ? "Girl" : "Boy";
   const failed = visible.filter((c) => c.status === "failed");
 
@@ -202,13 +223,29 @@ export function PostDetail({ post: initialPost, theme, initialCards }: { post: P
               <CaptionBox postId={post.id} initial={post.caption} />
             </div>
           </Panel>
-          <Button variant="danger" size="sm" onClick={() => setConfirmDelete(true)}><Trash2 className="size-4" /> Delete post</Button>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="subtle" size="sm" disabled={!restampable.restamp.length} onClick={() => setConfirmRestamp(true)}><Type className="size-4" /> Re-stamp with current text settings</Button>
+            <Button variant="danger" size="sm" onClick={() => setConfirmDelete(true)}><Trash2 className="size-4" /> Delete post</Button>
+          </div>
         </div>
       </div>
 
       <CardDialog card={open} url={open ? urlFor(open.card_path) : undefined} health={health} queuePos={open ? queuePosition(open, visible) : 0}
         onClose={() => setOpenId(null)} onDelete={deleteCard}
         onPatch={(id, p) => setCards((prev) => prev.map((x) => (x.id === id ? { ...x, ...p } : x)))} />
+
+      <Dialog open={confirmRestamp} onOpenChange={setConfirmRestamp} title="Re-stamp this post?"
+        description="The name, meaning and watermark are stamped again with your current text settings (fonts, sizes, position). The photos stay the same.">
+        <ul className="mb-4 space-y-1 text-sm text-muted">
+          <li>{restampable.restamp.length} card{restampable.restamp.length === 1 ? "" : "s"} will be re-stamped, about a second each once your PC picks {restampable.restamp.length === 1 ? "it" : "them"} up.</li>
+          {restampable.noPhoto > 0 && <li>{restampable.noPhoto} older card{restampable.noPhoto === 1 ? " has" : "s have"} no clean photo and will stay as {restampable.noPhoto === 1 ? "it is" : "they are"}.</li>}
+          {health === "offline" && <li className="font-semibold text-ink">Your PC is offline: the cards wait until it is on.</li>}
+        </ul>
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" onClick={() => setConfirmRestamp(false)}>Keep as is</Button>
+          <Button loading={busy === "restamp"} onClick={() => void restampAll()}>Re-stamp</Button>
+        </div>
+      </Dialog>
 
       <Dialog open={confirmDelete} onOpenChange={setConfirmDelete} title="Delete this post?"
         description="Its cards are deleted from the website and its names and theme go back on the list. The copies on your PC stay.">

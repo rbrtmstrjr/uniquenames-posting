@@ -11,7 +11,7 @@ import traceback
 
 from PIL import Image
 
-from render import JobError, slugify
+from render import JobError, slugify, text_style
 from supa import SupaError
 
 VERSION = "2.0.0"
@@ -138,10 +138,14 @@ class Runner:
         return True
 
     def _settings(self):
-        rows = self._net(lambda: self.supa.select("settings", "id=eq.1&select=handle,width,height"), NO_NET_SETTINGS)
+        # select=* (not a column list): the text columns arrive with migration 002, and naming
+        # a missing column would make PostgREST refuse the read and stop every card.
+        rows = self._net(lambda: self.supa.select("settings", "id=eq.1&select=*"), NO_NET_SETTINGS)
         if not rows:
             raise JobError("The settings row is missing. Run supabase/schema.sql again.")
-        return rows[0]
+        s = dict(rows[0])
+        s["style"] = text_style(s)  # missing or bad text settings get the defaults
+        return s
 
     def _to_generate(self, job, s):
         card = job["card"]
@@ -158,7 +162,7 @@ class Runner:
             raise JobError(COMFY_CLOSED)
         photo = self.renderer.generate_photo(card["prompt"], int(card["seed"]), int(s["width"]), int(s["height"]))
         photo_bytes = to_jpeg(photo, 92)
-        card_bytes = to_jpeg(self.renderer.compose(photo, card["name"], card["meaning"], s["handle"]), 93)
+        card_bytes = to_jpeg(self.renderer.compose(photo, card["name"], card["meaning"], s["handle"], s["style"]), 93)
         v = int(card["version"])
         photo_path = "photos/%s/v%d.jpg" % (card["id"], v)
         card_path = "cards/%s/v%d.jpg" % (card["id"], v)
@@ -174,7 +178,7 @@ class Runner:
     def _restamp(self, job, s):
         card = job["card"]
         photo = Image.open(io.BytesIO(self._load_photo(card["photo_path"]))).convert("RGB")
-        card_bytes = to_jpeg(self.renderer.compose(photo, card["name"], card["meaning"], s["handle"]), 93)
+        card_bytes = to_jpeg(self.renderer.compose(photo, card["name"], card["meaning"], s["handle"], s["style"]), 93)
         card_path = "cards/%s/v%d.jpg" % (card["id"], int(card["version"]))
         self._net(lambda: self.supa.upload(BUCKET, card_path, card_bytes), NO_NET_SAVE)
         if not self._finish(card, {"card_path": card_path}):

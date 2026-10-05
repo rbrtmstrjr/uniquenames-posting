@@ -157,7 +157,7 @@ describe("rewriteCaptionAction", () => {
 });
 
 describe("saveSettingsAction caption_ai", () => {
-  const input = { caption_template: "Hi {gender}", hashtags: "#a", handle: "@unique_names", min_images: 9, max_images: 13, sound_on: true, caption_ai: false };
+  const input = { caption_template: "Hi {gender}", hashtags: "#a", handle: "@unique_names", min_images: 9, max_images: 13, sound_on: true, ...TEXT_SETTINGS_DEFAULTS, caption_ai: false };
   const settingsUpdates = () => fake.queries.filter((q) => q.table === "settings" && isUpdate(q)).map((q) => op(q, "update")![1] as Record<string, unknown>);
 
   it("saves caption_ai with the rest", async () => {
@@ -189,6 +189,33 @@ describe("saveSettingsAction caption_ai", () => {
     };
     expect(await saveSettingsAction({ ...input, caption_ai: true })).toEqual({ ok: true });
     expect(settingsUpdates()).toHaveLength(2);
+  });
+
+  it("saves the card text settings with the rest", async () => {
+    const text = { title_font: "playfair", meaning_font: "lora", mark_font: "greatvibes", title_size: 120, meaning_size: 40, mark_size: 24, text_position: "bottom-right" as const };
+    expect(await saveSettingsAction({ ...input, ...text })).toEqual({ ok: true });
+    expect(settingsUpdates()[0]).toMatchObject(text);
+  });
+
+  it("rejects a bad text setting before writing", async () => {
+    expect(await saveSettingsAction({ ...input, title_font: "comic" })).toMatchObject({ ok: false, error: expect.stringMatching(/font/) });
+    expect(await saveSettingsAction({ ...input, mark_size: 99 })).toMatchObject({ ok: false, error: expect.stringMatching(/Watermark size/) });
+    expect(settingsUpdates()).toHaveLength(0);
+  });
+
+  it("before migration 002: changed text settings are saved without, with a clear message; defaults are fine", async () => {
+    const inner = respond;
+    let first = true;
+    respond = (q) => {
+      if (q.table === "settings" && isUpdate(q) && first) { first = false; return { error: { message: "Could not find the 'title_font' column of 'settings' in the schema cache", code: "PGRST204" } }; }
+      return inner(q);
+    };
+    const r = await saveSettingsAction({ ...input, caption_ai: true, text_position: "top-left" });
+    expect(r).toMatchObject({ ok: false, error: expect.stringMatching(/card text settings.*002_v2\.sql/) });
+    expect(settingsUpdates()[1]).not.toHaveProperty("title_font");
+    expect(settingsUpdates()[1]).toMatchObject({ caption_template: "Hi {gender}" });
+    first = true;
+    expect(await saveSettingsAction({ ...input, caption_ai: true })).toEqual({ ok: true });
   });
 
   it("any other error that mentions caption_ai is returned as is, with no second write", async () => {

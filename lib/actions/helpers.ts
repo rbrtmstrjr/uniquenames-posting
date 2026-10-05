@@ -40,6 +40,17 @@ export function restampMode(card: { status: CardStatus; photo_path: string | nul
   return "regenerate";
 }
 
+/**
+ * "Re-stamp with current text settings" on a post: finished cards (done or failed) that
+ * still have their clean photo get re-stamped. Cards without a clean photo are left as they
+ * are and counted; cards in line or being made read the current settings when the PC makes
+ * them, so they need nothing.
+ */
+export function restampSelection<T extends { id: string; status: CardStatus; photo_path: string | null }>(cards: T[]): { restamp: T[]; noPhoto: number } {
+  const finished = cards.filter((c) => c.status === "done" || c.status === "failed");
+  return { restamp: finished.filter((c) => !!c.photo_path), noPhoto: finished.filter((c) => !c.photo_path).length };
+}
+
 export function validateCreatePost(i: { gender: string; style: string; count: number | null; requestId: string; themeId?: string }): string | null {
   if (!UUID_RE.test(i.requestId ?? "")) return "Bad request id. Reload the page and try again.";
   if (i.themeId !== undefined && !UUID_RE.test(i.themeId)) return "Pick a valid theme.";

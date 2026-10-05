@@ -1,0 +1,28 @@
+{
+  "_about": "Card text layout rules, read by BOTH the PC worker (worker/render.py stamps the card with Pillow) and the website (lib/text/layout.ts: Settings live preview + slider ranges). Fractions are of the card width W or height H; sizes are px on a 1080 px wide card and scale with W/1080. The name never wraps: it shrinks to fit maxWidthCenter (centred) or maxWidthSide (left/right). The meaning first shrinks to meaningShrinkFirst of its size on one line, then wraps onto up to meaningMaxLines balanced lines, then shrinks further. Change a number here and both sides follow.",
+  "baseWidth": 1080,
+  "padX": 0.06,
+  "padTop": 0.06,
+  "padBottom": 0.10,
+  "maxWidthCenter": 0.88,
+  "maxWidthSide": 0.70,
+  "gap": 0.024,
+  "lineGap": 0.25,
+  "meaningMaxLines": 3,
+  "meaningShrinkFirst": 0.8,
+  "minPx": 8,
+  "markInsetX": 0.035,
+  "markInsetBottom": 0.045,
+  "lightBackdrop": 175,
+  "darkInk": [59, 42, 32],
+  "titleWeight": 600,
+  "bodyWeight": 400,
+  "autoBands": { "top": [0.07, 0.33], "middle": [0.37, 0.63], "bottom": [0.64, 0.88] },
+  "autoBandBias": { "top": 0.80, "middle": 1.0, "bottom": 0.95 },
+  "sizes": {
+    "title": { "min": 40, "max": 180, "default": 95 },
+    "meaning": { "min": 16, "max": 90, "default": 37 },
+    "mark": { "min": 12, "max": 48, "default": 21 }
+  },
+  "positions": ["auto", "top-left", "top-center", "top-right", "middle-left", "middle-center", "middle-right", "bottom-left", "bottom-center", "bottom-right"]
+}
