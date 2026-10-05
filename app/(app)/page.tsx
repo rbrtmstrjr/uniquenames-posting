@@ -18,10 +18,10 @@ export default async function TodayPage() {
       <PageHeader title="Today" subtitle="Make today's post. Cards appear here as your PC finishes them." />
       {/* The Stock card highlights the gender + style picked in New post (shared selection). */}
       <TodaySelectionProvider>
-        {/* Desktop: New post on the left; the post being made / just finished, then the compact Stock strip, on the right. */}
-        <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_380px] xl:grid-cols-[minmax(0,1fr)_440px] 2xl:grid-cols-2">
-          <NewPostPanel settings={d.settings} themes={d.themes} stock={d.stock} busy={d.activePost?.status === "generating"} />
-          <div className="min-w-0 space-y-4">
+        {/* Phones: New post first. Desktop: the post being made + Stock on the wide left (70%), New post on the right (30%). */}
+        <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_380px] xl:grid-cols-[minmax(0,1fr)_440px] 2xl:grid-cols-[minmax(0,7fr)_minmax(0,3fr)]">
+          <div className="min-w-0 lg:order-2"><NewPostPanel settings={d.settings} themes={d.themes} stock={d.stock} busy={d.activePost?.status === "generating"} /></div>
+          <div className="min-w-0 space-y-4 lg:order-1">
             {d.activePost
               ? <ActivePost key={d.activePost.id} post={d.activePost} initialCards={d.activeCards} />
               : <Empty icon={<ImageIcon className="size-6" />} title="No post in progress" text="Pick Boy or Girl and press Generate post." />}
