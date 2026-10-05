@@ -31,6 +31,14 @@ describe("generateJson", () => {
     expect(body.generationConfig).toMatchObject({ responseMimeType: "application/json", responseSchema: base.schema, thinkingConfig: { thinkingBudget: 0 } });
   });
 
+  it("can call another model and send a thinking level instead of a budget", async () => {
+    fetchMock.mockResolvedValueOnce(ok({ caption: "Hi" }));
+    await generateJson({ ...base, model: "gemini-3.1-pro-preview", thinkingLevel: "low" });
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-pro-preview:generateContent");
+    expect(JSON.parse(init.body).generationConfig.thinkingConfig).toEqual({ thinkingLevel: "low" });
+  });
+
   it("works for arrays of objects (name/theme suggestions) and skips thought parts", async () => {
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: "thinking…", thought: true }, { text: '[{"name":"Arlo"},{"name":"Juno"}]' }] } }] })));
     const r = await generateJson<{ name: string }[]>({ ...base, schema: { type: "ARRAY", items: { type: "OBJECT", properties: { name: { type: "STRING" } } } } });

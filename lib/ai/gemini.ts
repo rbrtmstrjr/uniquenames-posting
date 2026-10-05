@@ -1,8 +1,8 @@
 import "server-only";
 
-/** The one Gemini model the app uses (captions now, name/theme suggestions next). */
+/** The default Gemini model (captions, name/theme suggestions); reel scripts pass their own. */
 export const GEMINI_MODEL = "gemini-2.5-flash";
-const ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
+const endpoint = (model: string) => `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
 
 /** Gemini's OpenAPI-subset schema (types are upper-case: OBJECT, ARRAY, STRING, INTEGER, BOOLEAN). */
 export interface GeminiSchema {
@@ -27,6 +27,10 @@ export interface GenerateJsonInput<T> {
   parse?: (raw: unknown) => T | null;
   /** Gemini 2.5 "thinking" tokens; 0 turns thinking off (fast, cheap). Default 0. */
   thinkingBudget?: number;
+  /** Model id; default GEMINI_MODEL. */
+  model?: string;
+  /** Gemini 3 thinking level (those models cannot turn thinking off); replaces thinkingBudget when set. */
+  thinkingLevel?: "low" | "medium" | "high";
 }
 
 export type GenerateJsonResult<T> = { ok: true; data: T } | { ok: false; error: string };
@@ -58,7 +62,7 @@ export async function generateJson<T>(input: GenerateJsonInput<T>): Promise<Gene
       responseMimeType: "application/json",
       responseSchema: input.schema,
       temperature: input.temperature ?? 0.9,
-      thinkingConfig: { thinkingBudget: input.thinkingBudget ?? 0 },
+      thinkingConfig: input.thinkingLevel ? { thinkingLevel: input.thinkingLevel } : { thinkingBudget: input.thinkingBudget ?? 0 },
     },
   });
 
@@ -70,7 +74,7 @@ export async function generateJson<T>(input: GenerateJsonInput<T>): Promise<Gene
     const timer = setTimeout(() => ctrl.abort(), left);
     let res: Response;
     try {
-      res = await fetch(ENDPOINT, {
+      res = await fetch(endpoint(input.model ?? GEMINI_MODEL), {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-goog-api-key": key },
         body,
