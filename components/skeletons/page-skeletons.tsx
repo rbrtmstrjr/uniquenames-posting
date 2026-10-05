@@ -41,18 +41,39 @@ export function TodaySkeleton() {
   return (
     <Frame label="Today">
       <HeaderSkeleton />
-      <div className="grid gap-4 lg:grid-cols-[1fr_280px]">
-        <PanelSkeleton>
-          <div className="space-y-4">
-            <div className="flex flex-wrap gap-2"><Skeleton className="h-[52px] w-36" /><Skeleton className="h-[52px] w-48" /></div>
-            <div className="space-y-1.5"><Skeleton className="h-3 w-12 rounded-md" /><Skeleton className="h-[52px] w-full max-w-lg" /></div>
-            <div className="grid gap-3 sm:grid-cols-[1fr_auto]"><Skeleton className="h-11" /><Skeleton className="h-11 sm:w-40" /></div>
-            <Skeleton className="h-3 w-3/4 rounded-md" />
-            <Skeleton className="h-12 w-full sm:w-48" />
+      <div className="grid items-start gap-4 lg:grid-cols-[1fr_300px]">
+        {/* New post: title + date, Who (3 fields), Look (theme, details tile, fonts row), Cards, footer. */}
+        <div className="space-y-6 rounded-2xl border border-line bg-surface p-4 shadow-soft sm:p-5">
+          <div className="flex items-center justify-between gap-3"><Skeleton className="h-7 w-28 rounded-md" /><Skeleton className="h-11 w-40" /></div>
+          <div>
+            <Skeleton className="mb-3 h-3 w-10 rounded-md" />
+            <div className="grid grid-cols-[2fr_3fr] gap-4 sm:grid-cols-3">
+              {range(3).map((i) => <div key={i} className={cn("space-y-2", i === 2 && "col-span-2 sm:col-span-1")}><Skeleton className="h-4 w-20 rounded-md" /><Skeleton className="h-11" /></div>)}
+            </div>
           </div>
-        </PanelSkeleton>
+          <div className="space-y-2">
+            <Skeleton className="mb-3 h-3 w-10 rounded-md" />
+            <div className="flex justify-between"><Skeleton className="h-4 w-14 rounded-md" /><Skeleton className="h-4 w-36 rounded-md" /></div>
+            <Skeleton className="h-11" />
+            <Skeleton className="h-[5.5rem]" />
+            <Skeleton className="!mt-4 h-11" />
+          </div>
+          <div><Skeleton className="mb-3 h-3 w-12 rounded-md" /><Skeleton className="h-11" /></div>
+          <div className="flex flex-col gap-3 border-t border-line pt-5 sm:flex-row sm:items-center sm:justify-between">
+            <div className="space-y-1.5"><Skeleton className="h-4 w-72 max-w-full rounded-md" /><Skeleton className="h-3 w-24 rounded-md" /></div>
+            <Skeleton className="h-12 w-full sm:w-44" />
+          </div>
+        </div>
+        {/* Stock left: 2×2 table, themes left, two links. */}
         <PanelSkeleton>
-          <div className="space-y-3">{range(5).map((i) => <div key={i} className="flex justify-between"><Skeleton className="h-4 w-28 rounded-md" /><Skeleton className="h-4 w-8 rounded-md" /></div>)}</div>
+          <div className="grid grid-cols-[5.25rem_1fr_1fr] gap-1">
+            <span /><Skeleton className="mx-2 h-3 w-8 rounded-md" /><Skeleton className="mx-2 h-3 w-8 rounded-md" />
+            {range(2).map((r) => [<Skeleton key={`l${r}`} className="my-auto h-4 w-16 rounded-md" />, <Skeleton key={`a${r}`} className="h-16" />, <Skeleton key={`b${r}`} className="h-16" />])}
+          </div>
+          <div className="mt-4 space-y-2 border-t border-line pt-4">
+            <Skeleton className="h-3 w-20 rounded-md" />
+            <div className="grid grid-cols-2 gap-2"><Skeleton className="h-11" /><Skeleton className="h-11" /></div>
+          </div>
         </PanelSkeleton>
       </div>
       <PanelSkeleton className="mt-4">
