@@ -4,9 +4,6 @@ import { hashSeed } from "@/lib/planner/random";
 
 export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-/** Name particles that stay lowercase after the first word ("Maria de la Cruz"). */
-const PARTICLES = new Set(["de", "la", "da", "van", "von", "del", "di", "le", "du"]);
-
 /** Raise a lowercase first letter. Never lowercases anything: "AJ", "Mary-JANE", "McKenzie" stay as typed. */
 const capFirst = (p: string): string => p.charAt(0).toLocaleUpperCase() + p.slice(1);
 
@@ -14,13 +11,12 @@ const capFirst = (p: string): string => p.charAt(0).toLocaleUpperCase() + p.slic
  * The stored form of a name, used by EVERY insert/edit path (manual add, paste, card edit,
  * AI suggestions): straight apostrophes, single spaces, trimmed, and each word (and each
  * hyphenated part) starting with a capital, so "arlo   zenith" is saved as "Arlo Zenith".
- * Only a lowercase FIRST letter is ever changed. Particles (de, la, da, van, von, del, di,
- * le, du) after the first word are left as typed; the first word is always capitalised,
- * so "de la cruz" -> "De la Cruz".
+ * Only a lowercase FIRST letter is ever changed. These are first + middle names, not
+ * surnames, so short words like "Le" or "Van" are names and get a capital too.
  */
 export const normalizeName = (name: string): string =>
   normalizeQuotes(name).replace(/\s+/g, " ").trim().split(" ")
-    .map((w, i) => (i > 0 && PARTICLES.has(w) ? w : w.split("-").map(capFirst).join("-")))
+    .map((w) => w.split("-").map(capFirst).join("-"))
     .join(" ");
 /** Case- and whitespace-insensitive dedup key (names are stored normalized, matching the lower(name) unique index). */
 export const nameKey = (name: string): string => normalizeName(name).toLowerCase();

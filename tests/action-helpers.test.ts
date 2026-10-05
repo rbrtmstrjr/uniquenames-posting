@@ -34,10 +34,10 @@ describe("name helpers", () => {
     expect(normalizeName("d’angelo")).toBe("D'angelo");
     expect(normalizeName("Zoë")).toBe("Zoë");
     expect(normalizeName("élodie")).toBe("Élodie");
-    // particles stay lowercase after the first word; the first word is always capitalised
-    expect(normalizeName("de la cruz")).toBe("De la Cruz");
-    expect(normalizeName("Maria de la Cruz")).toBe("Maria de la Cruz");
-    expect(normalizeName("ava van wyk")).toBe("Ava van Wyk");
+    // first + middle names, not surnames: short words are names too
+    expect(normalizeName("ava le")).toBe("Ava Le");
+    expect(normalizeName("arlo van")).toBe("Arlo Van");
+    expect(normalizeName("Ava Le")).toBe("Ava Le");
     expect(nameKey(" arlo  ZENITH ")).toBe(nameKey("Arlo Zenith"));
   });
   it("dedupes against existing and within the batch", () => {
