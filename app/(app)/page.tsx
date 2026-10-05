@@ -19,7 +19,7 @@ export default async function TodayPage() {
       {/* The Stock card highlights the gender + style picked in New post (shared selection). */}
       <TodaySelectionProvider>
         {/* Desktop: New post on the left; Stock + the post being made / just finished on the right. */}
-        <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_380px] xl:grid-cols-[minmax(0,1fr)_440px]">
+        <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_380px] xl:grid-cols-[minmax(0,1fr)_440px] 2xl:grid-cols-2">
           <NewPostPanel settings={d.settings} themes={d.themes} stock={d.stock} busy={d.activePost?.status === "generating"} />
           <div className="min-w-0 space-y-4">
             <Stock stock={d.stock} themes={themesLeft} max={d.settings.max_images} />

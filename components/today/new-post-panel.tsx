@@ -117,7 +117,7 @@ export function NewPostPanel({ settings, themes, stock, busy }: {
 
   return (
     <Panel>
-      <div className="space-y-6">
+      <div className="@container space-y-6">
         <div className="flex items-center justify-between gap-3">
           <h2 className="font-display text-xl text-ink sm:text-2xl">New post</h2>
           <DatePicker label="Post date" value={date} onChange={setDate} today={manilaToday()} className="w-auto" />
@@ -125,7 +125,7 @@ export function NewPostPanel({ settings, themes, stock, busy }: {
 
         <Section label="Who">
           {/* Phone: gender + style side by side (style gets more room for "Two-word"), age below. Wider: one row. */}
-          <div className="grid grid-cols-[2fr_3fr] gap-4 sm:grid-cols-3">
+          <div className="grid grid-cols-[2fr_3fr] gap-4 @2xl:grid-cols-3">
             <Field label="Gender">
               <Segmented fill label="Gender" value={gender} onChange={(v) => { setSel({ gender: v, style }); setThemeId(""); }}
                 options={[{ value: "boy", label: "Boy" }, { value: "girl", label: "Girl" }]} />
@@ -134,7 +134,7 @@ export function NewPostPanel({ settings, themes, stock, busy }: {
               <Segmented fill label="Name style" value={style} onChange={(v) => setSel({ gender, style: v })}
                 options={[{ value: "two-word", label: "Two-word" }, { value: "single", label: "Single" }]} />
             </Field>
-            <Field label="Child age" id="age-label" className="col-span-2 sm:col-span-1">
+            <Field label="Child age" id="age-label" className="col-span-2 @2xl:col-span-1">
               <Select value={age} onValueChange={(v) => setAge(v as AgeChoice)}>
                 <SelectTrigger aria-labelledby="age-label" className="w-full font-semibold">
                   {/* Short in the trigger; the list spells it out. */}
@@ -181,10 +181,10 @@ export function NewPostPanel({ settings, themes, stock, busy }: {
 
         <Section label="Cards">
           {/* Phone: an even 6-column grid (Auto takes two). Wider: one full-width track. */}
-          <Segmented fill label="Number of cards" value={count} onChange={setCount} className="grid h-auto grid-cols-6 sm:flex sm:h-11"
+          <Segmented fill label="Number of cards" value={count} onChange={setCount} className="grid h-auto grid-cols-6 @2xl:flex @2xl:h-11"
             options={[
-              { value: "auto", label: `Auto ${settings.min_images}–${settings.max_images}`, className: "col-span-2 h-11 sm:h-9 sm:flex-[1.8]" },
-              ...counts.map((c) => ({ value: c, label: c, className: "h-11 sm:h-9" })),
+              { value: "auto", label: `Auto ${settings.min_images}–${settings.max_images}`, className: "col-span-2 h-11 @2xl:h-9 @2xl:flex-[1.8]" },
+              ...counts.map((c) => ({ value: c, label: c, className: "h-11 @2xl:h-9" })),
             ]} />
         </Section>
 
