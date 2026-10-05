@@ -2,7 +2,7 @@
 import { useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
-import { ChevronDown, Sparkles, Palette, Type } from "lucide-react";
+import { Baby, ChevronDown, Sparkles, Palette, Type } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Segmented } from "@/components/ui/segmented";
 import { Panel } from "@/components/ui/panel";
@@ -19,6 +19,7 @@ import { fontsOf, type PostFonts } from "@/lib/fonts/post-fonts";
 import { titleText } from "@/lib/text/layout";
 import { CatalogFontsLink, FontFields, FontSummary, fontStyle } from "@/components/fonts/font-select";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/shadcn/collapsible";
+import { AGE_CHOICES, AGE_LABELS, type AgeChoice } from "@/lib/planner/age";
 
 const SAMPLE = { name: "Arlo Zenith", meaning: "peak strength with calm" };
 
@@ -65,6 +66,8 @@ export function NewPostPanel({ settings, themes, stock, busy }: {
   const [themeId, setThemeId] = useState<string>("");
   // Defaults to the fonts of the last post (saved in settings when a post is made).
   const [fonts, setFonts] = useState<PostFonts>(() => fontsOf(settings));
+  // Always starts on Random (a different child and age per card); the owner picks a fixed age per post.
+  const [age, setAge] = useState<AgeChoice>("random");
   const [pending, start] = useTransition();
 
   const genderThemes = useMemo(() => themes.filter((t) => t.gender === gender), [themes, gender]);
@@ -79,7 +82,7 @@ export function NewPostPanel({ settings, themes, stock, busy }: {
   const generate = () => {
     if (blocked || pending) return;
     start(async () => {
-      const r = await callAction(() => createPostAction({ gender, style, count: count === "auto" ? null : Number(count), postDate: date || manilaToday(), themeId: theme?.id, requestId: crypto.randomUUID(), fonts }));
+      const r = await callAction(() => createPostAction({ gender, style, count: count === "auto" ? null : Number(count), postDate: date || manilaToday(), themeId: theme?.id, requestId: crypto.randomUUID(), fonts, subjectAge: age }));
       if (!r.ok) { toast.error(r.error); return; }
       // The action's revalidatePath re-renders Today with the new post in the same response.
       toast.success("Post queued. Cards will appear as they are made.");
@@ -99,8 +102,9 @@ export function NewPostPanel({ settings, themes, stock, busy }: {
           <Segmented label="Number of cards" value={count} onChange={setCount}
             options={[{ value: "auto", label: `Auto ${settings.min_images}–${settings.max_images}` }, ...counts.map((c) => ({ value: c, label: c }))]} />
         </div>
-        <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
-          <div>
+        {/* Phone: theme on its own row, then date + age side by side. Desktop: one row. */}
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-[1fr_auto_auto]">
+          <div className="col-span-2 sm:col-span-1">
             <div className="mb-1.5 flex items-center justify-between gap-1.5 text-xs font-semibold text-muted">
               <span id="theme-label" className="flex items-center gap-1.5"><Palette className="size-3.5" aria-hidden /> Theme</span>
               <Link href="/themes" className="text-accent hover:underline">Preview / change order</Link>
@@ -118,6 +122,18 @@ export function NewPostPanel({ settings, themes, stock, busy }: {
           <div>
             <div className="mb-1.5 text-xs font-semibold text-muted">Post date</div>
             <DatePicker label="Post date" value={date} onChange={setDate} today={manilaToday()} />
+          </div>
+          <div className="min-w-0">
+            <div id="age-label" className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold text-muted"><Baby className="size-3.5" aria-hidden /> Child age</div>
+            <Select value={age} onValueChange={(v) => setAge(v as AgeChoice)}>
+              <SelectTrigger aria-labelledby="age-label" className="w-full font-semibold sm:w-44">
+                {/* Short in the trigger so it fits half a phone row; the list spells it out. */}
+                <SelectValue>{age === "random" ? "Random · 0–7" : AGE_LABELS[age]}</SelectValue>
+              </SelectTrigger>
+              <SelectContent position="popper" collisionPadding={{ top: 8, bottom: 80 }} className="max-h-[min(20rem,var(--radix-select-content-available-height))]">
+                {AGE_CHOICES.map((a) => <SelectItem key={a} value={a}>{AGE_LABELS[a]}</SelectItem>)}
+              </SelectContent>
+            </Select>
           </div>
         </div>
         {theme && <p className="text-xs text-muted">{theme.backdrop} · {theme.outfit} · {theme.props}</p>}

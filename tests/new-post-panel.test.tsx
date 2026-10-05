@@ -127,4 +127,35 @@ describe("NewPostPanel (shadcn controls)", () => {
     fireEvent.keyDown(window, { key: "g" });
     expect(vi.mocked(callAction)).not.toHaveBeenCalled();
   });
+
+  it("Child age: defaults to Random, lists newborn to 7 years, and Generate sends the choice", async () => {
+    const { callAction } = await import("@/lib/actions/call");
+    const { createPostAction } = await import("@/lib/actions/posts");
+    vi.mocked(callAction).mockImplementation(async (fn) => { await fn(); return { ok: true }; });
+    render(<NewPostPanel settings={settings} themes={[theme("a", "Autumn Harvest")]} stock={stock(50)} busy={false} />);
+    const trigger = screen.getByRole("combobox", { name: "Child age" });
+    expect(trigger.textContent).toBe("Random · 0–7");
+    fireEvent.keyDown(trigger, { key: "ArrowDown" });
+    const options = within(screen.getByRole("listbox")).getAllByRole("option").map((o) => o.textContent);
+    expect(options).toEqual(["Random (newborn–7)", "Newborn", "1 year", "2 years", "3 years", "4 years", "5 years", "6 years", "7 years"]);
+    fireEvent.keyDown(within(screen.getByRole("listbox")).getByRole("option", { name: "5 years" }), { key: "Enter" });
+    expect(screen.getByRole("combobox", { name: "Child age" }).textContent).toContain("5 years");
+    vi.mocked(createPostAction).mockClear();
+    fireEvent.click(generateButton());
+    await vi.waitFor(() => expect(vi.mocked(createPostAction)).toHaveBeenCalled());
+    expect(vi.mocked(createPostAction).mock.calls.at(-1)![0]).toMatchObject({ subjectAge: "5" });
+    vi.mocked(callAction).mockReset();
+    vi.mocked(callAction).mockImplementation(async () => ({ ok: true }));
+  });
+
+  it("Child age: Generate without touching it sends Random", async () => {
+    const { callAction } = await import("@/lib/actions/call");
+    const { createPostAction } = await import("@/lib/actions/posts");
+    vi.mocked(createPostAction).mockClear();
+    vi.mocked(callAction).mockImplementationOnce(async (fn) => { await fn(); return { ok: true }; });
+    render(<NewPostPanel settings={settings} themes={[theme("a", "Autumn Harvest")]} stock={stock(50)} busy={false} />);
+    fireEvent.click(generateButton());
+    await vi.waitFor(() => expect(vi.mocked(createPostAction)).toHaveBeenCalled());
+    expect(vi.mocked(createPostAction).mock.calls.at(-1)![0]).toMatchObject({ subjectAge: "random" });
+  });
 });

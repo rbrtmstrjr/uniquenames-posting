@@ -1,13 +1,18 @@
 import type { Gender, ThemeRow } from "@/lib/db/types";
 import { hashSeed, seededRandom } from "./random";
-import { isPropsOnly, shotSpec, type Session, type TextSpace } from "./shots";
+import { isPropsOnly, sessionFor, shotSpec, type Session, type TextSpace } from "./shots";
+import type { SubjectAge } from "./age";
 
 export type ThemePromptFields = Pick<ThemeRow, "backdrop" | "outfit" | "props" | "lighting" | "palette">;
 
-/** The one baby of a post: same session type and same look on every card. */
-export interface Subject { session: Session; look: string }
+/**
+ * The child on a baby card. Without `age` it is the original (pre-age) baby: newborn or
+ * 8 months, the same on every card of the post. With `age`, `varied` marks a Random-age
+ * card (each card its own child); otherwise it is the one child of a fixed-age post.
+ */
+export interface Subject { session: Session; look: string; age?: SubjectAge; varied?: boolean }
 
-// Looks written for the page's audience; one is picked per post and repeated word for word.
+// Looks written for the page's audience; one is picked per child and repeated word for word.
 export const LOOKS = [
   "soft wispy dark hair, warm light-tan skin and big brown eyes",
   "short fine black hair, fair skin and round chubby cheeks",
@@ -16,14 +21,35 @@ export const LOOKS = [
   "thick soft black hair, warm tan skin and long eyelashes",
   "very fine short hair, light skin and big curious eyes",
 ];
+// The same six looks for children of 2 and up, whose hair has grown in (same index = same family look).
+// No "rosy": on older children the model paints it as round red blush spots.
+export const CHILD_LOOKS = [
+  "soft dark hair, warm light-tan skin and big brown eyes",
+  "straight black hair, fair skin and a sweet round face",
+  "dark brown hair, warm medium skin and dark eyes",
+  "light brown hair, fair skin with natural freckles and bright eyes",
+  "thick black hair, warm tan skin and long eyelashes",
+  "fine light brown hair, light skin and big curious eyes",
+];
 const NEWBORN_SHARE = 0.35;
 
-/** Deterministic per post: the same key always gives the same baby. */
-export function pickSubject(key: string): Subject {
+const looksFor = (age: SubjectAge) => (age === "newborn" || age === "1" ? LOOKS : CHILD_LOOKS);
+const lookAt = (age: SubjectAge, r: number) => { const l = looksFor(age); return l[Math.floor(r * l.length)]; };
+
+/**
+ * Deterministic per post: the same key always gives the same child. Without an age this is
+ * the original newborn-or-8-months baby (posts made before ages existed); with one, the same
+ * key keeps the same look at that age.
+ */
+export function pickSubject(key: string, age?: SubjectAge): Subject {
   const rng = seededRandom(hashSeed(key + "|subject"));
   const session: Session = rng() < NEWBORN_SHARE ? "newborn" : "sitter";
-  return { session, look: LOOKS[Math.floor(rng() * LOOKS.length)] };
+  if (!age) return { session, look: LOOKS[Math.floor(rng() * LOOKS.length)] };
+  return { session: sessionFor(age), age, look: lookAt(age, rng()) };
 }
+
+/** Random age: one card's own child at the age it was dealt. */
+export const randomSubject = (age: SubjectAge, rng: () => number): Subject => ({ session: sessionFor(age), age, look: lookAt(age, rng()), varied: true });
 
 // Z-Image runs without a negative prompt (cfg 1): naming an unwanted object (a camera, a
 // stand, a paper roll) can summon it, so prompts only describe what should be there.
@@ -48,18 +74,62 @@ export function propsSurface(backdrop: string): string {
   return `a smooth ${color || "plain"} surface`;
 }
 
-const SET = (t: ThemePromptFields, outfitLabel: string, propsShot = false) => [
+const years = (age?: SubjectAge) => (!age || age === "newborn" ? 0 : Number(age));
+
+/**
+ * Theme outfits are written baby-sized (rompers, onesies, "tiny" bow ties). From 3 years the
+ * model is asked for a toddler- or child-sized version of it, so a 6-year-old is not squeezed
+ * into a baby romper; younger children wear it as written.
+ */
+// From 4 years, baby-only garment words become their kid equivalents (ages below 4 keep them).
+export const KID_OUTFIT_WORDS: [RegExp, string][] = [
+  [/\brompers?\b/gi, "playsuit"],
+  [/\bonesies?\b/gi, "outfit"],
+  [/\bsleep ?suits?\b/gi, "pajamas"],
+  [/\bswaddle\b/gi, "drape"],
+  [/\bwrap\b/gi, "drape"],
+];
+
+export function outfitFor(outfit: string, age?: SubjectAge): string {
+  const y = years(age);
+  if (y < 3) return outfit;
+  let plain = outfit.replace(/\btiny\s+/gi, "").replace(/^\s*(a|an|the)\s+/i, "").trim();
+  if (y >= 4) for (const [from, to] of KID_OUTFIT_WORDS) plain = plain.replace(from, to);
+  return `a ${y <= 3 ? "toddler" : "child"}-sized version of the ${plain}`;
+}
+
+const SET = (t: ThemePromptFields, outfitLabel: string, propsShot = false, age?: SubjectAge) => [
   propsShot ? `Surface: ${propsSurface(t.backdrop)}.` : `Backdrop: ${t.backdrop}.`,
-  `${outfitLabel}: ${t.outfit}.`,
+  `${outfitLabel}: ${propsShot ? t.outfit : outfitFor(t.outfit, age)}.`,
   `Props: ${t.props}.`,
   `Lighting: ${t.lighting}.`,
   `Color palette: ${t.palette}.`,
 ];
 
+/** "baby" up to 1 year, then "toddler" (2–3) and "child" (4–7): the word for the one who is photographed. */
+const noun = (s: Subject) => (s.session === "toddler" ? "toddler" : s.session === "kid" ? "child" : "baby");
+
 function subjectLine(gender: Gender, s: Subject): string {
   const who = gender === "girl" ? "girl" : "boy";
-  const age = s.session === "newborn" ? `a newborn baby ${who}, about 10 days old` : `an 8-month-old baby ${who}`;
-  return `Subject (the same baby in every photo of this session): ${age}, with ${s.look}.`;
+  if (!s.age) {
+    const age = s.session === "newborn" ? `a newborn baby ${who}, about 10 days old` : `an 8-month-old baby ${who}`;
+    return `Subject (the same baby in every photo of this session): ${age}, with ${s.look}.`;
+  }
+  const y = years(s.age);
+  const desc = s.age === "newborn" ? `a newborn baby ${who}, about 10 days old`
+    : y === 1 ? `a 1-year-old baby ${who}`
+    : y === 2 ? `a 2-year-old toddler ${who}`
+    : y === 3 ? `a 3-year-old ${who} (a little preschooler)`
+    : y <= 5 ? `a ${y}-year-old ${who} (a preschool-age child)`
+    : `a ${y}-year-old ${who} (a slim school-age child, longer legs, gap-toothed smile)`;
+  return s.varied ? `Subject: ${desc}, with ${s.look}.` : `Subject (the same ${noun(s)} in every photo of this session): ${desc}, with ${s.look}.`;
+}
+
+function header(s?: Subject): string {
+  const kind = s?.session === "toddler" ? "toddler" : s?.session === "kid" ? "children's" : "baby";
+  const art = s?.session === "toddler" ? "child" : s?.session === "kid" ? "child portrait" : "baby";
+  const session = s?.varied ? "one frame from a full session" : `one frame from a full session with the same ${s ? noun(s) : "baby"}`;
+  return `Professional studio ${kind} photoshoot photograph, photorealistic, fine art ${art} photography; ${session}.`;
 }
 
 export function buildPrompt(theme: ThemePromptFields, shot: string, gender: Gender, subject?: Subject): string {
@@ -82,10 +152,10 @@ export function buildPrompt(theme: ThemePromptFields, shot: string, gender: Gend
     ].join("\n");
   }
   return [
-    "Professional studio baby photoshoot photograph, photorealistic, fine art baby photography; one frame from a full session with the same baby.",
+    header(subject),
     subject ? subjectLine(gender, subject) : `Subject: a ${babyWord}.`,
     shotLine,
-    ...SET(theme, "Outfit"),
+    ...SET(theme, "Outfit", false, subject?.age),
     `Photography: ${camera}, high detail, natural skin.`,
     `Composition: square frame, the backdrop fills the whole frame; ${space(where)}.`,
     NO_TEXT,

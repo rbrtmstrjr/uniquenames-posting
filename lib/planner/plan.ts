@@ -1,15 +1,20 @@
 import type { Gender, NameRow, NameStyle, SettingsRow, ThemeRow } from "@/lib/db/types";
 import { buildCaption } from "./caption";
-import { buildPrompt, pickSubject } from "./prompt";
+import { buildPrompt, pickSubject, randomSubject, type Subject } from "./prompt";
 import { hashSeed, seededRandom, shuffle } from "./random";
-import { buildShots, sessionShots } from "./shots";
+import { buildMixedShotSpecs, buildShots, dealAges, sessionShots } from "./shots";
+import { SUBJECT_AGES, type AgeChoice } from "./age";
 
-/** One key per post for its baby (session + look): add-a-card reuses it so extra cards match. */
+/** One key per post for its child (look, and session for older posts): add-a-card reuses it so extra cards match. */
 export const subjectKey = (postDate: string, gender: Gender, style: NameStyle) => `${postDate}|${gender}|${style}`;
 
 export interface PlannedCard { position: number; name_id: string; name: string; meaning: string; shot: string; prompt: string; seed: number }
 export interface PlanInput {
-  request: { gender: Gender; style: NameStyle; count: number | null; postDate: string };
+  request: {
+    gender: Gender; style: NameStyle; count: number | null; postDate: string;
+    /** The child's age from Today. "random" = its own child per card; undefined/null = the original one-baby plan. */
+    age?: AgeChoice | null;
+  };
   names: NameRow[]; themes: ThemeRow[];
   settings: Pick<SettingsRow, "caption_template" | "hashtags" | "min_images" | "max_images">;
   themeId?: string;
@@ -59,11 +64,22 @@ export function planPost(input: PlanInput): PlanResult {
     return { ok: false, reason: `Number of cards must be ${s.min_images} to ${s.max_images}.` };
   }
   const chosen = shuffle(pool, rng).slice(0, Math.min(want, pool.length));
-  const subject = pickSubject(subjectKey(r.postDate, r.gender, r.style));
-  const shots = buildShots(chosen.length, seededRandom(hashSeed(`${r.postDate}|${r.gender}|${r.style}|shots`)), subject.session);
+  const key = subjectKey(r.postDate, r.gender, r.style);
+  const shotRng = seededRandom(hashSeed(`${key}|shots`));
+  let frames: { shot: string; subject?: Subject }[];
+  if (r.age === "random") {
+    // Its own child per baby card, the ages dealt so the post shows a real spread.
+    const ageRng = seededRandom(hashSeed(`${key}|ages`));
+    const ages = dealAges(chosen.length, ageRng);
+    frames = buildMixedShotSpecs(chosen.length, ages, shotRng).map((f) =>
+      ({ shot: f.spec.text, subject: f.age ? randomSubject(f.age, ageRng) : undefined }));
+  } else {
+    const subject = pickSubject(key, r.age ?? undefined);
+    frames = buildShots(chosen.length, shotRng, subject.session).map((shot) => ({ shot, subject }));
+  }
   const cards = chosen.map((n, k) => ({
-    position: k + 1, name_id: n.id, name: n.name.trim(), meaning: n.meaning.trim(), shot: shots[k],
-    prompt: buildPrompt(theme!, shots[k], r.gender, subject), seed: cardSeed(r.postDate, n.name, k),
+    position: k + 1, name_id: n.id, name: n.name.trim(), meaning: n.meaning.trim(), shot: frames[k].shot,
+    prompt: buildPrompt(theme!, frames[k].shot, r.gender, frames[k].subject), seed: cardSeed(r.postDate, n.name, k),
   }));
   return { ok: true, theme_id: theme.id, caption: buildCaption(r.gender, s), cards };
 }
@@ -72,6 +88,8 @@ export interface ExtraCardInput {
   theme: ThemeRow; gender: Gender; style: NameStyle; names: NameRow[]; usedNameIds: string[]; nextPosition: number; salt: string;
   /** subjectKey(post_date, gender, style) of the post, so the extra card shows the same baby. */
   subjectKey?: string;
+  /** The post's subject_age: random = a new child of a random age; a fixed age = the post's child; null = the original baby. */
+  age?: AgeChoice | null;
 }
 export type ExtraCardResult = { ok: true; card: PlannedCard } | { ok: false; reason: string };
 
@@ -80,7 +98,9 @@ export function planExtraCard(i: ExtraCardInput): ExtraCardResult {
   if (!pool.length) return { ok: false, reason: `No unused ${i.gender} ${i.style} names left. Add names on the Names page.` };
   const rng = seededRandom(hashSeed(i.salt));
   const pick = pool[Math.floor(rng() * pool.length)];
-  const subject = pickSubject(i.subjectKey ?? i.salt);
+  const subject = i.age === "random"
+    ? randomSubject(SUBJECT_AGES[Math.floor(rng() * SUBJECT_AGES.length)], rng)
+    : pickSubject(i.subjectKey ?? i.salt, i.age ?? undefined);
   const lib = sessionShots(subject.session);
   const shot = lib[1 + Math.floor(rng() * (lib.length - 1))].text;
   return {

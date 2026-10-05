@@ -53,6 +53,7 @@ Do these in order:
 3. Push to GitHub so Vercel redeploys (or press Redeploy, so the new variable is picked up).
 4. Restart the worker: Task Scheduler, end then run **Unique Names card worker** (or reboot the PC). It loads the new text settings and downloads the fonts into `worker/fonts/` (git-ignored).
 5. Fonts per post: in the SQL Editor run `supabase/migrations/003_post_fonts.sql` (safe to run again), then restart the worker once more. Until then posts use the last-used fonts from settings, and changing a post's fonts in Re-stamp asks you to run it.
+6. Child age per post: in the SQL Editor run `supabase/migrations/004_subject_age.sql` (safe to run again; no worker restart needed). Until then Today's age choice still shapes the photos (it is baked into each card's prompt), but it is not saved on the post, so **Add a card** on such a post shows the original one-baby look instead of following the post's age.
 
 ## When something is wrong
 - Header dot red, "PC offline": turn on the PC. The worker starts at login. **Generate** is disabled (the button says why) until the PC is back.

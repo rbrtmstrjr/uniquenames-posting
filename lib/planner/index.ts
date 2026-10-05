@@ -1,4 +1,5 @@
 export * from "./random";
+export * from "./age";
 export * from "./shots";
 export * from "./prompt";
 export * from "./caption";

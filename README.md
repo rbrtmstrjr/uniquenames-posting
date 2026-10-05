@@ -19,6 +19,7 @@ ordered and saved to the phone with the caption.
 - **Suggest with AI** on Names and Themes: results arrive as `pending` and need approval (one by one or all); the planner never uses pending rows.
 - **Text settings**: sizes, position Auto (calmest band) or 9 fixed spots, live preview, and **Re-stamp** a post without new photos (its fonts can be changed there).
 - **Fonts per post**: name / meaning / watermark fonts are picked on Today before generating (defaults = the last post's fonts; migration `003_post_fonts.sql`).
+- **Child age per post**: Today's "Child age" picks Random (default: a different child on every card, ages newborn–7 dealt so a post shows a spread) or one child at a fixed age (newborn, 1–7 years), with age-fitting shots (baby, toddler, kid) and child-sized outfits from 3 years (migration `004_subject_age.sql`).
 - **Deeper lens look**: portrait 85mm f/1.8 for baby frames, macro 100mm f/2.8, shallow depth of field on wide shots.
 - New server-only secret `GEMINI_API_KEY` (see `docs/SETUP.md`). Existing install: follow "Upgrading to v2" there.
 

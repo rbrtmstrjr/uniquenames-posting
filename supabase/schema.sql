@@ -1,5 +1,5 @@
 -- Unique Names posting: database. Paste the whole file into the Supabase SQL editor and run it once.
--- A project created before v2 runs supabase/migrations/002_v2.sql then 003_post_fonts.sql instead (this file already includes both).
+-- A project created before v2 runs supabase/migrations/002_v2.sql, 003_post_fonts.sql then 004_subject_age.sql instead (this file already includes them).
 -- Status 'pending' = an AI-suggested name/theme waiting for approval; nothing here ever plans it (only 'available').
 
 -- ---------------------------------------------------------------- tables
@@ -69,7 +69,9 @@ create table if not exists public.posts (
   -- fonts chosen for this post on Today (003); null = use the fonts in settings
   title_font text,
   meaning_font text,
-  mark_font text
+  mark_font text,
+  -- the child's age chosen on Today (004): 'random' or 'newborn'/'1'..'7'; null = a post made before ages existed
+  subject_age text check (subject_age in ('random', 'newborn', '1', '2', '3', '4', '5', '6', '7'))
 );
 
 create table if not exists public.names (
@@ -189,9 +191,10 @@ begin
     return jsonb_build_object('status', 'conflict', 'reason', 'names');
   end if;
 
-  insert into public.posts (request_id, post_date, gender, style, theme_id, caption, title_font, meaning_font, mark_font)
+  insert into public.posts (request_id, post_date, gender, style, theme_id, caption, title_font, meaning_font, mark_font, subject_age)
   values ((p->>'request_id')::uuid, (p->>'post_date')::date, p->>'gender', p->>'style', v_theme_id, coalesce(p->>'caption', ''),
-          nullif(btrim(p->>'title_font'), ''), nullif(btrim(p->>'meaning_font'), ''), nullif(btrim(p->>'mark_font'), ''))
+          nullif(btrim(p->>'title_font'), ''), nullif(btrim(p->>'meaning_font'), ''), nullif(btrim(p->>'mark_font'), ''),
+          nullif(btrim(p->>'subject_age'), ''))
   returning id into v_post;
 
   insert into public.cards (post_id, theme_id, kind, position, name_id, name, meaning, shot, prompt, seed, order_index)

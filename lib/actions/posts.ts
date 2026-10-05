@@ -1,7 +1,7 @@
 "use server";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
-import { planExtraCard, planPost, subjectKey } from "@/lib/planner";
+import { planExtraCard, planPost, storedAge, subjectKey, type AgeChoice } from "@/lib/planner";
 import type { CardRow, Gender, NameRow, NameStyle, PostRow, SettingsRow, ThemeRow } from "@/lib/db/types";
 import { restampSelection, UUID_RE, validateCreatePost } from "./helpers";
 import { generateLockReason } from "./generate-guard";
@@ -16,12 +16,15 @@ export async function createPostAction(input: {
   gender: Gender; style: NameStyle; count: number | null; postDate: string; themeId?: string; requestId: string;
   /** Chosen on Today; stored on the post (migration 003; an older create_post ignores them). */
   fonts?: PostFonts;
+  /** The child's age chosen on Today (default Random). Stored on the post (migration 004; an older create_post ignores it). */
+  subjectAge?: AgeChoice;
 }): Promise<ActionResult<{ postId: string }>> {
   await requireOwner();
   const badInput = validateCreatePost(input) ?? (input.fonts !== undefined ? validateFonts(input.fonts) : null);
   if (badInput) return fail(badInput);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(input.postDate)) return fail("Pick a valid date.");
   const fonts = input.fonts ? fontsOf(input.fonts) : null;
+  const age: AgeChoice = input.subjectAge ?? "random";
   const sb = await createClient();
   // The AI caption needs the theme the planner picks, so it runs right after the (parallel)
   // reads and before create_post. It never throws, and ONE deadline (CAPTION_TIMEOUT_MS) covers
@@ -52,7 +55,7 @@ export async function createPostAction(input: {
     const s = settings as SettingsRow;
     const themeRows = (themes ?? []) as ThemeRow[];
     const plan = planPost({
-      request: { gender: input.gender, style: input.style, count: input.count, postDate: input.postDate },
+      request: { gender: input.gender, style: input.style, count: input.count, postDate: input.postDate, age },
       names: (names ?? []) as NameRow[], themes: themeRows, settings: s, themeId: input.themeId,
     });
     if (!plan.ok) return fail(plan.reason);
@@ -69,7 +72,7 @@ export async function createPostAction(input: {
     fontsSaved = true;
     const { data, error } = await sb.rpc("create_post", { p: {
       request_id: input.requestId, post_date: input.postDate, gender: input.gender, style: input.style,
-      theme_id: plan.theme_id, caption, cards: plan.cards, ...fonts,
+      theme_id: plan.theme_id, caption, cards: plan.cards, ...fonts, subject_age: age,
     } });
     if (error) return fail(`Could not create the post: ${error.message}`);
     const r = data as { status: string; post_id?: string; reason?: string };
@@ -198,7 +201,10 @@ export async function addCardAction(postId: string): Promise<ActionResult<{ card
   ]);
   const used = (cards ?? []).map((c) => c.name_id).filter(Boolean) as string[];
   const next = Math.max(0, ...(cards ?? []).map((c) => c.position as number)) + 1;
-  const plan = planExtraCard({ theme: theme as ThemeRow, gender: p.gender, style: p.style, names: (names ?? []) as NameRow[], usedNameIds: used, nextPosition: next, salt: `${postId}|${Date.now()}`, subjectKey: subjectKey(p.post_date, p.gender, p.style) });
+  // The post's child age (004): Random = a new child of a random age, a fixed age = the post's
+  // child. A post made before ages existed (or before 004 runs: no column) keeps its one baby.
+  const plan = planExtraCard({ theme: theme as ThemeRow, gender: p.gender, style: p.style, names: (names ?? []) as NameRow[], usedNameIds: used, nextPosition: next,
+    salt: `${postId}|${Date.now()}`, subjectKey: subjectKey(p.post_date, p.gender, p.style), age: storedAge(p.subject_age) });
   if (!plan.ok) return fail(plan.reason);
   const { data, error } = await sb.rpc("add_card", { p_post: postId, c: plan.card });
   if (error) return fail(error.message);
