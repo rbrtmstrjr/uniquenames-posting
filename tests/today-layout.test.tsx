@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import { postSummary, stockLevel } from "@/lib/today/summary";
+import { postSummary, postsLeft, stockLevel } from "@/lib/today/summary";
 
 vi.mock("next/link", () => ({ default: ({ href, children, ...rest }: { href: string; children: React.ReactNode }) => <a href={href} {...rest}>{children}</a> }));
 const { Stock } = await import("@/components/today/stock");
@@ -48,44 +48,57 @@ function Picker() {
   return <button onClick={() => setSel({ gender: "girl", style: "two-word" })}>pick girl two-word</button>;
 }
 
+describe("postsLeft (about how many posts a stock covers)", () => {
+  it("divides by the average Auto post size", () => {
+    expect(postsLeft(40, 6, 15)).toBe(3); // average 11 cards
+    expect(postsLeft(10, 6, 15)).toBe(0);
+    expect(postsLeft(0, 6, 15)).toBe(0);
+    expect(postsLeft(30, 10, 10)).toBe(3);
+  });
+});
+
+const tile = (label: string) => screen.getByRole("listitem", { name: new RegExp(`^${label}`) });
+
 describe("Stock card", () => {
-  it("is a Boy | Girl × Two-word | Single table with the counts", () => {
-    render(<Stock stock={stock} themes={{ boy: 27, girl: 2 }} max={13} />);
-    const table = screen.getByRole("table");
-    expect(within(table).getAllByRole("columnheader").map((c) => c.textContent)).toEqual(["", "Boy", "Girl"]);
-    expect(within(table).getAllByRole("rowheader").map((c) => c.textContent)).toEqual(["Two-word", "Single"]);
-    expect(within(table).getAllByRole("cell").map((c) => c.textContent)).toEqual(["40", "44", "9Low", "0Out"]);
+  it("shows one tile per gender + style with the count and about how many posts it covers", () => {
+    render(<Stock stock={stock} themes={{ boy: 27, girl: 2 }} min={6} max={13} />);
+    const names = within(screen.getByRole("list", { name: "Names left" })).getAllByRole("listitem");
+    expect(names.map((t) => t.getAttribute("aria-label"))).toEqual([
+      "Boy two-word: 40 names left", "Boy single: 9 names left", "Girl two-word: 44 names left", "Girl single: 0 names left"]);
+    expect(tile("Boy two-word").textContent).toContain("40");
+    expect(tile("Boy two-word").textContent).toContain("≈ 4 posts"); // average of 6–13 is 10
+    expect(tile("Girl single").textContent).toContain("None left");
   });
 
-  it("marks low cells warn and empty cells bad", () => {
-    render(<Stock stock={stock} themes={{ boy: 27, girl: 2 }} max={13} />);
-    const cells = screen.getAllByRole("cell");
-    expect(cells[0].getAttribute("data-level")).toBe("ok");
-    expect(cells[2].getAttribute("data-level")).toBe("low");
-    expect(cells[2].querySelector(".text-warn-text")).toBeTruthy();
-    expect(cells[3].getAttribute("data-level")).toBe("out");
-    expect(cells[3].querySelector(".text-bad")).toBeTruthy();
+  it("marks low tiles warn and empty tiles bad", () => {
+    render(<Stock stock={stock} themes={{ boy: 27, girl: 2 }} min={6} max={13} />);
+    expect(tile("Boy two-word").getAttribute("data-level")).toBe("ok");
+    expect(tile("Boy single").getAttribute("data-level")).toBe("low");
+    expect(tile("Boy single").textContent).toContain("Low");
+    expect(tile("Boy single").querySelector(".text-warn-text")).toBeTruthy();
+    expect(tile("Girl single").getAttribute("data-level")).toBe("out");
+    expect(tile("Girl single").querySelector(".text-bad")).toBeTruthy();
   });
 
-  it("highlights the cell for the gender + style picked in New post", () => {
+  it("highlights the tile for the gender + style picked in New post", () => {
     render(
       <TodaySelectionProvider>
         <Picker />
-        <Stock stock={stock} themes={{ boy: 27, girl: 2 }} max={13} />
+        <Stock stock={stock} themes={{ boy: 27, girl: 2 }} min={6} max={13} />
       </TodaySelectionProvider>,
     );
-    const selected = () => screen.getAllByRole("cell").filter((c) => c.getAttribute("aria-current") === "true");
-    expect(selected().map((c) => c.textContent)).toEqual(["40"]); // boy · two-word by default
+    const selected = () => screen.getAllByRole("listitem").filter((c) => c.getAttribute("aria-current") === "true").map((c) => c.getAttribute("aria-label"));
+    expect(selected()).toEqual(["Boy two-word: 40 names left"]); // boy · two-word by default
     fireEvent.click(screen.getByRole("button", { name: "pick girl two-word" }));
-    expect(selected().map((c) => c.textContent)).toEqual(["44"]);
+    expect(selected()).toEqual(["Girl two-word: 44 names left"]);
   });
 
   it("shows themes left per gender (low warns) and links to manage names and themes", () => {
-    render(<Stock stock={stock} themes={{ boy: 27, girl: 2 }} max={13} />);
-    const boy = within(screen.getByText("Themes left").parentElement!).getByText("Boy").closest("div")!;
-    expect(boy.textContent).toContain("27");
-    const girl = within(screen.getByText("Themes left").parentElement!).getByText("Girl").closest("div")!;
-    expect(girl.querySelector(".text-warn-text")?.textContent).toBe("2");
+    render(<Stock stock={stock} themes={{ boy: 27, girl: 2 }} min={6} max={13} />);
+    const themes = within(screen.getByRole("list", { name: "Themes left" })).getAllByRole("listitem");
+    expect(themes.map((t) => t.getAttribute("aria-label"))).toEqual(["Boy: 27 themes left", "Girl: 2 themes left"]);
+    expect(themes[0].textContent).toContain("27 posts");
+    expect([...themes[1].querySelectorAll(".text-warn-text")].map((e) => e.textContent)).toEqual(["Low", "2"]);
     expect(screen.getByRole("link", { name: "Manage names" }).getAttribute("href")).toBe("/names");
     expect(screen.getByRole("link", { name: "Manage themes" }).getAttribute("href")).toBe("/themes");
   });

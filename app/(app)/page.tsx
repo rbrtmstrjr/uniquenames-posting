@@ -25,7 +25,7 @@ export default async function TodayPage() {
             {d.activePost
               ? <ActivePost key={d.activePost.id} post={d.activePost} initialCards={d.activeCards} />
               : <Empty icon={<ImageIcon className="size-6" />} title="No post in progress" text="Pick Boy or Girl and press Generate post." />}
-            <Stock stock={d.stock} themes={themesLeft} max={d.settings.max_images} />
+            <Stock stock={d.stock} themes={themesLeft} min={d.settings.min_images} max={d.settings.max_images} />
           </div>
         </div>
       </TodaySelectionProvider>

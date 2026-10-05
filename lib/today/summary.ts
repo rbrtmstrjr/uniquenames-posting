@@ -19,3 +19,7 @@ export type StockLevel = "out" | "low" | "ok";
 export const LOW_STOCK = 15;
 export const stockLevel = (count: number, maxCards: number): StockLevel =>
   count <= 0 ? "out" : count < Math.max(LOW_STOCK, maxCards) ? "low" : "ok";
+
+/** About how many more posts a stock of names covers, at the average Auto post size. */
+export const postsLeft = (count: number, minCards: number, maxCards: number): number =>
+  Math.floor(Math.max(0, count) / Math.max(1, Math.round((minCards + maxCards) / 2)));
