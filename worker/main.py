@@ -36,7 +36,7 @@ def main():
     log = lambda m: print(time.strftime("%Y-%m-%d %H:%M:%S"), m, flush=True)  # noqa: E731
     runner = Runner(supa, renderer, output_root, cache_dir,
                     float(cfg.get("POLL_SECONDS", "3")), float(cfg.get("HEARTBEAT_SECONDS", "15")),
-                    log=log, reels=ReelRunner(supa, renderer, log=log))
+                    log=log, reels=ReelRunner(supa, renderer, log=log, output_root=output_root))
     print("Unique Names worker %s -> %s (ComfyUI %s)" % (VERSION, cfg["SUPABASE_URL"], renderer.comfy), flush=True)
     # Fonts download in the background: the heartbeat must start at once, or a slow GitHub on
     # the first start after an update would make the PC look offline (and lock Generate).

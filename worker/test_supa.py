@@ -94,6 +94,15 @@ class SupaTest(unittest.TestCase):
         self.assertEqual(SEEN[-1]["method"], "DELETE")
         self.assertEqual(json.loads(SEEN[-1]["body"]), {"prefixes": ["cards/abc/v1.jpg"]})
 
+    def test_video_upload_and_storage_list(self):
+        s = Supa(self.base, "k")
+        s.upload("reels", "r1/preview-v2.mp4", b"MP4", "video/mp4", timeout=600)
+        self.assertEqual(SEEN[-1]["path"], "/storage/v1/object/reels/r1/preview-v2.mp4")
+        self.assertEqual(SEEN[-1]["headers"]["content-type"], "video/mp4")
+        s.list("reels", "r1")
+        self.assertEqual((SEEN[-1]["method"], SEEN[-1]["path"]), ("POST", "/storage/v1/object/list/reels"))
+        self.assertEqual(json.loads(SEEN[-1]["body"])["prefix"], "r1")
+
     def test_update_returning_asks_for_the_matched_rows(self):
         Supa(self.base, "k").update("cards", "id=eq.1&version=eq.2", {"status": "done"}, returning=True)
         self.assertEqual(SEEN[-1]["path"], "/rest/v1/cards?id=eq.1&version=eq.2&select=id")

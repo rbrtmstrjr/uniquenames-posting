@@ -8,6 +8,7 @@ import re
 import threading
 import time
 import traceback
+import urllib.parse
 
 from PIL import Image
 
@@ -24,11 +25,24 @@ STALE = "stale result dropped (card changed while it was being made)"
 
 
 REELS_RECHECK_SECONDS = 600
+PREVIEW_DAYS = 14               # reel previews leave storage after this; the full video stays on the PC
+PREVIEW_SWEEP_SECONDS = 86400   # once a day
 
 
 def is_missing_function(e):
     """PostgREST's answer when an RPC does not exist (yet): HTTP 404 / PGRST202."""
     return "PGRST202" in str(e) or re.search(r"HTTP 404", str(e)) is not None
+
+
+def _age_days(stamp, now):
+    """Days since an ISO timestamp from Supabase Storage; 0 when it is missing or unreadable (kept)."""
+    try:
+        t = datetime.datetime.fromisoformat(str(stamp).replace("Z", "+00:00"))
+    except ValueError:
+        return 0.0
+    if t.tzinfo is None:
+        t = t.replace(tzinfo=datetime.timezone.utc)
+    return (now - t.timestamp()) / 86400.0
 
 
 class PhotoMissing(Exception):
@@ -115,6 +129,7 @@ class Runner:
         self.reels = reels             # reels.ReelRunner, or None (cards only)
         self.reels_off_until = 0.0     # the reel functions are missing (migration 005 not run): re-check later
         self.reels_missing_logged = False
+        self.next_preview_sweep = 0.0
 
     # ------------------------------------------------------------ heartbeat
     def heartbeat_once(self):
@@ -379,11 +394,45 @@ class Runner:
         except OSError as e:
             self.log("backup copy failed: %s" % e)
 
+    # ------------------------------------------------------------ reel previews
+    def sweep_old_previews(self, now=None):
+        """Once a day, best effort: delete reel previews older than PREVIEW_DAYS from the reels bucket and
+        clear preview_path on their reels (the site then says the preview expired). Returns files removed."""
+        now = now or time.time()
+        if not self.reels or now < self.next_preview_sweep:
+            return 0
+        self.next_preview_sweep = now + PREVIEW_SWEEP_SECONDS
+        removed = 0
+        try:
+            folders, offset = [], 0
+            while True:
+                page = self.supa.list("reels", "", 1000, offset) or []
+                folders += [f["name"] for f in page if not f.get("id") and f.get("name")]
+                if len(page) < 1000:
+                    break
+                offset += 1000
+            for folder in folders:
+                old = ["%s/%s" % (folder, f["name"]) for f in self.supa.list("reels", folder) or []
+                       if f.get("id") and re.match(r"preview-v\d+\.mp4$", f.get("name") or "")
+                       and _age_days(f.get("created_at"), now) > PREVIEW_DAYS]
+                if not old:
+                    continue
+                self.supa.remove("reels", old)
+                removed += len(old)
+                for path in old:
+                    self.supa.update("reels", "preview_path=eq.%s" % urllib.parse.quote(path, safe=""), {"preview_path": None})
+            if removed:
+                self.log("removed %d reel preview(s) older than %d days" % (removed, PREVIEW_DAYS))
+        except Exception as e:
+            self.log("reel preview clean-up skipped: %s" % str(e)[:200])
+        return removed
+
     # ------------------------------------------------------------ forever
     def run_forever(self):
         threading.Thread(target=self._heartbeat_loop, daemon=True).start()
         backoff = self.poll_seconds
         while not self.stop_event.is_set():
+            self.sweep_old_previews()
             try:
                 ran = self.tick()
                 backoff = self.poll_seconds

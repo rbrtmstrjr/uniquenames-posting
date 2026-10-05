@@ -131,10 +131,14 @@ class TranscribeTest(unittest.TestCase):
         self.assertEqual(out, [{"word": "Hello,", "start": 0.0, "end": 0.4}, {"word": "world.", "start": 0.4, "end": 0.9}])
 
     def test_card_only_import_does_not_load_whisper(self):
-        import jobs, reels  # noqa: F401  (what the worker imports at start)
-        self.assertIsNone(timing._model)
-        self.assertNotIn("faster_whisper", sys.modules)
-        self.assertNotIn("imageio_ffmpeg", sys.modules)
+        # a fresh interpreter: other test modules (the real-render tests) load imageio_ffmpeg themselves
+        import os
+        import subprocess
+        code = ("import sys, jobs, reels, timing; "
+                "print(timing._model is None, 'faster_whisper' in sys.modules, 'imageio_ffmpeg' in sys.modules)")
+        out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=60,
+                             cwd=os.path.dirname(os.path.abspath(__file__))).stdout.split()
+        self.assertEqual(out, ["True", "False", "False"])
 
 
 def wav_bytes(seconds, rate=24000):

@@ -1,4 +1,5 @@
 # Reel steps against an in-memory Supabase, a fake ComfyUI renderer and mocked voice/Whisper.
+import datetime
 import io
 import os
 import shutil
@@ -53,6 +54,7 @@ class FakeSupa:
         self.rpc_error = None
         self.rpc_args = []
         self.scene_update_error = None
+        self.listing = None
 
     def rpc(self, fn, args=None):
         self.rpcs.append(fn)
@@ -87,6 +89,10 @@ class FakeSupa:
 
     def remove(self, bucket, paths):
         self.removed.extend(paths)
+
+    def list(self, bucket, prefix="", limit=1000, offset=0):
+        self.selects.append(("list", prefix))
+        return (self.listing or {}).get(prefix, [])
 
     def of(self, table):
         return [u for u in self.updates if u[0] == table]
@@ -342,6 +348,30 @@ class RunnerReelTickTest(unittest.TestCase):
         self.supa.rpc_error = SupaError("POST x -> network error: down")
         with self.assertRaises(SupaError):
             self.run_.tick()
+
+    def test_daily_sweep_removes_previews_older_than_14_days(self):
+        now = 1_800_000_000.0
+        old = datetime.datetime.fromtimestamp(now - 15 * 86400, datetime.timezone.utc).isoformat().replace("+00:00", "Z")
+        new = datetime.datetime.fromtimestamp(now - 2 * 86400, datetime.timezone.utc).isoformat()
+        self.supa.listing = {"": [{"name": RID, "id": None}, {"name": "r2", "id": None}],
+                             RID: [{"name": "preview-v2.mp4", "id": "a", "created_at": old},
+                                   {"name": "voice-v2.wav", "id": "b", "created_at": old},
+                                   {"name": "scenes", "id": None}],
+                             "r2": [{"name": "preview-v1.mp4", "id": "c", "created_at": new}]}
+        self.assertEqual(self.run_.sweep_old_previews(now), 1)
+        self.assertEqual(self.supa.removed, [RID + "/preview-v2.mp4"])
+        self.assertEqual(self.supa.updates[-1], ("reels", "preview_path=eq.%s%%2Fpreview-v2.mp4" % RID, {"preview_path": None}))
+        self.assertEqual(self.run_.sweep_old_previews(now + 3600), 0)          # once a day
+        self.assertEqual(len(self.supa.removed), 1)
+
+    def test_sweep_errors_are_only_logged(self):
+        self.supa.list = mock.Mock(side_effect=SupaError("POST x -> HTTP 400 Bucket not found"))
+        self.assertEqual(self.run_.sweep_old_previews(), 0)
+        self.assertTrue(any("clean-up skipped" in m for m in self.logs))
+        self.run_.reels = None
+        self.run_.next_preview_sweep = 0
+        self.assertEqual(self.run_.sweep_old_previews(), 0)                   # cards-only worker: no sweep
+        self.assertEqual(self.supa.list.call_count, 1)
 
     def test_without_a_reel_runner_cards_behave_as_before(self):
         self.run_.reels = None

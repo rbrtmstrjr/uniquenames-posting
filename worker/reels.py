@@ -23,7 +23,7 @@ COMFY_CLOSED = "ComfyUI is closed. Open ComfyUI Desktop on your PC, then press R
 NO_NET = "Couldn't reach the internet to save this reel. Press Retry."
 NO_RENDER = "Video step not built yet"
 STALE = "stale reel result dropped (the reel changed while it was being made)"
-SCENE_COLS = "id,position,narration,image_prompt,seed,status,photo_path,version,attempts"
+SCENE_COLS = "id,position,narration,image_prompt,seed,status,photo_path,version,attempts,start_s,end_s"
 
 
 def now_iso():
@@ -54,8 +54,9 @@ def _match(row):
 
 
 class ReelRunner:
-    def __init__(self, supa, renderer, log=print, sleep=time.sleep):
+    def __init__(self, supa, renderer, log=print, sleep=time.sleep, output_root=None):
         self.supa = supa
+        self.output_root = output_root    # full videos go to <output_root>/Reels (None = Pictures/Unique Names)
         self.renderer = renderer          # ComfyRenderer: .comfy, .timeout, .health(), .generate_photo()
         self.log = log
         self.sleep = sleep
