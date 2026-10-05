@@ -44,7 +44,7 @@ export function AppShell({ initialWorker, soundOn, children }: { initialWorker: 
               <div className="md:hidden"><PcStatus health={worker.health} lastSeen={worker.lastSeen} compact /></div>
             </div>
           </header>
-          <main className="mx-auto w-full max-w-6xl px-4 pb-28 pt-5 md:px-8 md:pb-12">{children}</main>
+          <main className="mx-auto w-full max-w-[1480px] px-4 pb-28 pt-5 md:px-6 md:pb-12 xl:px-8">{children}</main>
         </div>
       </div>
       <BottomTabs />

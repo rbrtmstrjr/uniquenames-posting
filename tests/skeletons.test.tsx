@@ -32,8 +32,8 @@ describe("route skeletons", () => {
     expect(render(<Skel />).container.innerHTML).toBe(html);
   });
 
-  it("mirrors the real layouts: Today card grid, 6 post rows of 6 thumbs, post card grid", () => {
-    expect(tiles(render(<TodaySkeleton />).container)).toBe(10);
+  it("mirrors the real layouts: Today card grid (3 × 3 in the right column), 6 post rows of 6 thumbs, post card grid", () => {
+    expect(tiles(render(<TodaySkeleton />).container)).toBe(9);
     cleanup();
     const posts = render(<PostsSkeleton />).container;
     expect(posts.querySelectorAll("li").length).toBe(6);
