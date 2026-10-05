@@ -8,6 +8,9 @@ import { freshDb, one } from "../helpers/pglite";
 const stripSupabase = (sql: string) => sql.replace(/-- @supabase-only begin[\s\S]*?-- @supabase-only end/g, "");
 const v1 = stripSupabase(readFileSync(join(process.cwd(), "tests", "sql", "fixtures", "schema-v1.sql"), "utf8"));
 const migration = readFileSync(join(process.cwd(), "supabase", "migrations", "002_v2.sql"), "utf8");
+// Later migrations that also touch settings/names/themes (005 adds the reel settings).
+const later = ["003_post_fonts.sql", "004_subject_age.sql", "005_reels.sql"]
+  .map((m) => stripSupabase(readFileSync(join(process.cwd(), "supabase", "migrations", m), "utf8")));
 
 const POSITIONS = ["auto", "top-left", "top-center", "top-right", "middle-left", "middle-center", "middle-right", "bottom-left", "bottom-center", "bottom-right"];
 
@@ -74,7 +77,7 @@ describe("002_v2.sql on top of the live v1 schema", () => {
   });
 });
 
-describe("fresh schema.sql matches v1 + 002", () => {
+describe("fresh schema.sql matches v1 + 002 (+ the later migrations)", () => {
   const shape = async (db: PGlite) => ({
     columns: (await db.query(`select table_name, column_name, data_type, is_nullable, column_default from information_schema.columns
       where table_schema='public' and table_name in ('settings','names','themes') order by table_name, column_name`)).rows,
@@ -85,6 +88,7 @@ describe("fresh schema.sql matches v1 + 002", () => {
   it("has the same columns, defaults and check constraints", async () => {
     const migrated = await v1Db();
     await migrated.exec(migration);
+    for (const m of later) await migrated.exec(m);
     const fresh = await freshDb();
     const want = await shape(migrated);
     expect(want.checks.map((c) => c.conname)).toEqual(expect.arrayContaining(["names_status_check", "themes_status_check", "settings_text_position_check", "settings_title_font_check"]));

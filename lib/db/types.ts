@@ -47,7 +47,37 @@ export interface SettingsRow {
   title_font: string; meaning_font: string; mark_font: string;
   title_size: number; meaning_size: number; mark_size: number;
   text_position: TextPosition; caption_ai: boolean;
+  /** Reels (migration 005; absent before it runs): max images per reel (10–40, default 40). */
+  reel_max_images?: number;
+  /** Reels (migration 005): a reference voice clip in the `reels` bucket; null = Chatterbox's built-in voice. */
+  reel_voice_path?: string | null;
   updated_at: string;
+}
+/** Reel lifecycle (migration 005). script = waiting for review; queued..rendering = the PC is working on it. */
+export type ReelStatus = "script" | "queued" | "voicing" | "imaging" | "rendering" | "ready" | "needs_attention" | "failed";
+export type ReelSceneStatus = "pending" | "queued" | "generating" | "done" | "failed" | "skipped";
+export interface ReelCast { adult: string; child: string }
+/** One Whisper word with its times in seconds. */
+export interface ReelWord { word: string; start: number; end: number }
+export interface ReelRow {
+  id: string; title: string; topic: string | null; cast: ReelCast; status: ReelStatus; error: string | null;
+  voice_path: string | null; words: ReelWord[] | null; preview_path: string | null; pc_path: string | null;
+  /** numeric in Postgres; PostgREST returns it as a number. */
+  duration_s: number | null;
+  version: number; claimed_at: string | null; started_at: string | null; finished_at: string | null;
+  created_at: string; updated_at: string;
+}
+export interface ReelSceneRow {
+  id: string; reel_id: string; position: number; beat: string; narration: string; image_prompt: string; seed: number;
+  status: ReelSceneStatus; photo_path: string | null; attempts: number; error: string | null;
+  start_s: number | null; end_s: number | null; version: number; claimed_at: string | null;
+  created_at: string; updated_at: string;
+}
+/** What claim_next_reel_step() returns to the PC (null = nothing to do). */
+export interface ReelStepClaim {
+  step: "voice" | "timing" | "image" | "render";
+  reel: ReelRow;
+  scene: ReelSceneRow | null;
 }
 export interface WorkerStatusRow {
   id: 1; last_seen: string | null; comfyui_ok: boolean; gpu: string | null; current_card_id: string | null;
