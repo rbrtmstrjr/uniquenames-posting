@@ -49,12 +49,11 @@ describe("NewPostPanel (shadcn controls)", () => {
   it("date picker defaults to Manila today, shows 'Mon, Oct 5' and picks a new day", () => {
     render(<NewPostPanel settings={settings} themes={[theme("a", "Autumn Harvest")]} stock={stock(50)} busy={false} />);
     const trigger = screen.getByRole("button", { name: "Post date: Mon, Oct 5" });
-    expect(screen.getByText(/New post · Mon, Oct 5/)).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "New post" })).toBeTruthy();
     fireEvent.click(trigger);
     const grid = screen.getByRole("grid");
     fireEvent.click(within(grid).getByRole("button", { name: /October 7th, 2026/ }));
     expect(screen.getByRole("button", { name: "Post date: Wed, Oct 7" })).toBeTruthy();
-    expect(screen.getByText(/New post · Wed, Oct 7/)).toBeTruthy();
   });
 
   it("Generate is enabled with names and a theme, disabled with the reason otherwise", () => {
@@ -157,5 +156,29 @@ describe("NewPostPanel (shadcn controls)", () => {
     fireEvent.click(generateButton());
     await vi.waitFor(() => expect(vi.mocked(createPostAction)).toHaveBeenCalled());
     expect(vi.mocked(createPostAction).mock.calls.at(-1)![0]).toMatchObject({ subjectAge: "random" });
+  });
+
+  it("footer summary line follows the choices (Auto shows the card range)", () => {
+    render(<NewPostPanel settings={settings} themes={[theme("a", "Autumn Harvest"), theme("g", "Pink Bloom", "girl")]} stock={[...stock(50), { gender: "girl", style: "single", count: 30 }]} busy={false} />);
+    const summary = screen.getByTestId("post-summary");
+    expect(summary.textContent).toBe("9–13 cards · Boy · Two-word · Random ages · Autumn Harvest");
+    fireEvent.click(screen.getByRole("radio", { name: "Girl" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Single" }));
+    fireEvent.click(screen.getByRole("radio", { name: "11" }));
+    expect(summary.textContent).toBe("11 cards · Girl · Single · Random ages · Pink Bloom");
+    expect(screen.getByText(/30 names left/)).toBeTruthy();
+  });
+
+  it("groups the controls into Who / Look / Cards sections", () => {
+    render(<NewPostPanel settings={settings} themes={[theme("a", "Autumn Harvest")]} stock={stock(50)} busy={false} />);
+    for (const s of ["Who", "Look", "Cards"]) expect(screen.getByRole("group", { name: s })).toBeTruthy();
+    const who = screen.getByRole("group", { name: "Who" });
+    expect(within(who).getByRole("radiogroup", { name: "Gender" })).toBeTruthy();
+    expect(within(who).getByRole("radiogroup", { name: "Name style" })).toBeTruthy();
+    expect(within(who).getByRole("combobox", { name: "Child age" })).toBeTruthy();
+    const look = screen.getByRole("group", { name: "Look" });
+    expect(within(look).getByRole("combobox", { name: "Theme" })).toBeTruthy();
+    expect(within(look).getByLabelText("Theme details").textContent).toContain("sage backdrop");
+    expect(within(screen.getByRole("group", { name: "Cards" })).getByRole("radiogroup", { name: "Number of cards" })).toBeTruthy();
   });
 });

@@ -2,11 +2,11 @@
 import { useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
-import { Baby, ChevronDown, Sparkles, Palette, Type } from "lucide-react";
+import { ChevronDown, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Segmented } from "@/components/ui/segmented";
 import { Panel } from "@/components/ui/panel";
-import { DatePicker, formatDay } from "@/components/ui/date-picker";
+import { DatePicker } from "@/components/ui/date-picker";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/shadcn/select";
 import { useHotkey } from "@/lib/realtime/hotkey";
 import { createPostAction } from "@/lib/actions/posts";
@@ -20,6 +20,9 @@ import { titleText } from "@/lib/text/layout";
 import { CatalogFontsLink, FontFields, FontSummary, fontStyle } from "@/components/fonts/font-select";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/shadcn/collapsible";
 import { AGE_CHOICES, AGE_LABELS, type AgeChoice } from "@/lib/planner/age";
+import { postSummary } from "@/lib/today/summary";
+import { useTodaySelection } from "@/components/today/selection";
+import { cn } from "@/lib/utils/cn";
 
 const SAMPLE = { name: "Arlo Zenith", meaning: "peak strength with calm" };
 
@@ -32,12 +35,12 @@ function PostFontsPicker({ value, onChange, handle }: { value: PostFonts; onChan
   return (
     <Collapsible className="rounded-xl border border-line">
       <CatalogFontsLink />
-      <CollapsibleTrigger className="group flex min-h-11 w-full cursor-pointer items-center gap-3 rounded-xl px-3 text-left">
-        <span className="flex shrink-0 items-center gap-1.5 text-xs font-semibold text-muted"><Type className="size-3.5" aria-hidden /> Fonts</span>
+      <CollapsibleTrigger className="group flex min-h-11 w-full cursor-pointer items-center gap-3 rounded-xl px-3.5 text-left">
+        <span className="shrink-0 text-sm font-semibold text-ink">Fonts</span>
         <FontSummary value={value} className="flex-1 text-sm text-ink" />
         <ChevronDown className="size-4 shrink-0 text-muted transition-transform group-data-[state=open]:rotate-180" aria-hidden />
       </CollapsibleTrigger>
-      <CollapsibleContent className="space-y-3 px-3 pb-3">
+      <CollapsibleContent className="space-y-3 px-3.5 pb-3.5">
         <FontFields idPrefix="post-font" value={value} onChange={onChange} />
         <div className="rounded-lg bg-surface-2 px-3 py-2 text-center text-ink" role="group" aria-label="Font sample">
           {/* Capitals like the card (script fonts keep Title Case, as the PC stamps them). */}
@@ -51,6 +54,27 @@ function PostFontsPicker({ value, onChange, handle }: { value: PostFonts; onChan
   );
 }
 
+/** A titled group of fields ("WHO", "LOOK", "CARDS"), labelled like the other small section titles. */
+function Section({ label, children }: { label: string; children: React.ReactNode }) {
+  const id = `np-${label.toLowerCase()}`;
+  return (
+    <div role="group" aria-labelledby={id}>
+      <h3 id={id} className="mb-3 text-xs font-bold uppercase tracking-[.08em] text-muted">{label}</h3>
+      {children}
+    </div>
+  );
+}
+
+/** One field: the same plain label above every control. */
+function Field({ label, id, className, children }: { label: string; id?: string; className?: string; children: React.ReactNode }) {
+  return (
+    <div className={cn("min-w-0", className)}>
+      <span id={id} className="mb-2 block text-sm font-semibold text-ink">{label}</span>
+      {children}
+    </div>
+  );
+}
+
 function manilaToday() {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Manila" }).format(new Date());
 }
@@ -59,8 +83,8 @@ export function NewPostPanel({ settings, themes, stock, busy }: {
   settings: SettingsRow; themes: ThemeRow[]; stock: { gender: Gender; style: NameStyle; count: number }[]; busy: boolean;
 }) {
   const { health } = useWorkerContext();
-  const [gender, setGender] = useState<Gender>("boy");
-  const [style, setStyle] = useState<NameStyle>("two-word");
+  // Shared with the Stock card on Today (it highlights the matching count).
+  const [{ gender, style }, setSel] = useTodaySelection();
   const [count, setCount] = useState<string>("auto");
   const [date, setDate] = useState(manilaToday);
   const [themeId, setThemeId] = useState<string>("");
@@ -76,6 +100,7 @@ export function NewPostPanel({ settings, themes, stock, busy }: {
   const counts = Array.from({ length: settings.max_images - settings.min_images + 1 }, (_, i) => String(settings.min_images + i));
   const wanted = count === "auto" ? settings.min_images : Number(count);
   const gen = canGenerate(health);
+  const summary = postSummary({ count, min: settings.min_images, max: settings.max_images, gender, style, age, themeTitle: theme?.title });
   // The PC lock comes first: it is the one the owner fixes at the PC, not on this form.
   const blocked = !gen.ok ? gen.reason : left < wanted ? `Only ${left} ${gender} ${style} names left${count === "auto" ? "" : `, but you chose ${count} cards`}. Add names or pick fewer cards.` : !theme ? `No ${gender} theme left. Add a theme first.` : null;
 
@@ -91,60 +116,92 @@ export function NewPostPanel({ settings, themes, stock, busy }: {
   useHotkey("g", generate);
 
   return (
-    <Panel title={`New post · ${formatDay(date || manilaToday())}`}>
-      <div className="space-y-4">
-        <div className="flex flex-wrap gap-2">
-          <Segmented label="Gender" value={gender} onChange={(v) => { setGender(v); setThemeId(""); }} options={[{ value: "boy", label: "Boy" }, { value: "girl", label: "Girl" }]} />
-          <Segmented label="Name style" value={style} onChange={setStyle} options={[{ value: "two-word", label: "Two-word" }, { value: "single", label: "Single" }]} />
+    <Panel>
+      <div className="space-y-6">
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="font-display text-xl text-ink sm:text-2xl">New post</h2>
+          <DatePicker label="Post date" value={date} onChange={setDate} today={manilaToday()} className="w-auto" />
         </div>
-        <div>
-          <div className="mb-1.5 text-xs font-semibold text-muted">Cards</div>
-          <Segmented label="Number of cards" value={count} onChange={setCount}
-            options={[{ value: "auto", label: `Auto ${settings.min_images}–${settings.max_images}` }, ...counts.map((c) => ({ value: c, label: c }))]} />
-        </div>
-        {/* Phone: theme on its own row, then date + age side by side. Desktop: one row. */}
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-[1fr_auto_auto]">
-          <div className="col-span-2 sm:col-span-1">
-            <div className="mb-1.5 flex items-center justify-between gap-1.5 text-xs font-semibold text-muted">
-              <span id="theme-label" className="flex items-center gap-1.5"><Palette className="size-3.5" aria-hidden /> Theme</span>
-              <Link href="/themes" className="text-accent hover:underline">Preview / change order</Link>
+
+        <Section label="Who">
+          {/* Phone: gender + style side by side (style gets more room for "Two-word"), age below. Wider: one row. */}
+          <div className="grid grid-cols-[2fr_3fr] gap-4 sm:grid-cols-3">
+            <Field label="Gender">
+              <Segmented fill label="Gender" value={gender} onChange={(v) => { setSel({ gender: v, style }); setThemeId(""); }}
+                options={[{ value: "boy", label: "Boy" }, { value: "girl", label: "Girl" }]} />
+            </Field>
+            <Field label="Name style">
+              <Segmented fill label="Name style" value={style} onChange={(v) => setSel({ gender, style: v })}
+                options={[{ value: "two-word", label: "Two-word" }, { value: "single", label: "Single" }]} />
+            </Field>
+            <Field label="Child age" id="age-label" className="col-span-2 sm:col-span-1">
+              <Select value={age} onValueChange={(v) => setAge(v as AgeChoice)}>
+                <SelectTrigger aria-labelledby="age-label" className="w-full font-semibold">
+                  {/* Short in the trigger; the list spells it out. */}
+                  <SelectValue>{age === "random" ? "Random · 0–7" : AGE_LABELS[age]}</SelectValue>
+                </SelectTrigger>
+                <SelectContent position="popper" collisionPadding={{ top: 8, bottom: 80 }} className="max-h-[min(20rem,var(--radix-select-content-available-height))]">
+                  {AGE_CHOICES.map((a) => <SelectItem key={a} value={a}>{AGE_LABELS[a]}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </Field>
+          </div>
+        </Section>
+
+        <Section label="Look">
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-3">
+                <span id="theme-label" className="text-sm font-semibold text-ink">Theme</span>
+                <Link href="/themes" className="-my-3 inline-flex min-h-11 items-center text-sm font-semibold text-accent hover:underline">Preview / change order</Link>
+              </div>
+              <Select value={theme?.id ?? ""} onValueChange={setThemeId} disabled={!genderThemes.length}>
+                <SelectTrigger aria-labelledby="theme-label" className="w-full font-semibold">
+                  <SelectValue placeholder={`No ${gender} theme left`} />
+                </SelectTrigger>
+                {/* Bottom padding keeps the list clear of the phone tab bar. */}
+                <SelectContent position="popper" collisionPadding={{ top: 8, bottom: 80 }} className="max-h-[min(20rem,var(--radix-select-content-available-height))]">
+                  {genderThemes.map((t, i) => <SelectItem key={t.id} value={t.id}>{i === 0 ? `${t.title} (next)` : t.title}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              {theme && (
+                <dl aria-label="Theme details" className="grid grid-cols-[4.75rem_1fr] gap-x-3 gap-y-1.5 rounded-xl bg-surface-2 px-3.5 py-3 text-sm">
+                  {([["Backdrop", theme.backdrop], ["Outfit", theme.outfit], ["Props", theme.props]] as const).map(([k, v]) => (
+                    <div key={k} className="contents">
+                      <dt className="text-muted">{k}</dt>
+                      <dd className="min-w-0 text-ink">{v}</dd>
+                    </div>
+                  ))}
+                </dl>
+              )}
             </div>
-            <Select value={theme?.id ?? ""} onValueChange={setThemeId} disabled={!genderThemes.length}>
-              <SelectTrigger aria-labelledby="theme-label" className="w-full font-semibold">
-                <SelectValue placeholder={`No ${gender} theme left`} />
-              </SelectTrigger>
-              {/* Bottom padding keeps the list clear of the phone tab bar. */}
-              <SelectContent position="popper" collisionPadding={{ top: 8, bottom: 80 }} className="max-h-[min(20rem,var(--radix-select-content-available-height))]">
-                {genderThemes.map((t, i) => <SelectItem key={t.id} value={t.id}>{i === 0 ? `${t.title} (next)` : t.title}</SelectItem>)}
-              </SelectContent>
-            </Select>
+            <PostFontsPicker value={fonts} onChange={setFonts} handle={settings.handle} />
           </div>
-          <div>
-            <div className="mb-1.5 text-xs font-semibold text-muted">Post date</div>
-            <DatePicker label="Post date" value={date} onChange={setDate} today={manilaToday()} />
+        </Section>
+
+        <Section label="Cards">
+          {/* Phone: an even 6-column grid (Auto takes two). Wider: one full-width track. */}
+          <Segmented fill label="Number of cards" value={count} onChange={setCount} className="grid h-auto grid-cols-6 sm:flex sm:h-11"
+            options={[
+              { value: "auto", label: `Auto ${settings.min_images}–${settings.max_images}`, className: "col-span-2 h-11 sm:h-9 sm:flex-[1.8]" },
+              ...counts.map((c) => ({ value: c, label: c, className: "h-11 sm:h-9" })),
+            ]} />
+        </Section>
+
+        <div className="flex flex-col gap-3 border-t border-line pt-5 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0 space-y-1">
+            <p data-testid="post-summary" className="text-sm font-semibold text-ink">{summary}</p>
+            {!gen.ok
+              ? <GenerateLockNote reason={gen.reason} className="w-fit" />
+              : blocked
+                ? <span className="block text-xs font-semibold text-warn-text">{blocked}</span>
+                : busy
+                  ? <span className="block text-xs text-muted">If a post is still being made, the new cards wait in line.</span>
+                  : <span className="block text-xs text-muted">{left} names left<span className="hidden sm:inline"> · press G</span></span>}
           </div>
-          <div className="min-w-0">
-            <div id="age-label" className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold text-muted"><Baby className="size-3.5" aria-hidden /> Child age</div>
-            <Select value={age} onValueChange={(v) => setAge(v as AgeChoice)}>
-              <SelectTrigger aria-labelledby="age-label" className="w-full font-semibold sm:w-44">
-                {/* Short in the trigger so it fits half a phone row; the list spells it out. */}
-                <SelectValue>{age === "random" ? "Random · 0–7" : AGE_LABELS[age]}</SelectValue>
-              </SelectTrigger>
-              <SelectContent position="popper" collisionPadding={{ top: 8, bottom: 80 }} className="max-h-[min(20rem,var(--radix-select-content-available-height))]">
-                {AGE_CHOICES.map((a) => <SelectItem key={a} value={a}>{AGE_LABELS[a]}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
-        {theme && <p className="text-xs text-muted">{theme.backdrop} · {theme.outfit} · {theme.props}</p>}
-        <PostFontsPicker value={fonts} onChange={setFonts} handle={settings.handle} />
-        <div className="flex flex-wrap items-center gap-3">
-          <Button size="lg" onClick={generate} loading={pending} disabled={!!blocked} className="w-full sm:w-auto">
+          <Button size="lg" onClick={generate} loading={pending} disabled={!!blocked} className="w-full shrink-0 sm:w-auto">
             <Sparkles className="size-4" /> Generate post
           </Button>
-          {!gen.ok
-            ? <GenerateLockNote reason={gen.reason} className="w-full sm:w-auto" />
-            : <span className="text-xs text-muted">{blocked ?? (busy ? "If a post is still being made, the new cards wait in line." : `${left} names left for this style · press G`)}</span>}
         </div>
       </div>
     </Panel>
