@@ -15,14 +15,15 @@ export async function createPostAction(input: {
   if (badInput) return fail(badInput);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(input.postDate)) return fail("Pick a valid date.");
   const sb = await createClient();
-  const lock = await generateLockReason(sb);
-  if (lock) return fail(lock);
   for (let attempt = 0; attempt < 2; attempt++) {
-    const [{ data: settings }, { data: names }, { data: themes }] = await Promise.all([
+    // The Generate lock is read in parallel with the first round of reads (no extra round trip).
+    const [{ data: settings }, { data: names }, { data: themes }, lock] = await Promise.all([
       sb.from("settings").select("*").eq("id", 1).single(),
       sb.from("names").select("*").eq("gender", input.gender).eq("style", input.style).eq("status", "available"),
       sb.from("themes").select("*").eq("gender", input.gender).eq("status", "available"),
+      attempt === 0 ? generateLockReason(sb) : Promise.resolve(null),
     ]);
+    if (lock) return fail(lock);
     if (!settings) return fail("Settings are missing. Run supabase/schema.sql.");
     const plan = planPost({
       request: { gender: input.gender, style: input.style, count: input.count, postDate: input.postDate },

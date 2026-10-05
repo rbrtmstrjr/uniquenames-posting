@@ -3,7 +3,7 @@ import { useState } from "react";
 import { AlertTriangle, Clock3, Loader2, PenLine, PlugZap, RotateCw } from "lucide-react";
 import type { CardRow } from "@/lib/db/types";
 import { cardVisual } from "@/lib/status/card-state";
-import type { WorkerHealth } from "@/lib/status/worker-health";
+import { canGenerate, type WorkerHealth } from "@/lib/status/worker-health";
 import { formatElapsed } from "@/lib/status/eta";
 import { useNow } from "@/lib/realtime/hooks";
 import { cn } from "@/lib/utils/cn";
@@ -15,6 +15,7 @@ export function CardTile({ card, url, health, queuePos, onOpen, onRetry, selecti
 }) {
   const [retrying, setRetrying] = useState(false);
   const v = cardVisual(card, health);
+  const gen = canGenerate(health);
   const now = useNow(1000);
   const elapsed = card.started_at ? Math.max(0, (now - Date.parse(card.started_at)) / 1000) : 0;
   // The card has a picture to show (its signed URL may still be on the way: FadeImage shimmers until then).
@@ -72,11 +73,19 @@ export function CardTile({ card, url, health, queuePos, onOpen, onRetry, selecti
         <div className="absolute inset-x-2 bottom-2 z-[3] rounded-lg bg-surface/95 p-2 text-left shadow-soft">
           <div className="flex items-center gap-1.5 text-xs font-bold text-bad"><AlertTriangle className="size-3.5" /> Failed</div>
           <p className="mt-0.5 line-clamp-2 text-[11px] text-muted">{card.error ?? "Unknown error"}</p>
-          {onRetry && (
+          {onRetry && (gen.ok ? (
             <button type="button" onClick={retry} disabled={retrying} className="mt-1.5 inline-flex min-h-11 w-full items-center justify-center gap-1.5 rounded-md bg-bad px-2 text-xs font-bold text-bad-ink disabled:opacity-70">
               {retrying ? <Loader2 className="size-3.5 animate-spin" /> : <RotateCw className="size-3.5" />} {retrying ? "Retrying…" : "Retry"}
             </button>
-          )}
+          ) : (
+            // Locked like Generate: a retry needs the PC and ComfyUI. The reason is shown, not a tooltip.
+            <>
+              <button type="button" disabled className="mt-1.5 inline-flex min-h-11 w-full cursor-not-allowed items-center justify-center gap-1.5 rounded-md bg-bad px-2 text-xs font-bold text-bad-ink opacity-50">
+                <RotateCw className="size-3.5" /> Retry
+              </button>
+              <p className="mt-1 flex items-start gap-1 text-[11px] font-semibold text-warn-text"><PlugZap className="mt-px size-3 shrink-0" aria-hidden /> {gen.reason}</p>
+            </>
+          ))}
         </div>
       )}
       {selection && (

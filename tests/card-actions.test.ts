@@ -99,13 +99,26 @@ describe("regenerateCardAction with edited text (the #3 fix)", () => {
     expect(cardUpdates()).toHaveLength(0);
   });
 
-  it("puts the card back when the names row cannot be saved", async () => {
+  it("writes the names row BEFORE the card, so a names failure leaves the card untouched", async () => {
     world({ nameError: 'duplicate key value violates unique constraint "names_lower_name"' });
     const r = await regenerateCardAction(ID, { name: "Arlo Zephyr", meaning: "wind" });
     expect(r).toMatchObject({ ok: false, error: expect.stringMatching(/already has that spelling/) });
-    const ups = cardUpdates();
-    expect(ups).toHaveLength(2);
-    expect(patchOf(ups[1])).toMatchObject({ name: "Arlo Zenith", meaning: "strong and bright", status: "done", version: 3, seed: 12345 });
+    expect(cardUpdates()).toHaveLength(0);
+    expect(fake.queries.filter(isUpdate).map((q) => q.table)).toEqual(["names"]);
+  });
+
+  it("names first, then card; a stale card update puts only the names row back (no card rollback race)", async () => {
+    world({ updated: false });
+    const r = await regenerateCardAction(ID, { name: "Arlo Zephyr", meaning: "wind" });
+    expect(r).toMatchObject({ ok: false, error: expect.stringMatching(/just changed/) });
+    expect(fake.queries.filter(isUpdate).map((q) => q.table)).toEqual(["names", "cards", "names"]);
+    expect(patchOf(nameUpdates()[1])).toEqual({ name: "Arlo Zenith", meaning: "strong and bright", style: "two-word" });
+  });
+
+  it("restamp also writes names first and restores them on a stale card", async () => {
+    world({ updated: false });
+    expect(await restampCardAction(ID, "Arlo Zephyr", "wind")).toMatchObject({ ok: false });
+    expect(fake.queries.filter(isUpdate).map((q) => q.table)).toEqual(["names", "cards", "names"]);
   });
 });
 

@@ -30,19 +30,30 @@ async function spellingTaken(sb: SB, card: CardRow, name: string) {
   return !!dup?.length;
 }
 
+type Clean = { name: string; meaning: string };
+
 /**
- * Keep the names row in step with the card's new text. On failure, put the card back
- * exactly as it was (only if nothing moved it on since) so the two never disagree.
+ * The names row is written BEFORE the card: once the card is requeued the worker may claim
+ * it at any moment, so the card must never need a rollback. If the names write fails
+ * nothing changed; if the card update then fails, only the names row is put back.
  */
-async function saveNameRow(sb: SB, card: CardRow, clean: { name: string; meaning: string }): Promise<string | null> {
+async function setNameRow(sb: SB, card: CardRow, text: Clean): Promise<string | null> {
   if (!card.name_id) return null;
-  const { error: ne } = await sb.from("names").update({ ...clean, style: styleOf(clean.name) }).eq("id", card.name_id);
+  const { error: ne } = await sb.from("names").update({ ...text, style: styleOf(text.name) }).eq("id", card.name_id);
   if (!ne) return null;
-  await sb.from("cards").update({
-    name: card.name, meaning: card.meaning, status: card.status, claimed_at: card.claimed_at, error: card.error, version: card.version, seed: card.seed,
-    queued_at: card.queued_at, started_at: card.started_at, finished_at: card.finished_at, attempts: card.attempts,
-  }).eq("id", card.id).eq("version", card.version + 1);
   return ne.message.includes("names_lower_name") ? DUP : ne.message;
+}
+
+/** Card update with the names row written first and restored if the card update fails. */
+async function updateCardWithName(sb: SB, card: CardRow, clean: Clean | null, patch: Record<string, unknown>): Promise<string | null> {
+  if (clean) {
+    const bad = await setNameRow(sb, card, clean);
+    if (bad) return bad;
+  }
+  const { data, error } = await sb.from("cards").update(patch).eq("id", card.id).eq("version", card.version).neq("status", "generating").select("id");
+  const failed = error ? error.message : !data?.length ? STALE : null;
+  if (failed && clean) await setNameRow(sb, card, { name: card.name, meaning: card.meaning });
+  return failed;
 }
 
 /**
@@ -66,14 +77,8 @@ export async function regenerateCardAction(cardId: string, text?: { name: string
 
   const version = card.version + 1;
   const patch = { ...clean, ...REQUEUE, version, seed: nextSeed(card.id, version, card.seed), queued_at: new Date().toISOString() };
-  const { data, error } = await sb.from("cards").update(patch).eq("id", cardId).eq("version", card.version).neq("status", "generating").select("id");
-  if (error) return fail(error.message);
-  if (!data?.length) return fail(STALE);
-  if (clean) {
-    const bad = await saveNameRow(sb, card, clean);
-    if (bad) return fail(bad);
-  }
-  return { ok: true };
+  const bad = await updateCardWithName(sb, card, clean, patch);
+  return bad ? fail(bad) : { ok: true };
 }
 
 export async function restampCardAction(cardId: string, name: string, meaning: string): Promise<ActionResult<{ mode: "restamp" | "regenerate" }>> {
@@ -95,12 +100,8 @@ export async function restampCardAction(cardId: string, name: string, meaning: s
   const patch = mode === "restamp"
     ? { ...clean, status: "restamp", claimed_at: null, error: null, version, queued_at: now }
     : { ...clean, ...REQUEUE, version, seed: nextSeed(card.id, version, card.seed), queued_at: now };
-  const { data, error } = await sb.from("cards").update(patch).eq("id", cardId).eq("version", card.version).neq("status", "generating").select("id");
-  if (error) return fail(error.message);
-  if (!data?.length) return fail(STALE);
-  const nameErr = await saveNameRow(sb, card, clean);
-  if (nameErr) return fail(nameErr);
-  return { ok: true, mode };
+  const err = await updateCardWithName(sb, card, clean, patch);
+  return err ? fail(err) : { ok: true, mode };
 }
 
 export async function deleteCardAction(cardId: string): Promise<ActionResult> {
