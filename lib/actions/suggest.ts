@@ -5,6 +5,7 @@ import type { Gender, NameStyle } from "@/lib/db/types";
 import { suggestNames, suggestThemes } from "@/lib/ai/suggest";
 import { NAME_COUNT, THEME_COUNT, VIBE_MAX, filterNameSuggestions, filterThemeSuggestions } from "@/lib/ai/suggest-filter";
 import { fail, requireOwner, type ActionResult } from "./result";
+import { UUID_RE } from "./helpers";
 
 export type SuggestResult = ActionResult<{ added: number; duplicates: number; invalid: number }>;
 
@@ -54,6 +55,39 @@ export async function suggestNamesAction(i: { gender: Gender; style: NameStyle; 
   }
   revalidatePath("/names");
   return { ok: true, added: rows.length, duplicates, invalid };
+}
+
+const CARD_IDEAS = 5;
+export type CardNameIdeas = ActionResult<{ ideas: { name: string; meaning: string }[] }>;
+
+/**
+ * "Suggest names" in the card dialog: up to 5 new names (+ meanings) for the card's post — same
+ * gender and style, its theme as the idea — that no name in the database already has. Nothing is
+ * saved: the owner picks one into the Name/Meaning fields, then saves or makes a new picture
+ * (which renames the card's own names row through the usual uniqueness-checked path).
+ */
+export async function cardNameIdeasAction(cardId: string): Promise<CardNameIdeas> {
+  await requireOwner();
+  if (!UUID_RE.test(cardId ?? "")) return fail("Card not found.");
+  const sb = await createClient();
+  const { data: card } = await sb.from("cards").select("id, post_id, theme_id").eq("id", cardId).single();
+  if (!card) return fail("Card not found.");
+  if (!card.post_id) return fail("Name ideas are for cards in a post.");
+  const [{ data: post }, { data: theme }, all] = await Promise.all([
+    sb.from("posts").select("gender, style").eq("id", card.post_id).single(),
+    sb.from("themes").select("title").eq("id", card.theme_id).single(),
+    selectAll<{ name: string; gender: Gender; style: NameStyle }>(sb, "names", "name, gender, style"),
+  ]);
+  if (!post) return fail("Post not found.");
+  if (all.error) return fail(all.error);
+  const { gender, style } = post as { gender: Gender; style: NameStyle };
+  const existing = all.rows.filter((n) => n.gender === gender && n.style === style).map((n) => n.name);
+  const vibe = theme?.title ? `names that suit a "${theme.title}" baby photoshoot`.slice(0, VIBE_MAX) : undefined;
+  const ai = await suggestNames({ gender, style, count: CARD_IDEAS, vibe, existing });
+  if (!ai.ok) return fail(`Gemini could not suggest names: ${ai.error}`);
+  const { fresh } = filterNameSuggestions(ai.data, all.rows.map((n) => n.name), style);
+  if (!fresh.length) return fail("Every idea Gemini had is already one of your names. Try again.");
+  return { ok: true, ideas: fresh.slice(0, CARD_IDEAS).map((n) => ({ name: n.name, meaning: n.meaning })) };
 }
 
 /**

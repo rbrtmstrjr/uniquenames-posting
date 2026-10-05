@@ -16,6 +16,7 @@ import { regenerateCardAction, restampCardAction } from "@/lib/actions/cards";
 import { callAction, optimistic } from "@/lib/actions/call";
 import { useNow } from "@/lib/realtime/hooks";
 import { CardTile } from "./card-tile";
+import { NameIdeas } from "./name-ideas";
 
 type Base = { id: string; name: string; meaning: string };
 
@@ -92,6 +93,7 @@ export function CardDialog({ card, url, health, queuePos = 0, onClose, onDelete,
             <span className="text-xs font-semibold text-muted">Meaning</span>
             <Input value={meaning} onChange={(e) => setMeaning(e.target.value)} className="mt-1" />
           </label>
+          {card.post_id && <NameIdeas cardId={card.id} current={name} onPick={(i) => { setName(i.name); setMeaning(i.meaning); }} />}
           <div className="flex flex-wrap gap-2">
             <Button onClick={saveText} loading={busy === "text"} disabled={!changed || working || textLocked || busy !== null}><Save className="size-4" /> Save text</Button>
             <Button variant="subtle" onClick={regen} loading={busy === "regen"} disabled={working || !gen.ok || busy !== null}>
