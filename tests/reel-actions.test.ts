@@ -299,15 +299,26 @@ describe("saveReelScriptAction", () => {
 describe("approveReelAction", () => {
   it("queues every pending scene first, then the reel (guarded)", async () => {
     expect(await A.approveReelAction(REEL)).toEqual({ ok: true });
-    expect(fake.queries.filter(isUpdate).map((q) => q.table)).toEqual(["reel_scenes", "reels"]);
+    expect(fake.queries.filter(isUpdate).map((q) => q.table)).toEqual(["reel_scenes", "reel_scenes", "reel_scenes", "reels"]);
     const [u] = qs("reels", "update");
     expect(patchOf(u)).toMatchObject({ status: "queued", error: null, version: 5 });
     expect(u.ops).toContainEqual(["eq", "version", 4]);
     expect(u.ops).toContainEqual(["eq", "status", "script"]);
-    const [s] = qs("reel_scenes", "update");
-    expect(patchOf(s)).toEqual({ status: "queued" });
-    expect(s.ops).toContainEqual(["eq", "reel_id", REEL]);
-    expect(s.ops).toContainEqual(["eq", "status", "pending"]);
+    const ups = qs("reel_scenes", "update");
+    ups.forEach((s, i) => {
+      expect(patchOf(s)).toEqual({ status: "queued", version: 3 });
+      expect(s.ops).toContainEqual(["eq", "id", [S1, S2, S3][i]]);
+      expect(s.ops).toContainEqual(["eq", "version", 2]);
+      expect(s.ops).toContainEqual(["eq", "status", "pending"]);
+    });
+  });
+
+  it("already approved by another call: the scenes it queued are left untouched", async () => {
+    world({ sceneUpdated: false, reelUpdated: false });
+    expect(await A.approveReelAction(REEL)).toEqual({ ok: false, error: expect.stringMatching(/changed/) });
+    const ups = qs("reel_scenes", "update");
+    expect(ups).toHaveLength(3);
+    expect(ups.every((q) => patchOf(q).status === "queued")).toBe(true);
   });
 
   it("obeys the generate lock", async () => {
@@ -323,10 +334,13 @@ describe("approveReelAction", () => {
     world({ reelUpdated: false });
     expect(await A.approveReelAction(REEL)).toEqual({ ok: false, error: expect.stringMatching(/changed/) });
     const ups = qs("reel_scenes", "update");
-    expect(ups).toHaveLength(2);
-    expect(patchOf(ups[1])).toEqual({ status: "pending" });
-    expect(ups[1].ops).toContainEqual(["eq", "reel_id", REEL]);
-    expect(ups[1].ops).toContainEqual(["eq", "status", "queued"]);
+    expect(ups).toHaveLength(6);
+    ups.slice(3).forEach((s, i) => {
+      expect(patchOf(s)).toEqual({ status: "pending", version: 4 });
+      expect(s.ops).toContainEqual(["eq", "id", [S1, S2, S3][i]]);
+      expect(s.ops).toContainEqual(["eq", "version", 3]);
+      expect(s.ops).toContainEqual(["eq", "status", "queued"]);
+    });
   });
 });
 
@@ -395,11 +409,13 @@ describe("skipReelSceneAction", () => {
     expect(r.ops).toContainEqual(["eq", "version", 4]);
   });
 
-  it("a reel still in line whose image failed 3 times: only the scene is skipped", async () => {
-    world({ reel: reelRow({ status: "queued", claimed_at: "now" }), scenes: [sceneRow(S1, 1, { status: "failed", attempts: 3 })] });
-    expect(await A.skipReelSceneAction(S1)).toEqual({ ok: true });
-    expect(patchOf(qs("reel_scenes", "update")[0])).toMatchObject({ status: "skipped" });
-    expect(qs("reels", "update")).toHaveLength(0);
+  it("a reel in line or being made whose image failed 3 times: only the scene is skipped", async () => {
+    for (const status of ["queued", "voicing", "imaging", "rendering"] as const) {
+      world({ reel: reelRow({ status, claimed_at: "now" }), scenes: [sceneRow(S1, 1, { status: "failed", attempts: 3 })] });
+      expect(await A.skipReelSceneAction(S1), status).toEqual({ ok: true });
+      expect(patchOf(qs("reel_scenes", "update")[0])).toMatchObject({ status: "skipped", version: 3 });
+      expect(qs("reels", "update")).toHaveLength(0);
+    }
   });
 
   it("refused otherwise", async () => {
@@ -440,12 +456,14 @@ describe("rerenderReelAction", () => {
 
 describe("retryReelAction", () => {
   it("a stopped reel goes back in line: failed images get fresh attempts, the voice / words / done images stay", async () => {
-    world({ reel: reelRow({ status: "failed", error: "voice boom", voice_path: "v", words: [] }) });
+    world({ reel: reelRow({ status: "failed", error: "boom", voice_path: "v", words: [] }),
+      scenes: [sceneRow(S1, 1, { status: "failed", attempts: 3 }), sceneRow(S2, 2, { status: "done" }), sceneRow(S3, 3, { status: "skipped" })] });
     expect(await A.retryReelAction(REEL)).toEqual({ ok: true });
-    expect(fake.queries.filter(isUpdate).map((q) => q.table)).toEqual(["reel_scenes", "reels"]);
+    expect(fake.queries.filter(isUpdate).map((q) => q.table)).toEqual(["reels", "reel_scenes"]);
     const [s] = qs("reel_scenes", "update");
-    expect(patchOf(s)).toEqual({ status: "queued", attempts: 0, error: null, claimed_at: null });
-    expect(s.ops).toContainEqual(["eq", "reel_id", REEL]);
+    expect(patchOf(s)).toEqual({ status: "queued", attempts: 0, error: null, claimed_at: null, version: 3 });
+    expect(s.ops).toContainEqual(["eq", "id", S1]);
+    expect(s.ops).toContainEqual(["eq", "version", 2]);
     expect(s.ops).toContainEqual(["eq", "status", "failed"]);
     const [r] = qs("reels", "update");
     expect(patchOf(r)).toEqual({ status: "queued", error: null, claimed_at: null, finished_at: null, preview_path: null, version: 5 });
@@ -461,6 +479,16 @@ describe("retryReelAction", () => {
     expect(fake.queries.filter(isUpdate)).toHaveLength(0);
     world({ reel: reelRow({ status: "failed" }), reelUpdated: false });
     expect(await A.retryReelAction(REEL)).toEqual({ ok: false, error: expect.stringMatching(/changed/) });
+    expect(qs("reel_scenes", "update")).toHaveLength(0);
+  });
+
+  it("timed but every image skipped: refused with how to fix it; before timing it may retry", async () => {
+    const skipped = [sceneRow(S1, 1, { status: "skipped" }), sceneRow(S2, 2, { status: "skipped" })];
+    world({ reel: reelRow({ status: "failed", voice_path: "v", words: [] }), scenes: skipped });
+    expect(await A.retryReelAction(REEL)).toEqual({ ok: false, error: "Every image was skipped. Tap an image to make it again." });
+    expect(fake.queries.filter(isUpdate)).toHaveLength(0);
+    world({ reel: reelRow({ status: "failed", words: null }), scenes: skipped });
+    expect((await A.retryReelAction(REEL)).ok).toBe(true);
   });
 });
 

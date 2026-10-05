@@ -231,18 +231,29 @@ export async function approveReelAction(reelId: string): Promise<ActionResult> {
   if (!reel) return fail(NOT_FOUND);
   if (reel.status !== "script") return fail("This reel was already approved.");
   if (lock) return fail(lock);
+  const { scenes, error: re } = await getScenes(sb, reelId);
+  if (re) return dbFail(re);
   // Scenes first: the PC never claims anything of a reel still in 'script', so once the reel is
   // queued every image is already in line.
-  const { error: se } = await sb.from("reel_scenes").update({ status: "queued" }).eq("reel_id", reelId).eq("status", "pending");
-  if (se) return dbFail(se);
-  const { data, error: ue } = await sb.from("reels").update({ status: "queued", error: null, version: reel.version + 1 })
+  const moved = await moveScenes(sb, scenes.filter((s) => s.status === "pending"), "pending", { status: "queued" });
+  const { data, error: ue } = moved.error ? { data: null, error: moved.error } : await sb.from("reels")
+    .update({ status: "queued", error: null, version: reel.version + 1 })
     .eq("id", reelId).eq("version", reel.version).eq("status", "script").select("id");
   if (ue || !data?.length) {
-    // Back to pending, so the script can still be edited.
-    await sb.from("reel_scenes").update({ status: "pending" }).eq("reel_id", reelId).eq("status", "queued");
+    // Back to pending (only the scenes THIS call moved), so the script can still be edited.
+    await Promise.all(moved.done.map((s) => sb.from("reel_scenes").update({ status: "pending", version: s.version + 1 })
+      .eq("id", s.id).eq("version", s.version).eq("status", "queued")));
     return ue ? dbFail(ue) : fail(STALE);
   }
   return done();
+}
+
+/** Version-guarded per-scene status change; returns the scenes this call changed (with their new version). */
+async function moveScenes(sb: SB, scenes: ReelSceneRow[], from: ReelSceneStatus, patch: Record<string, unknown>) {
+  const results = await Promise.all(scenes.map((s) =>
+    sb.from("reel_scenes").update({ ...patch, version: s.version + 1 }).eq("id", s.id).eq("version", s.version).eq("status", from).select("id")));
+  const done = scenes.filter((_, i) => !!results[i].data?.length).map((s) => ({ id: s.id, version: s.version + 1 }));
+  return { done, error: results.find((r) => r.error)?.error as DbError | undefined };
 }
 
 /** The scene plus its reel and the Generate lock. */
@@ -256,6 +267,8 @@ async function getSceneAndReel(sb: SB, sceneId: string) {
 
 /** Reel statuses where the PC is still making images: a requeued scene is simply picked up. */
 const MAKING: ReelStatus[] = ["queued", "voicing", "imaging"];
+/** Every status the PC works on. */
+const WORKING: ReelStatus[] = [...MAKING, "rendering"];
 /** Scenes that can be made again: finished, failed, or skipped earlier (a skipped image can come back). */
 const REDOABLE: ReelSceneStatus[] = ["done", "failed", "skipped"];
 const REQUEUE_REEL = { status: "queued", preview_path: null, pc_path: null, error: null, claimed_at: null, finished_at: null };
@@ -296,7 +309,8 @@ export async function redoReelSceneAction(sceneId: string): Promise<ActionResult
 
 /**
  * "Skip image": the video is made without that picture. For a failed image of a reel that needs
- * attention, or of a reel still in line whose image already failed 3 times (before the PC flags it).
+ * attention, or of a reel still in line / being made whose image already failed 3 times (before the
+ * PC flags it; only the scene changes then, the PC's hold on the reel is left alone).
  */
 export async function skipReelSceneAction(sceneId: string): Promise<ActionResult> {
   await requireOwner();
@@ -306,7 +320,7 @@ export async function skipReelSceneAction(sceneId: string): Promise<ActionResult
   if (error) return dbFail(error);
   if (!scene || !reel) return fail(SCENE_NOT_FOUND);
   if (scene.status !== "failed") return fail("Only an image that failed can be skipped.");
-  const inLine = reel.status === "queued" && scene.attempts >= 3;
+  const inLine = WORKING.includes(reel.status) && scene.attempts >= 3;
   if (reel.status !== "needs_attention" && !inLine) return fail("An image can be skipped once it has failed 3 times.");
   const { data, error: ue } = await sb.from("reel_scenes")
     .update({ status: "skipped", error: null, claimed_at: null, version: scene.version + 1 })
@@ -350,20 +364,23 @@ export async function retryReelAction(reelId: string): Promise<ActionResult> {
   await requireOwner();
   if (!UUID_RE.test(reelId ?? "")) return fail(NOT_FOUND);
   const sb = await createClient();
-  const [{ reel, error }, lock] = await Promise.all([getReel(sb, reelId), generateLockReason(sb)]);
-  if (error) return dbFail(error);
+  const [{ reel, error }, { scenes, error: se }, lock] = await Promise.all([getReel(sb, reelId), getScenes(sb, reelId), generateLockReason(sb)]);
+  const readErr = error ?? se;
+  if (readErr) return dbFail(readErr);
   if (!reel) return fail(NOT_FOUND);
   if (reel.status !== "failed") return fail("Only a reel that stopped can be tried again.");
+  if (reel.words !== null && !scenes.some((s) => s.status === "failed" || s.status === "done")) {
+    return fail("Every image was skipped. Tap an image to make it again.");
+  }
   if (lock) return fail(lock);
-  // Scenes first (the PC ignores a failed reel), then the reel.
-  const { error: se } = await sb.from("reel_scenes").update({ status: "queued", attempts: 0, error: null, claimed_at: null })
-    .eq("reel_id", reelId).eq("status", "failed");
-  if (se) return dbFail(se);
+  // The reel first (version-guarded: one Try again wins), then its failed images get fresh attempts.
   const { data, error: ue } = await sb.from("reels")
     .update({ status: "queued", error: null, claimed_at: null, finished_at: null, preview_path: null, version: reel.version + 1 })
     .eq("id", reelId).eq("version", reel.version).eq("status", "failed").select("id");
   if (ue) return dbFail(ue);
   if (!data?.length) return fail(STALE);
+  const moved = await moveScenes(sb, scenes.filter((s) => s.status === "failed"), "failed", { status: "queued", attempts: 0, error: null, claimed_at: null });
+  if (moved.error) return fail(`The reel is back in line, but some failed images were not reset: ${moved.error.message}`);
   return done();
 }
 
