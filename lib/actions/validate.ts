@@ -1,8 +1,30 @@
-import type { Gender } from "@/lib/db/types";
+import { TEXT_POSITIONS, type Gender, type SettingsRow } from "@/lib/db/types";
 import { NAME_RE, normalizeQuotes } from "@/lib/names/bulk-paste";
+import { isFontId } from "@/lib/fonts/catalog";
+import { SIZE_RANGES } from "@/lib/text/layout";
+import { fontsOf } from "@/lib/fonts/post-fonts";
 
 export interface ThemeInput { title: string; gender: Gender; backdrop: string; outfit: string; props: string; lighting: string; palette: string }
-export interface SettingsInput { caption_template: string; hashtags: string; handle: string; min_images: number; max_images: number; sound_on: boolean }
+/** The card text settings (columns added by migration 002). */
+export type TextSettings = Pick<SettingsRow, "title_font" | "meaning_font" | "mark_font" | "title_size" | "meaning_size" | "mark_size" | "text_position">;
+export const TEXT_SETTING_KEYS = ["title_font", "meaning_font", "mark_font", "title_size", "meaning_size", "mark_size", "text_position"] as const satisfies readonly (keyof TextSettings)[];
+export interface SettingsInput extends TextSettings { caption_template: string; hashtags: string; handle: string; min_images: number; max_images: number; sound_on: boolean; caption_ai: boolean }
+
+const SIZE_LABEL = { title: "Name", meaning: "Meaning", mark: "Watermark" } as const;
+
+/** Card text settings: catalog fonts, whole-number sizes in their ranges, a known position. */
+export function validateTextSettings(t: TextSettings): string | null {
+  for (const k of ["title_font", "meaning_font", "mark_font"] as const) {
+    if (!isFontId(t[k])) return "Pick a font from the list.";
+  }
+  for (const key of ["title", "meaning", "mark"] as const) {
+    const v = t[`${key}_size`];
+    const r = SIZE_RANGES[key];
+    if (!Number.isInteger(v) || v < r.min || v > r.max) return `${SIZE_LABEL[key]} size must be ${r.min} to ${r.max} px.`;
+  }
+  if (!(TEXT_POSITIONS as readonly string[]).includes(t.text_position)) return "Pick a text position.";
+  return null;
+}
 
 export function validateName(name: string, meaning: string): string | null {
   const n = normalizeQuotes(name).replace(/\s+/g, " ").trim();
@@ -30,5 +52,7 @@ export function validateSettings(s: SettingsInput): string | null {
   if (s.handle.length > 40) return "The handle can be at most 40 characters.";
   if (!Number.isInteger(s.min_images) || !Number.isInteger(s.max_images) || s.min_images < 1 || s.max_images > 30) return "Card counts must be 1 to 30.";
   if (s.min_images > s.max_images) return "The min card count cannot be above the max.";
-  return null;
+  // Fonts are not edited in Settings any more (picked per post on Today, never written by a
+  // Settings save), so a stale/unknown font id must not block Save: normalise, don't reject.
+  return validateTextSettings({ ...s, ...fontsOf(s) });
 }

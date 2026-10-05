@@ -20,6 +20,26 @@ describe("name helpers", () => {
     expect(styleOf("Arlo  Zenith")).toBe("two-word");
     expect(styleOf(" Arlo ")).toBe("single");
   });
+  it("only raises a lowercase first letter per word — never lowercases anything", () => {
+    expect(normalizeName("arlo   zenith")).toBe("Arlo Zenith");
+    expect(normalizeName("AJ")).toBe("AJ");
+    expect(normalizeName("TJ Rowan")).toBe("TJ Rowan");
+    expect(normalizeName("JJ")).toBe("JJ");
+    expect(normalizeName("ARLO ZENITH")).toBe("ARLO ZENITH");
+    expect(normalizeName("Mary-JANE")).toBe("Mary-JANE");
+    expect(normalizeName("mary-jane")).toBe("Mary-Jane");
+    expect(normalizeName("McKenzie")).toBe("McKenzie");
+    expect(normalizeName("McKenzie deAndre")).toBe("McKenzie DeAndre");
+    expect(normalizeName("D'Angelo")).toBe("D'Angelo");
+    expect(normalizeName("d’angelo")).toBe("D'angelo");
+    expect(normalizeName("Zoë")).toBe("Zoë");
+    expect(normalizeName("élodie")).toBe("Élodie");
+    // first + middle names, not surnames: short words are names too
+    expect(normalizeName("ava le")).toBe("Ava Le");
+    expect(normalizeName("arlo van")).toBe("Arlo Van");
+    expect(normalizeName("Ava Le")).toBe("Ava Le");
+    expect(nameKey(" arlo  ZENITH ")).toBe(nameKey("Arlo Zenith"));
+  });
   it("dedupes against existing and within the batch", () => {
     const have = new Set(["arlo"]);
     const { fresh, skipped } = dedupeNames([{ name: "ARLO" }, { name: "Kai  Rowan" }, { name: "kai rowan" }], have);

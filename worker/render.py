@@ -1,9 +1,12 @@
 # Unique Names card rendering: ComfyUI makes a TEXT-FREE photo, Pillow stamps
 # the exact name, meaning and handle. Pure helpers + ComfyRenderer. No HTTP server.
+import collections
 import datetime
 import hmac
 import io
+import itertools
 import json
+import math
 import os
 import random
 import re
@@ -17,12 +20,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageStat
 
+import fonts
+
 HERE = os.path.dirname(os.path.abspath(__file__))
-FONTS_DIR = os.path.join(HERE, "fonts")
-FONT_URLS = {
-    "Poppins-SemiBold.ttf": "https://raw.githubusercontent.com/google/fonts/main/ofl/poppins/Poppins-SemiBold.ttf",
-    "Poppins-Regular.ttf": "https://raw.githubusercontent.com/google/fonts/main/ofl/poppins/Poppins-Regular.ttf",
-}
 
 NAME_MAX = 40
 MEANING_MAX = 80
@@ -34,10 +34,21 @@ LABEL_RE = re.compile(r"^[A-Za-z][A-Za-z \-]{0,23}$")
 # Letters (any language), spaces, hyphens, apostrophes and periods only.
 NAME_RE = re.compile(r"^[^\W\d_]+(?:[ '\-.][^\W\d_]+)*$", re.UNICODE)
 
-# Text bands as fractions of the image height: (top, bottom).
-BANDS = {"top": (0.07, 0.33), "middle": (0.37, 0.63), "bottom": (0.64, 0.88)}
+# Text layout rules shared with the website's Settings preview (lib/text/layout.ts reads the same file).
+with open(os.path.join(HERE, "..", "lib", "text", "layout.json"), encoding="utf-8") as _fh:
+    LAYOUT = json.load(_fh)
+# Auto position: text bands as fractions of the image height: (top, bottom).
+BANDS = {k: tuple(v) for k, v in LAYOUT["autoBands"].items()}
 # The sample posts put the name at the top most of the time, so top wins ties.
-BAND_BIAS = {"top": 0.80, "middle": 1.0, "bottom": 0.95}
+BAND_BIAS = LAYOUT["autoBandBias"]
+
+# The card text settings (settings row; the columns arrive with migration 002).
+TextStyle = collections.namedtuple("TextStyle", "title_font meaning_font mark_font title_size meaning_size mark_size position")
+TEXT_DEFAULTS = {
+    "title_font": fonts.FALLBACK, "meaning_font": fonts.FALLBACK, "mark_font": fonts.FALLBACK,
+    "title_size": LAYOUT["sizes"]["title"]["default"], "meaning_size": LAYOUT["sizes"]["meaning"]["default"],
+    "mark_size": LAYOUT["sizes"]["mark"]["default"], "text_position": "auto",
+}
 
 
 class CardError(Exception):
@@ -175,18 +186,35 @@ def pick_band(img):
     return min(scores, key=lambda k: scores[k] * BAND_BIAS[k]), scores
 
 
-def _font(path, size):
-    return ImageFont.truetype(path, size)
+def _px(v):
+    """Round half up, like the website's Math.round, so both sides pick the same size."""
+    return int(math.floor(v + 0.5))
 
 
-def fit_font(path, text, start, max_width, min_size=24):
-    size = start
-    while size > min_size:
-        f = _font(path, size)
-        if f.getbbox(text)[2] - f.getbbox(text)[0] <= max_width:
-            return f
-        size -= 2
-    return _font(path, min_size)
+def text_style(settings):
+    """A clean TextStyle from a settings row. Missing or bad values get the defaults:
+    the row has none of these columns until migration 002 runs."""
+    s = settings or {}
+
+    def font(k):
+        v = s.get(k)
+        return fonts.resolve(v)["id"] if v is not None else TEXT_DEFAULTS[k]
+
+    def size(k, key):
+        rng = LAYOUT["sizes"][key]
+        v = s.get(k)
+        if isinstance(v, bool):
+            return rng["default"]
+        try:
+            v = int(v)
+        except (TypeError, ValueError):
+            return rng["default"]
+        return max(rng["min"], min(rng["max"], v))
+
+    pos = s.get("text_position")
+    return TextStyle(font("title_font"), font("meaning_font"), font("mark_font"),
+                     size("title_size", "title"), size("meaning_size", "meaning"), size("mark_size", "mark"),
+                     pos if pos in LAYOUT["positions"] else "auto")
 
 
 def _text_w(font, text):
@@ -194,52 +222,182 @@ def _text_w(font, text):
     return b[2] - b[0]
 
 
-def compose_card(photo, name, meaning, handle, fonts, band=None):
-    """Stamp NAME / meaning / handle on the photo. Returns (image, band, scores)."""
+def _largest(fits, lo, hi):
+    """The largest whole size in [lo, hi] for which fits(size) is true (text width grows
+    with size, so a binary search is enough), or None if even `lo` does not fit."""
+    lo, hi = int(lo), int(hi)
+    if hi < lo or not fits(lo):
+        return None
+    while lo < hi:
+        mid = (lo + hi + 1) // 2
+        if fits(mid):
+            lo = mid
+        else:
+            hi = mid - 1
+    return lo
+
+
+def fit_title(font_id, text, px, max_w, log=print):
+    """The name never wraps: it shrinks until it fits max_w."""
+    load = lambda s: fonts.load_safe(font_id, LAYOUT["titleWeight"], s, log)
+    size = _largest(lambda s: _text_w(load(s), text) <= max_w, LAYOUT["minPx"], _px(px))
+    return load(size or LAYOUT["minPx"])
+
+
+def balanced_lines(font, words, n):
+    """`words` split into n lines whose widest line is as narrow as possible."""
+    if n <= 1:
+        return [" ".join(words)]
+    widths = {}
+
+    def width(i, j):  # each run of words is measured once
+        if (i, j) not in widths:
+            widths[(i, j)] = _text_w(font, " ".join(words[i:j]))
+        return widths[(i, j)]
+
+    best = None
+    for cuts in itertools.combinations(range(1, len(words)), n - 1):
+        bounds = (0,) + cuts + (len(words),)
+        widest = max(width(bounds[i], bounds[i + 1]) for i in range(n))
+        if best is None or widest < best[0]:
+            best = (widest, bounds)
+    b = best[1]
+    return [" ".join(words[b[i]:b[i + 1]]) for i in range(n)]
+
+
+def fit_meaning(font_id, text, px, max_w, log=print):
+    """(font, lines): one line, shrinking to meaningShrinkFirst of the size; then 2, then up
+    to meaningMaxLines balanced lines in that size range; then smaller on the most lines."""
+    load = lambda s: fonts.load_safe(font_id, LAYOUT["bodyWeight"], s, log)
+    words = text.split()
+    start = _px(px)
+    floor = max(LAYOUT["minPx"], _px(px * LAYOUT["meaningShrinkFirst"]))
+    most = max(1, min(LAYOUT["meaningMaxLines"], len(words)))
+
+    def fits(n):
+        return lambda s: max(_text_w(load(s), ln) for ln in balanced_lines(load(s), words, n)) <= max_w
+
+    for n in range(1, most + 1):
+        size = _largest(fits(n), floor, start)
+        if size:
+            return load(size), balanced_lines(load(size), words, n)
+    size = _largest(fits(most), LAYOUT["minPx"], floor - 1) or LAYOUT["minPx"]
+    return load(size), balanced_lines(load(size), words, most)
+
+
+def layout_text(size, name, meaning, handle, style, band="top", log=print):
+    """Where every line goes. Pure geometry (no drawing): {title, meaning: [{text, font, xy,
+    box}], mark: {...}, block: ink box of title + meaning, band}. `xy` is the draw origin
+    (Pillow's default "la" anchor), `box` the ink box on the image. `band` is only used
+    for the auto position."""
+    W, H = size
+    k = W / LAYOUT["baseWidth"]
+    pos = style.position if style.position in LAYOUT["positions"] else "auto"
+    vert, horiz = ("auto", "center") if pos == "auto" else pos.split("-")
+    max_w = W * (LAYOUT["maxWidthCenter"] if horiz == "center" else LAYOUT["maxWidthSide"])
+    left, right = W * LAYOUT["padX"], W - W * LAYOUT["padX"]
+
+    def x_for(bb):
+        if horiz == "left":
+            return left - bb[0]
+        if horiz == "right":
+            return right - bb[2]
+        return W / 2 - (bb[0] + bb[2]) / 2
+
+    mk = fonts.load_safe(style.mark_font, LAYOUT["bodyWeight"], max(1, _px(style.mark_size * k)), log)
+    mb = mk.getbbox(handle)
+    # The watermark sits bottom-right, out of the text's way; bottom-right text pushes it left.
+    mx = W * LAYOUT["markInsetX"] - mb[0] if pos == "bottom-right" else W - W * LAYOUT["markInsetX"] - mb[2]
+    my = H - H * LAYOUT["markInsetBottom"] - mb[3]
+    mark = {"text": handle, "font": mk, "xy": (mx, my), "box": (mx + mb[0], my + mb[1], mx + mb[2], my + mb[3])}
+
+    # The text block lives between the top padding and the bottom padding, and never reaches
+    # the watermark row (on a short, wide card 10% of the height is less than a big watermark).
+    lo = H * LAYOUT["padTop"]
+    bottom = min(H - H * LAYOUT["padBottom"], mark["box"][1] - W * LAYOUT["gap"] / 2)
+
+    title = name.upper() if fonts.caps(style.title_font) else name
+    scale = 1.0
+    while True:
+        # A block taller than the space shrinks (title and meaning together) instead of overflowing.
+        tf = fit_title(style.title_font, title, style.title_size * k * scale, max_w, log)
+        mf, lines = fit_meaning(style.meaning_font, meaning, style.meaning_size * k * scale, max_w, log)
+        parts = []
+        tb = tf.getbbox(title)
+        parts.append({"text": title, "font": tf, "y": 0, "bb": tb})
+        first = mf.getbbox(lines[0])
+        pitch = mf.size * (1 + LAYOUT["lineGap"])
+        for i, ln in enumerate(lines):
+            parts.append({"text": ln, "font": mf, "y": tb[3] + W * LAYOUT["gap"] * scale - first[1] + i * pitch, "bb": mf.getbbox(ln)})
+        top = min(p["y"] + p["bb"][1] for p in parts)
+        height = max(p["y"] + p["bb"][3] for p in parts) - top
+        if height <= bottom - lo or scale < 0.15:
+            break
+        scale *= 0.9
+
+    hi = bottom - height
+    if vert == "top":
+        y = lo
+    elif vert == "middle":
+        y = (H - height) / 2
+    elif vert == "bottom":
+        y = hi
+    else:
+        a, b = BANDS.get(band, BANDS["top"])
+        y = H * a + (H * (b - a) - height) / 2
+    y = max(lo, min(hi, y))
+    dy = y - top
+
+    out = []
+    for p in parts:
+        bb = p["bb"]
+        x, py = x_for(bb), p["y"] + dy
+        out.append({"text": p["text"], "font": p["font"], "xy": (x, py), "box": (x + bb[0], py + bb[1], x + bb[2], py + bb[3])})
+
+    boxes = [p["box"] for p in out]
+    block = (min(b[0] for b in boxes), min(b[1] for b in boxes), max(b[2] for b in boxes), max(b[3] for b in boxes))
+    return {"title": out[:1], "meaning": out[1:], "mark": mark, "block": block, "band": band if pos == "auto" else pos}
+
+
+def compose_card(photo, name, meaning, handle, style=None, band=None, log=print):
+    """Stamp the name / meaning / handle on the photo with the owner's text settings.
+    Returns (image, band or fixed position, band scores)."""
     img = photo.convert("RGB")
     W, H = img.size
+    style = style or text_style({})
     scores = {}
-    if band is None:
+    if style.position == "auto" and band is None:
         band, scores = pick_band(img)
-    title = name.upper()
-    name_font = fit_font(fonts["semibold"], title, int(W * 0.088), int(W * 0.84))
-    mean_font = fit_font(fonts["regular"], meaning, int(W * 0.034), int(W * 0.80))
-    mark_font = _font(fonts["regular"], max(14, int(W * 0.019)))
-
-    nb = name_font.getbbox(title)
-    mb = mean_font.getbbox(meaning)
-    name_h, mean_h = nb[3] - nb[1], mb[3] - mb[1]
-    gap = int(W * 0.024)
-    block_h = name_h + gap + mean_h
-    a, b = BANDS[band]
-    top = int(H * a + (H * (b - a) - block_h) / 2)
-    name_xy = ((W - _text_w(name_font, title)) / 2 - nb[0], top - nb[1])
-    mean_xy = ((W - _text_w(mean_font, meaning)) / 2 - mb[0], top + name_h + gap - mb[1])
-    mark_xy = (W - _text_w(mark_font, handle) - int(W * 0.035), H - int(H * 0.045) - mark_font.getbbox(handle)[3])
+    lay = layout_text(img.size, name, meaning, handle, style, band or "top", log)
 
     # White text with a soft dark shadow on darker backdrops; warm dark-brown text with a
     # soft light glow on bright ones (pale mint, cream, ivory), where white would wash out.
-    block = (int(W * 0.08), max(0, top - gap), int(W * 0.92), min(H, top + block_h + gap))
-    mark_box = (int(mark_xy[0]) - 4, int(mark_xy[1]) - 4, W, H)
+    pad = W * LAYOUT["gap"]
+    bx = lay["block"]
+    block = (max(0, int(bx[0] - pad)), max(0, int(bx[1] - pad)), min(W, int(bx[2] + pad)), min(H, int(bx[3] + pad)))
+    mbx = lay["mark"]["box"]
+    mark_box = (max(0, int(mbx[0]) - 4), max(0, int(mbx[1]) - 4), min(W, int(mbx[2]) + 4), min(H, int(mbx[3]) + 4))
     title_ink, title_halo = text_colors(img, block)
     mark_ink, mark_halo = text_colors(img, mark_box)
 
+    lines = [(p, title_ink, 255, title_halo) for p in lay["title"]] + [(p, title_ink, 240, title_halo) for p in lay["meaning"]]
     halo = Image.new("RGBA", img.size, (0, 0, 0, 0))
     sd = ImageDraw.Draw(halo)
     off = max(2, W // 400)
-    sd.text((name_xy[0], name_xy[1] + off), title, font=name_font, fill=title_halo)
-    sd.text((mean_xy[0], mean_xy[1] + off), meaning, font=mean_font, fill=title_halo)
-    sd.text((mark_xy[0], mark_xy[1] + 1), handle, font=mark_font, fill=mark_halo)
+    for p, _ink, _a, h in lines:
+        sd.text((p["xy"][0], p["xy"][1] + off), p["text"], font=p["font"], fill=h)
+    m = lay["mark"]
+    sd.text((m["xy"][0], m["xy"][1] + 1), m["text"], font=m["font"], fill=mark_halo)
     out = Image.alpha_composite(img.convert("RGBA"), halo.filter(ImageFilter.GaussianBlur(max(3, W // 220))))
     d = ImageDraw.Draw(out)
-    d.text(name_xy, title, font=name_font, fill=title_ink + (255,))
-    d.text(mean_xy, meaning, font=mean_font, fill=title_ink + (240,))
-    d.text(mark_xy, handle, font=mark_font, fill=mark_ink + (200,))
-    return out.convert("RGB"), band, scores
+    for p, ink, a, _h in lines:
+        d.text(p["xy"], p["text"], font=p["font"], fill=ink + (a,))
+    d.text(m["xy"], m["text"], font=m["font"], fill=mark_ink + (200,))
+    return out.convert("RGB"), lay["band"], scores
 
 
-LIGHT_BACKDROP = 175  # mean luminance (0-255) above which white text stops reading well
-DARK_INK = (59, 42, 32)  # the brand's warm dark brown
+LIGHT_BACKDROP = LAYOUT["lightBackdrop"]  # mean luminance (0-255) above which white text stops reading well
+DARK_INK = tuple(LAYOUT["darkInk"])  # the brand's warm dark brown
 
 
 def text_colors(img, box):
@@ -263,22 +421,27 @@ def fit_to_size(img, width, height):
 
 # ---------------------------------------------------------------- side effects
 
-def ensure_fonts():
-    os.makedirs(FONTS_DIR, exist_ok=True)
-    paths = {}
-    for name, url in FONT_URLS.items():
-        dest = os.path.join(FONTS_DIR, name)
-        if not os.path.exists(dest):
-            tmp = dest + ".part"
-            req = urllib.request.Request(url, headers={"User-Agent": "unique-names-worker"})
-            with urllib.request.urlopen(req, timeout=60) as r, open(tmp, "wb") as f:
-                f.write(r.read())
-            if os.path.getsize(tmp) < 10000:
-                os.remove(tmp)
-                raise RuntimeError("font download too small: " + url)
-            os.replace(tmp, dest)
-        paths[name] = dest
-    return {"semibold": paths["Poppins-SemiBold.ttf"], "regular": paths["Poppins-Regular.ttf"]}
+def ensure_fonts(log=print):
+    """At startup: fetch the fallback font (Poppins, required: a card can always be stamped),
+    then prefetch the rest of the catalog best effort (short timeout, failures only logged;
+    a font still missing downloads on first use or falls back to Poppins)."""
+    files = {"semibold": fonts.font_file(fonts.FALLBACK, LAYOUT["titleWeight"]),
+             "regular": fonts.font_file(fonts.FALLBACK, LAYOUT["bodyWeight"])}
+    fonts.prefetch(timeout=15, log=log)
+    return files
+
+
+def ensure_fonts_in_background(renderer, log=print):
+    """Run ensure_fonts() on a daemon thread so startup (heartbeat + claim loop) never waits
+    on GitHub. Until it finishes, a card loads its font on demand or falls back to Poppins."""
+    def run():
+        try:
+            renderer.font_files = ensure_fonts(log=log)
+        except Exception as e:  # offline: cards fetch on demand later
+            log("font download at startup failed: %s" % e)
+    t = threading.Thread(target=run, name="font-prefetch", daemon=True)
+    t.start()
+    return t
 
 
 def http_json(url, body=None, timeout=30):
@@ -293,10 +456,11 @@ class JobError(Exception):
 
 
 class ComfyRenderer:
-    def __init__(self, comfy_url, timeout, fonts):
+    def __init__(self, comfy_url, timeout, font_files=None, log=print):
         self.comfy = comfy_url.rstrip("/")
         self.timeout = int(timeout)
-        self.fonts = fonts
+        self.font_files = font_files  # the prefetched fallback; other fonts load per card
+        self.log = log
 
     def health(self):
         try:
@@ -340,6 +504,6 @@ class ComfyRenderer:
                 return fit_to_size(Image.open(io.BytesIO(data)).convert("RGB"), width, height)
         raise JobError("ComfyUI did not finish within %d seconds." % self.timeout)
 
-    def compose(self, photo, name, meaning, handle):
-        img, _band, _scores = compose_card(photo, name, meaning, handle, self.fonts)
+    def compose(self, photo, name, meaning, handle, style=None):
+        img, _band, _scores = compose_card(photo, name, meaning, handle, style, log=self.log)
         return img

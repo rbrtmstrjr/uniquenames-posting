@@ -18,44 +18,54 @@ export interface ShotSpec {
   space: TextSpace;
 }
 
+// Lens + aperture per frame give the photoshoot its depth: a portrait lens wide open melts
+// the set into creamy blur behind the baby. (Never the word for the device itself: the model draws it.)
+const PORTRAIT = "85mm portrait lens, f/1.8, creamy blurred background";
+const CLOSE = "85mm portrait lens, f/1.8, close-up, very shallow depth of field";
+const MACRO = "100mm macro lens, f/2.8, extreme close-up, background melted into blur";
+const WIDE = "35mm lens, f/2.0, soft background falloff";
+const OVERHEAD = "50mm lens, f/2.8, soft focus falloff at the edges";
+// Props-only frames: same optics without the word "portrait", which could pull a person into an empty set.
+const PROPS_LENS = "85mm lens, f/1.8";
+
 const baby = (text: string, camera: string, angle: Angle, space: TextSpace = "top"): ShotSpec => ({ kind: "baby", text, camera, angle, space });
 const props = (text: string, camera: string, angle: Angle, space: TextSpace = "top"): ShotSpec => ({ kind: "props", text, camera, angle, space });
 
 // Index 0 of each session is the album cover.
 export const SITTER_SHOTS: ShotSpec[] = [
-  baby("eye-level medium shot of the baby sitting up in the middle of the set, looking straight ahead at the viewer with a sweet expression", "eye level, 50mm lens, medium shot", "eye"),
-  baby("wide establishing shot of the whole set with the baby sitting small in the scene among the props", "eye level, 35mm lens, wide shot", "wide"),
-  baby("high-angle shot looking down at the baby sitting on the blanket and gazing up at the viewer with wide eyes", "high-angle viewpoint from above at 45 degrees looking down, 50mm lens", "high", "bottom"),
-  baby("low-angle shot from floor level of the baby crawling toward the viewer between the props", "floor-level viewpoint, 35mm lens, low angle", "low"),
-  baby("tight close-up portrait of the baby's face with a soft smile, the props melting into soft blur behind", "85mm lens, close-up, very shallow depth of field", "closeup"),
-  baby("detail close-up of the baby's tiny hands holding one of the small props", "100mm macro lens, extreme close-up", "macro"),
-  baby("over-the-shoulder view from behind the baby, who sits looking at the props in front of them; the back of the head and the outfit are visible", "viewpoint just behind the baby at the baby's eye level, 35mm lens, point of view", "pov"),
-  baby("three-quarter side view of the baby reaching out to touch one of the props", "eye level, 50mm lens, three-quarter angle", "profile"),
-  baby("candid moment of the baby laughing with eyes squeezed shut, sitting beside the props", "slightly above eye level, 50mm lens, candid", "eye"),
-  baby("tummy-time shot of the baby lying on the tummy with the head lifted, smiling at the viewer", "floor-level viewpoint, 85mm lens", "low"),
-  baby("detail close-up of the baby's bare feet and toes resting on the blanket next to a small prop", "100mm macro lens, extreme close-up", "macro"),
+  baby("eye-level medium shot of the baby sitting up in the middle of the set, looking straight ahead at the viewer with a sweet expression", `eye level, medium shot, ${PORTRAIT}`, "eye"),
+  baby("wide establishing shot of the whole set with the baby sitting small in the scene among the props", `eye level, wide shot, ${WIDE}`, "wide"),
+  baby("high-angle shot looking down at the baby sitting on the blanket and gazing up at the viewer with wide eyes", `high-angle viewpoint from above at 45 degrees looking down, ${PORTRAIT}`, "high", "bottom"),
+  baby("low-angle shot from floor level of the baby crawling toward the viewer between the props", `floor-level viewpoint, low angle, ${PORTRAIT}`, "low"),
+  baby("tight close-up portrait of the baby's face with a soft smile, the props melting into soft blur behind", CLOSE, "closeup"),
+  baby("detail close-up of the baby's tiny hands holding one of the small props", MACRO, "macro"),
+  baby("over-the-shoulder view from behind the baby, who sits looking at the props in front of them; the back of the head and the outfit are visible", `viewpoint just behind the baby at the baby's eye level, point of view, ${PORTRAIT}`, "pov"),
+  baby("three-quarter side view of the baby reaching out to touch one of the props", `eye level, three-quarter angle, ${PORTRAIT}`, "profile"),
+  baby("candid moment of the baby laughing with eyes squeezed shut, sitting beside the props", `slightly above eye level, candid, ${PORTRAIT}`, "eye"),
+  baby("tummy-time shot of the baby lying on the tummy with the head lifted, smiling at the viewer", `floor-level viewpoint, ${PORTRAIT}`, "low"),
+  baby("detail close-up of the baby's bare feet and toes resting on the blanket next to a small prop", MACRO, "macro"),
 ];
 
 export const NEWBORN_SHOTS: ShotSpec[] = [
-  baby("eye-level shot of the newborn sleeping peacefully, curled up in the main prop in the center of the set", "eye level, 50mm lens, medium shot", "eye"),
-  baby("wide establishing shot of the whole set with the sleeping newborn small in the scene", "eye level, 35mm lens, wide shot", "wide"),
-  baby("top-down bird's-eye shot of the newborn sleeping curled on a soft blanket with the small props arranged around", "top-down viewpoint looking straight down, 35mm lens", "overhead", "bottom"),
-  baby("high-angle shot of the swaddled newborn sleeping on the blanket", "high-angle viewpoint from above at 45 degrees looking down, 50mm lens", "high", "bottom"),
-  baby("close-up of the newborn's sleeping face and tiny nose, cheek resting on folded hands", "85mm lens, close-up, very shallow depth of field", "closeup"),
-  baby("macro detail of the newborn's tiny feet and toes peeking out of the blanket", "100mm macro lens, extreme close-up", "macro"),
-  baby("macro detail of the newborn's tiny hand curled around one of the small props", "100mm macro lens, extreme close-up", "macro"),
-  baby("side profile of the newborn sleeping on the tummy with the chin resting on the hands", "eye level, 85mm lens, side profile", "profile"),
-  baby("low-angle shot from blanket level, the sleeping newborn in soft focus in front with the props rising behind", "blanket-level viewpoint, 35mm lens, low angle", "low"),
-  baby("eye-level shot of the newborn sleeping on the side, wrapped, with a small plush prop tucked beside", "eye level, 85mm lens", "eye"),
+  baby("eye-level shot of the newborn sleeping peacefully, curled up in the main prop in the center of the set", `eye level, medium shot, ${PORTRAIT}`, "eye"),
+  baby("wide establishing shot of the whole set with the sleeping newborn small in the scene", `eye level, wide shot, ${WIDE}`, "wide"),
+  baby("top-down bird's-eye shot of the newborn sleeping curled on a soft blanket with the small props arranged around", `top-down viewpoint looking straight down, ${OVERHEAD}`, "overhead", "bottom"),
+  baby("high-angle shot of the swaddled newborn sleeping on the blanket", `high-angle viewpoint from above at 45 degrees looking down, ${PORTRAIT}`, "high", "bottom"),
+  baby("close-up of the newborn's sleeping face and tiny nose, cheek resting on folded hands", CLOSE, "closeup"),
+  baby("macro detail of the newborn's tiny feet and toes peeking out of the blanket", MACRO, "macro"),
+  baby("macro detail of the newborn's tiny hand curled around one of the small props", MACRO, "macro"),
+  baby("side profile of the newborn sleeping on the tummy with the chin resting on the hands", `eye level, side profile, ${PORTRAIT}`, "profile"),
+  baby("low-angle shot from blanket level, the sleeping newborn in soft focus in front with the props rising behind", `blanket-level viewpoint, low angle, ${PORTRAIT}`, "low"),
+  baby("eye-level shot of the newborn sleeping on the side, wrapped, with a small plush prop tucked beside", `eye level, ${PORTRAIT}`, "eye"),
 ];
 
 // Index 0 is the "empty set before the session" frame; it always comes first among the props shots.
 export const PROPS_SPECS: ShotSpec[] = [
-  props("props-only shot of the empty styled set before the session: every prop in place on the smooth colored surface, close crop so the colored surface fills every edge of the frame", "eye level, 50mm lens, close crop", "wide"),
-  props("props-only flat lay photographed from directly above like a product flat lay: the outfit laid flat with the small props arranged around it on the smooth colored surface, which fills every edge of the frame", "top-down view looking straight down, 50mm lens, close crop", "overhead"),
-  props("props-only macro close-up of the single most charming prop from the props list, filling the frame, the colored background melting into soft blur", "100mm macro lens, eye level, very shallow depth of field", "macro"),
-  props("props-only low-angle still life from floor level, the props in the foreground and the smooth colored background softly blurred behind, close crop", "floor-level viewpoint, 50mm lens, low angle, close crop", "low"),
-  props("props-only detail of the folded outfit resting on the blanket next to one small prop", "slightly above, 85mm lens, close-up", "closeup"),
+  props("props-only shot of the empty styled set before the session: every prop in place on the smooth colored surface, close crop so the colored surface fills every edge of the frame", "eye level, close crop, 50mm lens, f/2.0, soft background falloff", "wide"),
+  props("props-only flat lay photographed from directly above like a product flat lay: the outfit laid flat with the small props arranged around it on the smooth colored surface, which fills every edge of the frame", `top-down view looking straight down, close crop, ${OVERHEAD}`, "overhead"),
+  props("props-only macro close-up of the single most charming prop from the props list, filling the frame, the colored background melting into soft blur", `eye level, ${MACRO}`, "macro"),
+  props("props-only low-angle still life from floor level, the props in the foreground and the smooth colored background softly blurred behind, close crop", `floor-level viewpoint, low angle, close crop, ${PROPS_LENS}, creamy blurred background`, "low"),
+  props("props-only detail of the folded outfit resting on the blanket next to one small prop", `slightly above, ${PROPS_LENS}, close-up, very shallow depth of field`, "closeup"),
 ];
 
 const BY_TEXT = new Map([...SITTER_SHOTS, ...NEWBORN_SHOTS, ...PROPS_SPECS].map((s) => [s.text, s]));

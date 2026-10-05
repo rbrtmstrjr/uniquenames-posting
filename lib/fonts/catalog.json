@@ -1,0 +1,21 @@
+{
+  "_about": "The card font catalog, read by BOTH the website (lib/fonts/catalog.ts: Settings selects + live preview via Google Fonts CSS) and the PC worker (worker/fonts.py: downloads the files from github.com/google/fonts into worker/fonts/ and stamps with Pillow). `dir` + files are paths under ofl/ in that repo. `var` = one variable font file with a wght axis; otherwise one static file per weight. `caps` = the name is stamped in CAPITALS (script fonts keep the name's own Title Case: capitals in a script face are hard to read). Unknown ids fall back to poppins.",
+  "fallback": "poppins",
+  "fonts": [
+    { "id": "poppins", "label": "Poppins", "family": "Poppins", "dir": "poppins", "files": { "400": "Poppins-Regular.ttf", "600": "Poppins-SemiBold.ttf" }, "caps": true },
+    { "id": "montserrat", "label": "Montserrat", "family": "Montserrat", "dir": "montserrat", "var": "Montserrat[wght].ttf", "caps": true },
+    { "id": "playfair", "label": "Playfair Display", "family": "Playfair Display", "dir": "playfairdisplay", "var": "PlayfairDisplay[wght].ttf", "caps": true },
+    { "id": "fraunces", "label": "Fraunces", "family": "Fraunces", "dir": "fraunces", "var": "Fraunces[SOFT,WONK,opsz,wght].ttf", "caps": true },
+    { "id": "dmserif", "label": "DM Serif Display", "family": "DM Serif Display", "dir": "dmserifdisplay", "files": { "400": "DMSerifDisplay-Regular.ttf" }, "caps": true },
+    { "id": "quicksand", "label": "Quicksand", "family": "Quicksand", "dir": "quicksand", "var": "Quicksand[wght].ttf", "caps": true },
+    { "id": "nunito", "label": "Nunito", "family": "Nunito", "dir": "nunito", "var": "Nunito[wght].ttf", "caps": true },
+    { "id": "lora", "label": "Lora", "family": "Lora", "dir": "lora", "var": "Lora[wght].ttf", "caps": true },
+    { "id": "cormorant", "label": "Cormorant Garamond", "family": "Cormorant Garamond", "dir": "cormorantgaramond", "var": "CormorantGaramond[wght].ttf", "caps": true },
+    { "id": "josefin", "label": "Josefin Sans", "family": "Josefin Sans", "dir": "josefinsans", "var": "JosefinSans[wght].ttf", "caps": true },
+    { "id": "comfortaa", "label": "Comfortaa", "family": "Comfortaa", "dir": "comfortaa", "var": "Comfortaa[wght].ttf", "caps": true },
+    { "id": "greatvibes", "label": "Great Vibes", "family": "Great Vibes", "dir": "greatvibes", "files": { "400": "GreatVibes-Regular.ttf" }, "caps": false },
+    { "id": "dancing", "label": "Dancing Script", "family": "Dancing Script", "dir": "dancingscript", "var": "DancingScript[wght].ttf", "caps": false },
+    { "id": "pacifico", "label": "Pacifico", "family": "Pacifico", "dir": "pacifico", "files": { "400": "Pacifico-Regular.ttf" }, "caps": false },
+    { "id": "parisienne", "label": "Parisienne", "family": "Parisienne", "dir": "parisienne", "files": { "400": "Parisienne-Regular.ttf" }, "caps": false }
+  ]
+}

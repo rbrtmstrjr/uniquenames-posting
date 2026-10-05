@@ -4,10 +4,12 @@ import { toast } from "sonner";
 import { Dialog } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Segmented } from "@/components/ui/segmented";
+import { Input } from "@/components/ui/shadcn/input";
 import type { Gender, NameRow } from "@/lib/db/types";
 import { addNamesAction, updateNameAction } from "@/lib/actions/names";
 import { normalizeName } from "@/lib/actions/helpers";
 import { validateName } from "@/lib/actions/validate";
+import { callAction } from "@/lib/actions/call";
 
 export function NameForm({ open, onOpenChange, editing, defaultGender, onSaved }: {
   open: boolean; onOpenChange: (o: boolean) => void; editing: NameRow | null; defaultGender: Gender; onSaved: () => void;
@@ -29,11 +31,11 @@ export function NameForm({ open, onOpenChange, editing, defaultGender, onSaved }
     e.preventDefault();
     setBusy(true);
     if (editing) {
-      const r = await updateNameAction(editing.id, { name, meaning, gender });
+      const r = await callAction(() => updateNameAction(editing.id, { name, meaning, gender }));
       setBusy(false);
       if (!r.ok) { toast.error(r.error); return; }
     } else {
-      const r = await addNamesAction([{ name, meaning, gender }]);
+      const r = await callAction(() => addNamesAction([{ name, meaning, gender }]));
       setBusy(false);
       if (!r.ok) { toast.error(r.error); return; }
       if (r.skipped.length) { toast.error(`${normalizeName(name)} is already in your list.`); return; }
@@ -48,9 +50,9 @@ export function NameForm({ open, onOpenChange, editing, defaultGender, onSaved }
       <form onSubmit={save} className="space-y-4">
         <Segmented label="Gender" value={gender} onChange={setGender} options={[{ value: "boy", label: "Boy" }, { value: "girl", label: "Girl" }]} />
         <label className="block"><span className="text-xs font-semibold text-muted">Name</span>
-          <input autoFocus value={name} onChange={(e) => setName(e.target.value)} className="mt-1 h-11 w-full rounded-xl border border-line bg-bg px-3 font-semibold text-ink" /></label>
+          <Input autoFocus value={name} onChange={(e) => setName(e.target.value)} className="mt-1 font-semibold" /></label>
         <label className="block"><span className="text-xs font-semibold text-muted">Meaning</span>
-          <input value={meaning} onChange={(e) => setMeaning(e.target.value)} placeholder="peak strength with calm" className="mt-1 h-11 w-full rounded-xl border border-line bg-bg px-3 text-ink" /></label>
+          <Input value={meaning} onChange={(e) => setMeaning(e.target.value)} placeholder="peak strength with calm" className="mt-1" /></label>
         {problem && <p className="text-sm text-bad">{problem}</p>}
         <div className="flex justify-end gap-2">
           <Button variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>

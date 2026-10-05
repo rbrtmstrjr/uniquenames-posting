@@ -5,7 +5,7 @@ import sys
 import time
 
 from jobs import VERSION, Runner, prune_cache, rotate_log, sweep_parts
-from render import HERE, ComfyRenderer, default_output_root, ensure_fonts, load_env
+from render import HERE, ComfyRenderer, default_output_root, ensure_fonts_in_background, load_env
 from supa import Supa
 
 _LOCK = None
@@ -26,7 +26,7 @@ def main():
         _LOCK.bind(("127.0.0.1", 47821))  # one worker per PC
     except OSError:
         sys.exit("The card worker is already running.")
-    renderer = ComfyRenderer(cfg.get("COMFY_URL", "http://127.0.0.1:8188"), int(cfg.get("GENERATE_TIMEOUT_SECONDS", "300")), ensure_fonts())
+    renderer = ComfyRenderer(cfg.get("COMFY_URL", "http://127.0.0.1:8188"), int(cfg.get("GENERATE_TIMEOUT_SECONDS", "300")))
     output_root = cfg.get("OUTPUT_ROOT") or default_output_root()
     cache_dir = os.path.join(HERE, "cache")
     prune_cache(cache_dir)
@@ -36,6 +36,9 @@ def main():
                     float(cfg.get("POLL_SECONDS", "3")), float(cfg.get("HEARTBEAT_SECONDS", "15")),
                     log=lambda m: print(time.strftime("%Y-%m-%d %H:%M:%S"), m, flush=True))
     print("Unique Names worker %s -> %s (ComfyUI %s)" % (VERSION, cfg["SUPABASE_URL"], renderer.comfy), flush=True)
+    # Fonts download in the background: the heartbeat must start at once, or a slow GitHub on
+    # the first start after an update would make the PC look offline (and lock Generate).
+    ensure_fonts_in_background(renderer, log=runner.log)
     runner.run_forever()
 
 

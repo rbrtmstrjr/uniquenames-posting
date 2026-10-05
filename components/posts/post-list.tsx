@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Empty } from "@/components/ui/empty";
 import { Segmented } from "@/components/ui/segmented";
 import { useSignedUrls } from "@/lib/realtime/signed-urls";
+import { FadeImage } from "@/components/ui/fade-image";
 
 type Filter = "all" | "ready" | "posted";
 
@@ -47,11 +48,9 @@ export function PostList({ posts }: { posts: PostListItem[] }) {
               </div>
               <div className="mt-3 grid grid-cols-6 gap-1.5">
                 {p.cards.slice(0, 6).map((c) => (
-                  <div key={c.id} className="aspect-square overflow-hidden rounded-lg bg-surface-2">
-                    {urlFor(c.card_path) ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={urlFor(c.card_path)} alt="" loading="lazy" className="size-full object-cover" />
-                    ) : <div className={c.status === "done" ? "size-full" : "size-full shimmer animate-shimmer"} />}
+                  <div key={c.id} className="relative aspect-square overflow-hidden rounded-lg bg-surface-2">
+                    {c.card_path ? <FadeImage src={urlFor(c.card_path)} />
+                      : <div className={c.status === "done" ? "size-full" : "size-full shimmer animate-shimmer"} />}
                   </div>
                 ))}
               </div>

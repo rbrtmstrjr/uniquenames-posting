@@ -3,8 +3,8 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import type { Gender, NameStyle } from "@/lib/db/types";
 import { validateName } from "./validate";
-import { dedupeNames, nameKey, normalizeName, styleOf } from "./helpers";
-import { fail, requireOwner, type ActionResult } from "./result";
+import { badIds, chunks, dedupeNames, nameKey, normalizeName, styleOf } from "./helpers";
+import { bulkFail, fail, requireOwner, type ActionResult, type BulkResult } from "./result";
 
 // `style` is accepted for caller convenience but always derived from the name itself.
 export async function addNamesAction(rows: { name: string; meaning: string; gender: Gender; style?: NameStyle }[]): Promise<ActionResult<{ added: number; skipped: string[] }>> {
@@ -60,9 +60,49 @@ export async function setSkipAction(id: string, skip: boolean): Promise<ActionRe
 export async function deleteNameAction(id: string): Promise<ActionResult> {
   await requireOwner();
   const sb = await createClient();
-  const { data, error } = await sb.from("names").delete().eq("id", id).in("status", ["available", "skip"]).select("id");
+  // Pending = an AI suggestion never used in a post, so deleting it is how it is rejected.
+  const { data, error } = await sb.from("names").delete().eq("id", id).in("status", ["available", "skip", "pending"]).select("id");
   if (error) return fail(error.message);
   if (!data?.length) return fail("Names that were used in a post cannot be deleted. Mark it Skip instead.");
   revalidatePath("/names");
   return { ok: true };
+}
+
+/** A sanity cap only: any realistic "Approve all" fits; ids travel in chunks of 100. */
+const MAX_BULK = 10000;
+
+/**
+ * Run one pending-only statement per chunk of ids. A later chunk failing does not hide the
+ * earlier chunks' changes: the page is revalidated whenever anything changed.
+ */
+async function bulkPending(ids: string[], approve: boolean): Promise<BulkResult> {
+  const bad = badIds(ids, MAX_BULK);
+  if (bad) return fail(bad);
+  const sb = await createClient();
+  const done: string[] = [];
+  let err: string | null = null;
+  for (const part of chunks(ids, 100)) {
+    const q = approve ? sb.from("names").update({ status: "available" }) : sb.from("names").delete();
+    const { data, error } = await q.in("id", part).eq("status", "pending").select("id");
+    if (error) { err = error.message; break; }
+    for (const d of (data ?? []) as { id: string }[]) done.push(d.id);
+  }
+  const count = done.length;
+  if (count) { revalidatePath("/names"); if (approve) revalidatePath("/"); }
+  // The client keeps `done` rows in their new state and rolls back only the rest.
+  if (err) return bulkFail(count ? `${err} (${count} were ${approve ? "approved" : "rejected"} before this.)` : err, done);
+  if (!count) return fail("These suggestions were already handled. Reload the page.");
+  return { ok: true, count };
+}
+
+/** Approve AI suggestions: pending -> available (now usable in posts). Only pending rows change. */
+export async function approveNamesAction(ids: string[]): Promise<BulkResult> {
+  await requireOwner();
+  return bulkPending(ids, true);
+}
+
+/** Reject AI suggestions: deletes them. Only pending rows can be removed this way. */
+export async function rejectNamesAction(ids: string[]): Promise<BulkResult> {
+  await requireOwner();
+  return bulkPending(ids, false);
 }

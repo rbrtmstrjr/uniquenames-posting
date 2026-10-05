@@ -4,10 +4,12 @@ import { toast } from "sonner";
 import { Dialog } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Segmented } from "@/components/ui/segmented";
+import { Textarea } from "@/components/ui/shadcn/textarea";
 import type { Gender } from "@/lib/db/types";
 import { parseBulkNames } from "@/lib/names/bulk-paste";
 import { addNamesAction } from "@/lib/actions/names";
 import { nameKey } from "@/lib/actions/helpers";
+import { callAction } from "@/lib/actions/call";
 
 /** `existing` holds nameKey() values (normalized, lower-case) so the preview matches the server's dedup. */
 export function BulkPaste({ open, onOpenChange, existing, onSaved }: { open: boolean; onOpenChange: (o: boolean) => void; existing: Set<string>; onSaved: () => void }) {
@@ -31,7 +33,7 @@ export function BulkPaste({ open, onOpenChange, existing, onSaved }: { open: boo
 
   const save = async () => {
     setBusy(true);
-    const r = await addNamesAction(fresh);
+    const r = await callAction(() => addNamesAction(fresh));
     setBusy(false);
     if (!r.ok) { toast.error(r.error); return; }
     toast.success(`Added ${r.added} names${r.skipped.length ? `, skipped ${r.skipped.length} already in the list` : ""}`);
@@ -44,8 +46,8 @@ export function BulkPaste({ open, onOpenChange, existing, onSaved }: { open: boo
     <Dialog open={open} onOpenChange={onOpenChange} wide title="Paste many names" description="One per line: Name - meaning. Two-word and single names can be mixed.">
       <div className="space-y-4">
         <Segmented label="Gender" value={gender} onChange={setGender} options={[{ value: "boy", label: "Boy names" }, { value: "girl", label: "Girl names" }]} />
-        <textarea value={text} onChange={(e) => setText(e.target.value)} rows={9} aria-label="Names to add" placeholder={"Arlo Zenith - peak strength with calm\nLuna - the moon"}
-          className="w-full rounded-xl border border-line bg-bg p-3 font-mono text-sm text-ink" />
+        <Textarea value={text} onChange={(e) => setText(e.target.value)} rows={9} aria-label="Names to add" placeholder={"Arlo Zenith - peak strength with calm\nLuna - the moon"}
+          className="field-sizing-fixed min-h-52 font-mono md:text-sm" />
         <div className="grid gap-3 sm:grid-cols-3 text-sm">
           <div className="rounded-xl bg-ok/10 p-3"><div className="text-2xl font-bold text-ok">{fresh.length}</div><div className="text-muted">new names ready</div></div>
           <div className="rounded-xl bg-surface-2 p-3"><div className="text-2xl font-bold text-ink">{dupes.length}</div><div className="text-muted">already in your list (skipped)</div></div>

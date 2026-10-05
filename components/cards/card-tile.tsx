@@ -3,10 +3,11 @@ import { useState } from "react";
 import { AlertTriangle, Clock3, Loader2, PenLine, PlugZap, RotateCw } from "lucide-react";
 import type { CardRow } from "@/lib/db/types";
 import { cardVisual } from "@/lib/status/card-state";
-import type { WorkerHealth } from "@/lib/status/worker-health";
+import { canGenerate, type WorkerHealth } from "@/lib/status/worker-health";
 import { formatElapsed } from "@/lib/status/eta";
 import { useNow } from "@/lib/realtime/hooks";
 import { cn } from "@/lib/utils/cn";
+import { FadeImage } from "@/components/ui/fade-image";
 
 export function CardTile({ card, url, health, queuePos, onOpen, onRetry, selection, className }: {
   card: CardRow; url?: string; health: WorkerHealth; queuePos: number; onOpen?: () => void; onRetry?: () => void | Promise<void>;
@@ -14,9 +15,11 @@ export function CardTile({ card, url, health, queuePos, onOpen, onRetry, selecti
 }) {
   const [retrying, setRetrying] = useState(false);
   const v = cardVisual(card, health);
+  const gen = canGenerate(health);
   const now = useNow(1000);
   const elapsed = card.started_at ? Math.max(0, (now - Date.parse(card.started_at)) / 1000) : 0;
-  const showImage = !!url && (v === "done" || v === "restamp" || v === "regenerating" || (v === "waiting" && !!card.card_path) || (v === "failed" && !!card.card_path));
+  // The card has a picture to show (its signed URL may still be on the way: FadeImage shimmers until then).
+  const showImage = !!card.card_path && (v === "done" || v === "restamp" || v === "regenerating" || v === "waiting" || v === "failed");
   const label = `${card.name}: ${({ queued: "in line", generating: "being made", regenerating: "being remade", restamp: "updating text", done: "ready", failed: "failed", waiting: "waiting for your PC" } as const)[v]}`;
 
   const retry = async () => {
@@ -28,9 +31,8 @@ export function CardTile({ card, url, health, queuePos, onOpen, onRetry, selecti
   const media = (
     <>
       {showImage && (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img key={url} src={url} alt="" loading="lazy" decoding="async"
-          className={cn("size-full object-cover animate-pop transition duration-500", v === "regenerating" && "scale-[1.02] opacity-30 blur-[2px]", selection && !selection.selected && "opacity-45 saturate-50")} />
+        <FadeImage src={url}
+          className={cn(v === "regenerating" && "scale-[1.02] opacity-30 blur-[2px]", selection && !selection.selected && "opacity-45 saturate-50")} />
       )}
       {(v === "generating" || v === "regenerating") && <div className={cn("absolute inset-0 shimmer animate-shimmer", v === "regenerating" && "opacity-60")} aria-hidden />}
     </>
@@ -71,11 +73,19 @@ export function CardTile({ card, url, health, queuePos, onOpen, onRetry, selecti
         <div className="absolute inset-x-2 bottom-2 z-[3] rounded-lg bg-surface/95 p-2 text-left shadow-soft">
           <div className="flex items-center gap-1.5 text-xs font-bold text-bad"><AlertTriangle className="size-3.5" /> Failed</div>
           <p className="mt-0.5 line-clamp-2 text-[11px] text-muted">{card.error ?? "Unknown error"}</p>
-          {onRetry && (
+          {onRetry && (gen.ok ? (
             <button type="button" onClick={retry} disabled={retrying} className="mt-1.5 inline-flex min-h-11 w-full items-center justify-center gap-1.5 rounded-md bg-bad px-2 text-xs font-bold text-bad-ink disabled:opacity-70">
               {retrying ? <Loader2 className="size-3.5 animate-spin" /> : <RotateCw className="size-3.5" />} {retrying ? "Retrying…" : "Retry"}
             </button>
-          )}
+          ) : (
+            // Locked like Generate: a retry needs the PC and ComfyUI. The reason is shown, not a tooltip.
+            <>
+              <button type="button" disabled className="mt-1.5 inline-flex min-h-11 w-full cursor-not-allowed items-center justify-center gap-1.5 rounded-md bg-bad px-2 text-xs font-bold text-bad-ink opacity-50">
+                <RotateCw className="size-3.5" /> Retry
+              </button>
+              <p className="mt-1 flex items-start gap-1 text-[11px] font-semibold text-warn-text"><PlugZap className="mt-px size-3 shrink-0" aria-hidden /> {gen.reason}</p>
+            </>
+          ))}
         </div>
       )}
       {selection && (

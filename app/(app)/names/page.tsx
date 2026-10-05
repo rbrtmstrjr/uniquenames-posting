@@ -5,6 +5,9 @@ import { PageHeader } from "@/components/ui/page-header";
 
 const PAGE = 1000; // PostgREST's default max-rows
 
+// "Suggest with AI" server actions run on this route and can wait ~50 s for Gemini.
+export const maxDuration = 60;
+
 export default async function NamesPage() {
   const sb = await createClient();
   const names: NameRow[] = [];

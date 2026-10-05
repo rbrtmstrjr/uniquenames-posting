@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { validateName, validateSettings, validateTheme } from "@/lib/actions/validate";
+import { validateName, validateSettings, validateTextSettings, validateTheme } from "@/lib/actions/validate";
+import { TEXT_SETTINGS_DEFAULTS } from "@/lib/db/types";
 
 describe("validate", () => {
   it("names", () => {
@@ -14,10 +15,23 @@ describe("validate", () => {
     expect(validateTheme({ ...t, props: " " })).toMatch(/props/);
   });
   it("settings", () => {
-    const s = { caption_template: "x {gender}", hashtags: "#a", handle: "@unique_names", min_images: 9, max_images: 13, sound_on: true };
+    const s = { caption_template: "x {gender}", hashtags: "#a", handle: "@unique_names", min_images: 9, max_images: 13, sound_on: true, ...TEXT_SETTINGS_DEFAULTS };
     expect(validateSettings(s)).toBeNull();
     expect(validateSettings({ ...s, min_images: 14 })).toMatch(/min/i);
     expect(validateSettings({ ...s, handle: "" })).toMatch(/handle/i);
+    expect(validateSettings({ ...s, title_size: 500 })).toMatch(/Name size/);
+  });
+  it("card text settings", () => {
+    const t = { ...TEXT_SETTINGS_DEFAULTS, title_font: "playfair", meaning_font: "lora", mark_font: "greatvibes", text_position: "bottom-right" as const };
+    expect(validateTextSettings(t)).toBeNull();
+    expect(validateTextSettings({ ...t, title_font: "comic-sans" })).toMatch(/font/);
+    expect(validateTextSettings({ ...t, mark_font: "" })).toMatch(/font/);
+    expect(validateTextSettings({ ...t, title_size: 39 })).toBe("Name size must be 40 to 180 px.");
+    expect(validateTextSettings({ ...t, title_size: 180 })).toBeNull();
+    expect(validateTextSettings({ ...t, meaning_size: 91 })).toBe("Meaning size must be 16 to 90 px.");
+    expect(validateTextSettings({ ...t, mark_size: 12.5 })).toBe("Watermark size must be 12 to 48 px.");
+    expect(validateTextSettings({ ...t, mark_size: Number.NaN })).toMatch(/Watermark/);
+    expect(validateTextSettings({ ...t, text_position: "upside-down" as never })).toMatch(/position/);
   });
 });
 

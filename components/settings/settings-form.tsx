@@ -3,38 +3,49 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Bell, LogOut } from "lucide-react";
-import type { SettingsRow } from "@/lib/db/types";
+import { TEXT_SETTINGS_DEFAULTS, type SettingsRow } from "@/lib/db/types";
 import { Panel } from "@/components/ui/panel";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/shadcn/input";
+import { Textarea } from "@/components/ui/shadcn/textarea";
+import { Switch } from "@/components/ui/shadcn/switch";
+import { Slider } from "@/components/ui/shadcn/slider";
 import { ThemeToggle } from "@/components/shell/theme-toggle";
 import { saveSettingsAction } from "@/lib/actions/settings";
+import { callAction } from "@/lib/actions/call";
 import { validateSettings } from "@/lib/actions/validate";
 import { buildCaption } from "@/lib/planner";
 import { createClient } from "@/lib/supabase/client";
+import { TEXT_SETTING_KEYS, type TextSettings } from "@/lib/actions/validate";
+import { CardTextSettings, type PreviewSample } from "./card-text";
 
-const FIELD = "mt-1 h-11 w-full rounded-xl border border-line bg-bg px-3 text-sm text-ink";
+// Card counts are picked on sliders, so a value is always a whole number in range;
+// validateSettings still rejects "fewest" above "most" with a clear message.
+const COUNT_MIN = 1;
+const COUNT_MAX = 30;
 
-// A cleared number input becomes NaN, which validateSettings rejects with a clear message.
-const toCount = (v: string) => (v.trim() === "" ? Number.NaN : Number(v));
-const fromCount = (n: number) => (Number.isNaN(n) ? "" : n);
+const DEFAULT_SAMPLE: PreviewSample = { photoUrl: null, name: "Arlo Zenith", meaning: "peak strength with calm" };
 
-export function SettingsForm({ initial }: { initial: SettingsRow }) {
+/** The text settings of a row; every field is undefined until migration 002 runs, so the column defaults apply. */
+const textOf = (row: Partial<SettingsRow>): TextSettings =>
+  Object.fromEntries(TEXT_SETTING_KEYS.map((k) => [k, row[k] ?? TEXT_SETTINGS_DEFAULTS[k]])) as unknown as TextSettings;
+
+export function SettingsForm({ initial, sample = DEFAULT_SAMPLE }: { initial: SettingsRow; sample?: PreviewSample }) {
   const router = useRouter();
-  const [s, setS] = useState({ caption_template: initial.caption_template, hashtags: initial.hashtags, handle: initial.handle, min_images: initial.min_images, max_images: initial.max_images, sound_on: initial.sound_on });
+  const [s, setS] = useState({ caption_template: initial.caption_template, hashtags: initial.hashtags, handle: initial.handle, min_images: initial.min_images, max_images: initial.max_images, sound_on: initial.sound_on,
+    // undefined until migration 002 runs: the column default (on) is what the app uses then.
+    caption_ai: initial.caption_ai ?? TEXT_SETTINGS_DEFAULTS.caption_ai, ...textOf(initial) });
   const [busy, setBusy] = useState(false);
   const problem = validateSettings(s);
 
   const save = async () => {
     if (validateSettings(s)) return;
     setBusy(true);
-    try {
-      const r = await saveSettingsAction(s);
-      if (r.ok) { toast.success("Settings saved"); router.refresh(); } else toast.error(r.error);
-    } catch {
-      toast.error("Could not save. Check your connection and try again.");
-    } finally {
-      setBusy(false);
-    }
+    // The form already shows the new values; the action's revalidatePath refreshes the
+    // layout (chime setting) in the same response, so no extra router.refresh() round trip.
+    const r = await callAction(() => saveSettingsAction(s));
+    setBusy(false);
+    if (r.ok) toast.success("Settings saved"); else toast.error(r.error);
   };
   const enableNotifications = async () => {
     // Undefined on iOS Safari outside a home-screen app.
@@ -43,34 +54,45 @@ export function SettingsForm({ initial }: { initial: SettingsRow }) {
     if (p === "granted") toast.success("You will get a notification when a post is ready.");
     else toast.error("Notifications are blocked in this browser.");
   };
-  const signOut = async () => { await createClient().auth.signOut(); router.replace("/login"); };
+  const [signingOut, setSigningOut] = useState(false);
+  const signOut = async () => { setSigningOut(true); await createClient().auth.signOut(); router.replace("/login"); };
 
   return (
     <div className="space-y-4">
       <Panel title="Caption">
         <div className="space-y-3">
-          <label className="block"><span className="text-xs font-semibold text-muted">Caption template ({"{gender}"} becomes boy or girl)</span>
-            <textarea value={s.caption_template} onChange={(e) => setS({ ...s, caption_template: e.target.value })} rows={2} className="mt-1 w-full rounded-xl border border-line bg-bg p-3 text-sm text-ink" /></label>
+          <div>
+            <label htmlFor="caption-ai" className="inline-flex min-h-11 cursor-pointer items-center gap-3 text-sm font-semibold text-ink">
+              <Switch id="caption-ai" checked={s.caption_ai} onCheckedChange={(v) => setS({ ...s, caption_ai: v })} /> Write captions with AI
+            </label>
+            <p className="text-xs text-muted">{s.caption_ai
+              ? "Each new post gets its own 1–2 sentences about its theme, then your hashtags. The fallback caption below is used if AI is unavailable."
+              : "New posts use the fallback caption below. You can still tap Rewrite caption on a post."}</p>
+          </div>
+          <label className="block"><span className="text-xs font-semibold text-muted">Fallback caption ({"{gender}"} becomes boy or girl)</span>
+            <Textarea value={s.caption_template} onChange={(e) => setS({ ...s, caption_template: e.target.value })} rows={2} className="mt-1" /></label>
           <label className="block"><span className="text-xs font-semibold text-muted">Hashtags</span>
-            <input value={s.hashtags} onChange={(e) => setS({ ...s, hashtags: e.target.value })} className={FIELD} /></label>
-          <div className="rounded-xl bg-surface-2 p-3 text-sm whitespace-pre-wrap text-ink"><span className="mb-1 block text-xs font-semibold text-muted">Preview</span>{buildCaption("girl", s)}</div>
+            <Input value={s.hashtags} onChange={(e) => setS({ ...s, hashtags: e.target.value })} className="mt-1" /></label>
+          <div className="rounded-xl bg-surface-2 p-3 text-sm whitespace-pre-wrap text-ink"><span className="mb-1 block text-xs font-semibold text-muted">Fallback preview</span>{buildCaption("girl", s)}</div>
         </div>
       </Panel>
       <Panel title="Cards">
-        <div className="grid gap-3 sm:grid-cols-3">
+        <div className="grid gap-4 sm:grid-cols-3">
           <label className="block"><span className="text-xs font-semibold text-muted">Watermark handle</span>
-            <input value={s.handle} onChange={(e) => setS({ ...s, handle: e.target.value })} className={FIELD} /></label>
-          <label className="block"><span className="text-xs font-semibold text-muted">Fewest cards (Auto)</span>
-            <input type="number" inputMode="numeric" min={1} max={30} value={fromCount(s.min_images)} onChange={(e) => setS({ ...s, min_images: toCount(e.target.value) })} className={FIELD} /></label>
-          <label className="block"><span className="text-xs font-semibold text-muted">Most cards (Auto)</span>
-            <input type="number" inputMode="numeric" min={1} max={30} value={fromCount(s.max_images)} onChange={(e) => setS({ ...s, max_images: toCount(e.target.value) })} className={FIELD} /></label>
+            <Input value={s.handle} onChange={(e) => setS({ ...s, handle: e.target.value })} className="mt-1" /></label>
+          <CountSlider label="Fewest cards (Auto)" value={s.min_images} onChange={(v) => setS({ ...s, min_images: v })} />
+          <CountSlider label="Most cards (Auto)" value={s.max_images} onChange={(v) => setS({ ...s, max_images: v })} />
         </div>
         <p className="mt-2 text-xs text-muted">The handle change applies to cards made from now on.</p>
       </Panel>
+      <Panel title="Card text">
+        <CardTextSettings value={textOf(s)} onChange={(t) => setS({ ...s, ...t })} sample={sample}
+          aspect={initial.height / initial.width || 1} handle={s.handle.trim() || "@unique_names"} />
+      </Panel>
       <Panel title="App">
         <div className="flex flex-wrap items-center gap-3">
-          <label className="inline-flex min-h-11 cursor-pointer items-center gap-3 text-sm font-semibold text-ink">
-            <input type="checkbox" checked={s.sound_on} onChange={(e) => setS({ ...s, sound_on: e.target.checked })} className="size-6 shrink-0 accent-[var(--accent)]" /> Chime when a post is ready
+          <label htmlFor="sound-on" className="inline-flex min-h-11 cursor-pointer items-center gap-3 text-sm font-semibold text-ink">
+            <Switch id="sound-on" checked={s.sound_on} onCheckedChange={(v) => setS({ ...s, sound_on: v })} /> Chime when a post is ready
           </label>
           <Button variant="subtle" size="sm" onClick={enableNotifications}><Bell className="size-4" aria-hidden /> Allow notifications</Button>
           <ThemeToggle />
@@ -79,8 +101,20 @@ export function SettingsForm({ initial }: { initial: SettingsRow }) {
       {problem && <p role="alert" className="rounded-xl border border-bad bg-bad/10 p-3 text-sm font-semibold text-ink">{problem}</p>}
       <div className="flex flex-wrap justify-between gap-2">
         <Button onClick={save} loading={busy} disabled={!!problem}>Save settings</Button>
-        <Button variant="ghost" onClick={signOut}><LogOut className="size-4" aria-hidden /> Sign out</Button>
+        <Button variant="ghost" loading={signingOut} onClick={signOut}><LogOut className="size-4" aria-hidden /> Sign out</Button>
       </div>
+    </div>
+  );
+}
+
+function CountSlider({ label, value, onChange }: { label: string; value: number; onChange: (v: number) => void }) {
+  return (
+    <div>
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="text-xs font-semibold text-muted">{label}</span>
+        <span className="text-sm font-bold tabular-nums text-ink" aria-hidden>{value}</span>
+      </div>
+      <Slider aria-label={label} min={COUNT_MIN} max={COUNT_MAX} step={1} value={[value]} onValueChange={([v]) => onChange(v)} className="mt-1" />
     </div>
   );
 }

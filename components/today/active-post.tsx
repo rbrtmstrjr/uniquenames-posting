@@ -1,7 +1,6 @@
 "use client";
 import Link from "next/link";
-import { useCallback } from "react";
-import { useRouter } from "next/navigation";
+import { useCallback, useMemo, useState } from "react";
 import { ArrowRight } from "lucide-react";
 import { toast } from "sonner";
 import type { CardRow, PostRow } from "@/lib/db/types";
@@ -15,15 +14,22 @@ import { queuePosition } from "@/lib/status/card-state";
 import { etaSeconds, formatEta } from "@/lib/status/eta";
 import { createClient } from "@/lib/supabase/client";
 import { regenerateCardAction } from "@/lib/actions/cards";
+import { callAction } from "@/lib/actions/call";
+import { CardDialog } from "@/components/cards/card-dialog";
+import { useUndoableDelete } from "@/components/cards/use-undoable-delete";
 
 export function ActivePost({ post, initialCards }: { post: PostRow; initialCards: CardRow[] }) {
-  const router = useRouter();
   const { health } = useWorkerContext();
   const refetch = useCallback(async () => {
     const { data, error } = await createClient().from("cards").select("*").eq("post_id", post.id).order("position");
     return error ? null : ((data ?? []) as CardRow[]);
   }, [post.id]);
-  const [cards] = useRealtimeRows<CardRow>("cards", initialCards, { key: `today-${post.id}`, filter: `post_id=eq.${post.id}`, sort: (a, b) => a.position - b.position, refetch });
+  const [allCards] = useRealtimeRows<CardRow>("cards", initialCards, { key: `today-${post.id}`, filter: `post_id=eq.${post.id}`, sort: (a, b) => a.position - b.position, refetch });
+  const { hidden, remove } = useUndoableDelete();
+  const cards = useMemo(() => allCards.filter((c) => !hidden.has(c.id)), [allCards, hidden]);
+  // The card opens right here (no page load); its live row keeps the dialog current.
+  const [openId, setOpenId] = useState<string | null>(null);
+  const open = cards.find((c) => c.id === openId) ?? null;
   const urlFor = useSignedUrls(cards.map((c) => c.card_path));
   const done = cards.filter((c) => c.status === "done").length;
   const failed = cards.filter((c) => c.status === "failed").length;
@@ -51,10 +57,11 @@ export function ActivePost({ post, initialCards }: { post: PostRow; initialCards
       <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 lg:grid-cols-5">
         {cards.map((c) => (
           <CardTile key={c.id} card={c} url={urlFor(c.card_path)} health={health} queuePos={queuePosition(c, cards)}
-            onOpen={() => { router.push(`/posts/${post.id}?card=${c.id}`); }}
-            onRetry={async () => { const r = await regenerateCardAction(c.id); if (!r.ok) toast.error(r.error); }} />
+            onOpen={() => setOpenId(c.id)}
+            onRetry={async () => { const r = await callAction(() => regenerateCardAction(c.id)); if (!r.ok) toast.error(r.error); }} />
         ))}
       </div>
+      <CardDialog card={open} url={open ? urlFor(open.card_path) : undefined} health={health} onClose={() => setOpenId(null)} onDelete={remove} />
     </Panel>
   );
 }

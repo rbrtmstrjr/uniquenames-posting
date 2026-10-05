@@ -2,6 +2,11 @@ import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({
-  resolve: { alias: { "@": fileURLToPath(new URL(".", import.meta.url)) } },
-  test: { environment: "node", include: ["tests/**/*.test.ts"], testTimeout: 30000 },
+  resolve: { alias: {
+    "@": fileURLToPath(new URL(".", import.meta.url)),
+    // The real package throws outside a React Server bundle; tests run server code directly.
+    "server-only": fileURLToPath(new URL("./tests/helpers/server-only-stub.ts", import.meta.url)),
+  } },
+  // Component tests (.tsx) opt into jsdom per file with `// @vitest-environment jsdom`.
+  test: { environment: "node", include: ["tests/**/*.test.ts", "tests/**/*.test.tsx"], testTimeout: 30000 },
 });
