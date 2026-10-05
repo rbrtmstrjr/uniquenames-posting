@@ -1,6 +1,7 @@
 import type { CardStatus, Gender, NameStyle } from "@/lib/db/types";
 import { normalizeQuotes } from "@/lib/names/bulk-paste";
 import { hashSeed } from "@/lib/planner/random";
+import { isAgeChoice } from "@/lib/planner/age";
 
 export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -51,7 +52,8 @@ export function restampSelection<T extends { id: string; status: CardStatus; pho
   return { restamp: finished.filter((c) => !!c.photo_path), noPhoto: finished.filter((c) => !c.photo_path).length };
 }
 
-export function validateCreatePost(i: { gender: string; style: string; count: number | null; requestId: string; themeId?: string }): string | null {
+export function validateCreatePost(i: { gender: string; style: string; count: number | null; requestId: string; themeId?: string; subjectAge?: unknown }): string | null {
+  if (i.subjectAge !== undefined && !isAgeChoice(i.subjectAge)) return "Pick a child age: Random, Newborn or 1 to 7 years.";
   if (!UUID_RE.test(i.requestId ?? "")) return "Bad request id. Reload the page and try again.";
   if (i.themeId !== undefined && !UUID_RE.test(i.themeId)) return "Pick a valid theme.";
   if ((i.gender as Gender) !== "boy" && (i.gender as Gender) !== "girl") return "Pick Boy or Girl.";
