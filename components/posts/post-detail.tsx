@@ -152,6 +152,9 @@ export function PostDetail({ post: initialPost, theme, initialCards }: { post: P
     setBusy(null);
     setConfirmRestamp(false);
     if (!r.ok) { toast.error(r.error); return; }
+    // Cards the server skipped ("changed meanwhile") drop the optimistic look; realtime brings their real state.
+    const queued = new Set(r.ids);
+    setCards((prev) => prev.map((c) => (before.has(c.id) && !queued.has(c.id) && c.status === "restamp" ? { ...c, status: before.get(c.id)! } : c)));
     const extra = [r.noPhoto && `${r.noPhoto} older card${r.noPhoto === 1 ? " has" : "s have"} no clean photo and stay${r.noPhoto === 1 ? "s" : ""} as ${r.noPhoto === 1 ? "it is" : "they are"}.`,
       r.skipped && `${r.skipped} changed meanwhile and ${r.skipped === 1 ? "was" : "were"} skipped.`].filter(Boolean).join(" ");
     toast.success(`Re-stamping ${r.restamped} card${r.restamped === 1 ? "" : "s"} with your text settings…`, extra ? { description: extra } : undefined);

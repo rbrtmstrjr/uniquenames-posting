@@ -431,6 +431,19 @@ def ensure_fonts(log=print):
     return files
 
 
+def ensure_fonts_in_background(renderer, log=print):
+    """Run ensure_fonts() on a daemon thread so startup (heartbeat + claim loop) never waits
+    on GitHub. Until it finishes, a card loads its font on demand or falls back to Poppins."""
+    def run():
+        try:
+            renderer.font_files = ensure_fonts(log=log)
+        except Exception as e:  # offline: cards fetch on demand later
+            log("font download at startup failed: %s" % e)
+    t = threading.Thread(target=run, name="font-prefetch", daemon=True)
+    t.start()
+    return t
+
+
 def http_json(url, body=None, timeout=30):
     data = json.dumps(body).encode("utf-8") if body is not None else None
     req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"} if data else {})

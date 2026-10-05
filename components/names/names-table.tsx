@@ -12,7 +12,7 @@ import { approveNamesAction, deleteNameAction, rejectNamesAction, setSkipAction 
 import { suggestNamesAction } from "@/lib/actions/suggest";
 import { NAME_COUNT } from "@/lib/ai/suggest-filter";
 import { SuggestDialog } from "@/components/ui/suggest-dialog";
-import { optimistic } from "@/lib/actions/call";
+import { doneIds, optimistic } from "@/lib/actions/call";
 import type { ActionResult } from "@/lib/actions/result";
 import { nameKey } from "@/lib/actions/helpers";
 import { Dialog } from "@/components/ui/dialog";
@@ -74,7 +74,9 @@ export function NamesTable({ names: serverNames }: { names: NameRow[] }) {
     setBusy((b) => new Set([...b, ...ids]));
     const r = await optimistic(
       () => setNames((all) => (approve ? all.map((x) => (ids.has(x.id) ? { ...x, status: "available" as const } : x)) : all.filter((x) => !ids.has(x.id)))),
-      () => setNames((all) => [...all.filter((x) => !ids.has(x.id)), ...list]),
+      // A bulk call that stopped part-way keeps the rows it already changed; only the rest go back.
+      (fail) => { const done = doneIds(fail); const back = list.filter((n) => !done.has(n.id)); const undo = new Set(back.map((n) => n.id));
+        setNames((all) => [...all.filter((x) => !undo.has(x.id)), ...back]); },
       () => (approve ? approveNamesAction([...ids]) : rejectNamesAction([...ids])));
     setBusy((b) => { const s = new Set(b); ids.forEach((id) => s.delete(id)); return s; });
     const one = list.length === 1 ? list[0].name : `${list.length} names`;

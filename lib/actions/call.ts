@@ -14,10 +14,17 @@ export async function callAction<T extends object>(fn: () => Promise<ActionResul
 }
 
 // Optimistic update helper: apply the change now, run the action, roll back on failure.
+// The rollback gets the failed result (see `doneIds` for bulk actions that stopped part-way).
 // Returns the action result so callers can toast success/failure.
-export async function optimistic<T extends object>(apply: () => void, rollback: () => void, fn: () => Promise<ActionResult<T>>): Promise<ActionResult<T>> {
+export async function optimistic<T extends object>(apply: () => void, rollback: (r: { ok: false; error: string }) => void, fn: () => Promise<ActionResult<T>>): Promise<ActionResult<T>> {
   apply();
   const r = await callAction(fn);
-  if (!r.ok) rollback();
+  if (!r.ok) rollback(r);
   return r;
+}
+
+/** Ids a failed bulk action had already changed before it stopped (empty if none/unknown). */
+export function doneIds(r: { ok: false; error: string }): Set<string> {
+  const done = (r as { done?: unknown }).done;
+  return new Set(Array.isArray(done) ? done.filter((d): d is string => typeof d === "string") : []);
 }

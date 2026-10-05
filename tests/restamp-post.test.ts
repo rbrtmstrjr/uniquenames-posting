@@ -41,7 +41,7 @@ describe("restampPostAction", () => {
   const updates = () => fake.queries.filter((q) => q.table === "cards" && isUpdate(q));
 
   it("queues a version-guarded restamp for each finished card with a photo, and counts the rest", async () => {
-    expect(await restampPostAction(POST)).toEqual({ ok: true, restamped: 2, noPhoto: 1, skipped: 0 });
+    expect(await restampPostAction(POST)).toEqual({ ok: true, restamped: 2, noPhoto: 1, skipped: 0, ids: ["a", "b"] });
     const u = updates();
     expect(u).toHaveLength(2);
     expect(op(u[0], "update")![1]).toMatchObject({ status: "restamp", claimed_at: null, error: null, version: 4 });
@@ -55,7 +55,7 @@ describe("restampPostAction", () => {
 
   it("a card that changed meanwhile is skipped, not an error", async () => {
     stale.add("b");
-    expect(await restampPostAction(POST)).toEqual({ ok: true, restamped: 1, noPhoto: 1, skipped: 1 });
+    expect(await restampPostAction(POST)).toEqual({ ok: true, restamped: 1, noPhoto: 1, skipped: 1, ids: ["a"] }) // b is not reported as queued;
   });
 
   it("explains when nothing can be re-stamped", async () => {

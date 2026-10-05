@@ -214,7 +214,28 @@ describe("bulk approve / reject at scale", () => {
     const r = await rejectNamesAction(ids(150));
     expect(r.ok).toBe(false);
     expect(!r.ok && r.error).toMatch(/boom.*100 were rejected/);
+    expect(!r.ok && "done" in r && r.done).toEqual(ids(100)); // the client keeps these removed
     expect(revalidatePath).toHaveBeenCalledWith("/names");
+  });
+
+  it("a theme approve that fails part-way reports exactly which ids were approved", async () => {
+    let n = 0;
+    respond = (q) => {
+      if (op(q, "update")) return n++ < 55 ? { data: [{ id: (op(q, "eq") as unknown[])[2] }] } : { error: { message: "boom" } };
+      return q.table === "themes" ? { data: [{ sort_order: 7 }] } : { data: [] };
+    };
+    const r = await approveThemesAction(ids(120));
+    expect(r.ok).toBe(false);
+    expect(!r.ok && r.error).toMatch(/boom.*55 were approved/);
+    expect(!r.ok && "done" in r && r.done).toEqual(ids(55));
+  });
+
+  it("a theme reject that fails part-way reports the deleted ids", async () => {
+    let n = 0;
+    respond = (q) => (op(q, "delete") ? (n++ === 0 ? { data: inIds(q).map((id) => ({ id })) } : { error: { message: "boom" } }) : { data: [] });
+    const r = await rejectThemesAction(ids(120));
+    expect(!r.ok && r.error).toMatch(/boom.*50 were rejected/);
+    expect(!r.ok && "done" in r && r.done).toEqual(ids(50));
   });
 
   it("approves more than 100 themes in chunks, with one running sort_order", async () => {

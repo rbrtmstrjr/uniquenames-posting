@@ -133,7 +133,7 @@ export async function deletePostAction(postId: string): Promise<ActionResult> {
  * wait in line while the PC is off). Each card update is version-guarded and only takes a
  * card that is still done/failed, so a card that changed meanwhile is simply skipped.
  */
-export async function restampPostAction(postId: string): Promise<ActionResult<{ restamped: number; noPhoto: number; skipped: number }>> {
+export async function restampPostAction(postId: string): Promise<ActionResult<{ restamped: number; noPhoto: number; skipped: number; ids: string[] }>> {
   await requireOwner();
   if (!UUID_RE.test(postId ?? "")) return fail("Post not found.");
   const sb = await createClient();
@@ -146,9 +146,11 @@ export async function restampPostAction(postId: string): Promise<ActionResult<{ 
     sb.from("cards").update({ status: "restamp", claimed_at: null, error: null, version: c.version + 1, queued_at: now })
       .eq("id", c.id).eq("version", c.version).in("status", ["done", "failed"]).select("id")));
   const failed = results.find((r) => r.error)?.error;
-  const restamped = results.filter((r) => !r.error && r.data?.length).length;
+  // The ids really queued: the client drops its optimistic "updating text" look on the rest.
+  const ids = results.flatMap((r) => (r.error ? [] : ((r.data ?? []) as { id: string }[]).map((d) => d.id)));
+  const restamped = ids.length;
   if (failed && !restamped) return fail(failed.message);
-  return { ok: true, restamped, noPhoto, skipped: restamp.length - restamped };
+  return { ok: true, restamped, noPhoto, skipped: restamp.length - restamped, ids };
 }
 
 export async function addCardAction(postId: string): Promise<ActionResult<{ cardId: string }>> {

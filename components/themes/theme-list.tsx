@@ -21,7 +21,7 @@ import { approveThemesAction, makePreviewAction, moveThemeNextAction, rejectThem
 import { suggestThemesAction } from "@/lib/actions/suggest";
 import { THEME_COUNT } from "@/lib/ai/suggest-filter";
 import { SuggestDialog } from "@/components/ui/suggest-dialog";
-import { callAction, optimistic } from "@/lib/actions/call";
+import { callAction, doneIds, optimistic } from "@/lib/actions/call";
 import type { ActionResult } from "@/lib/actions/result";
 import { Dialog } from "@/components/ui/dialog";
 import { GenerateLockNote } from "@/components/shell/generate-lock-note";
@@ -193,7 +193,9 @@ export function ThemeList({ themes: serverThemes, previews: initialPreviews }: {
       () => setThemes((all) => (approve
         ? all.map((x) => (idSet.has(x.id) ? { ...x, status: "available" as const, sort_order: end + 1 + ids.indexOf(x.id) } : x))
         : all.filter((x) => !idSet.has(x.id)))),
-      () => setThemes((all) => [...all.filter((x) => !idSet.has(x.id)), ...rows]),
+      // A bulk call that stopped part-way keeps the themes it already changed; only the rest go back.
+      (fail) => { const done = doneIds(fail); const back = rows.filter((t) => !done.has(t.id)); const undo = new Set(back.map((t) => t.id));
+        setThemes((all) => [...all.filter((x) => !undo.has(x.id)), ...back]); },
       () => (approve ? approveThemesAction(ids) : rejectThemesAction(ids)));
     setPending((m) => { const n = new Map(m); ids.forEach((id) => n.delete(id)); return n; });
     const what = rows.length === 1 ? rows[0].title : `${rows.length} themes`;

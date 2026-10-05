@@ -6,7 +6,7 @@ import type { ThemeRow } from "@/lib/db/types";
 import { validateTheme, type ThemeInput } from "./validate";
 import { generateLockReason } from "./generate-guard";
 import { badIds, chunks } from "./helpers";
-import { fail, requireOwner, type ActionResult } from "./result";
+import { bulkFail, fail, requireOwner, type ActionResult, type BulkResult } from "./result";
 
 export async function saveThemeAction(input: ThemeInput & { id?: string }): Promise<ActionResult<{ id: string }>> {
   await requireOwner();
@@ -80,7 +80,7 @@ const THEME_CHUNK = 50;
  * Approve AI-suggested themes: pending -> available, placed at the END of Up next in the
  * order given (themes added since the suggestion stay ahead of them). Only pending rows change.
  */
-export async function approveThemesAction(ids: string[]): Promise<ActionResult<{ count: number }>> {
+export async function approveThemesAction(ids: string[]): Promise<BulkResult> {
   await requireOwner();
   const bad = badIds(ids, MAX_THEMES);
   if (bad) return fail(bad);
@@ -88,18 +88,19 @@ export async function approveThemesAction(ids: string[]): Promise<ActionResult<{
   const { data: last, error: le } = await sb.from("themes").select("sort_order").neq("status", "pending").order("sort_order", { ascending: false }).limit(1);
   if (le) return fail(le.message);
   const base = ((last?.[0]?.sort_order as number) ?? 0) + 1;
-  let count = 0;
+  const done: string[] = [];
   let err: string | null = null;
   // Each theme gets its own sort_order, so one update per id; at most THEME_CHUNK at a time.
   for (const [c, part] of chunks(ids, THEME_CHUNK).entries()) {
     const rs = await Promise.all(part.map((id, i) =>
       sb.from("themes").update({ status: "available", sort_order: base + c * THEME_CHUNK + i }).eq("id", id).eq("status", "pending").select("id")));
-    count += rs.reduce((n, r) => n + (r.data?.length ?? 0), 0);
+    for (const r of rs) for (const d of (r.data ?? []) as { id: string }[]) done.push(d.id);
     const e = rs.find((r) => r.error)?.error;
     if (e) { err = e.message; break; }
   }
+  const count = done.length;
   if (count) { revalidatePath("/", "layout"); revalidatePath("/themes"); }
-  if (err) return fail(err);
+  if (err) return bulkFail(count ? `${err} (${count} were approved before this.)` : err, done);
   if (!count) return fail("These suggestions were already handled. Reload the page.");
   return { ok: true, count };
 }
@@ -108,7 +109,7 @@ export async function approveThemesAction(ids: string[]): Promise<ActionResult<{
  * Reject AI-suggested themes: deletes them (their preview card rows cascade). Only pending
  * themes. The preview images are removed from storage afterwards, best effort.
  */
-export async function rejectThemesAction(ids: string[]): Promise<ActionResult<{ count: number }>> {
+export async function rejectThemesAction(ids: string[]): Promise<BulkResult> {
   await requireOwner();
   const bad = badIds(ids, MAX_THEMES);
   if (bad) return fail(bad);
@@ -132,7 +133,7 @@ export async function rejectThemesAction(ids: string[]): Promise<ActionResult<{ 
     if (re) console.error("rejectThemesAction: storage cleanup failed", re.message);
   }
   if (deleted.length) revalidatePath("/themes");
-  if (err) return fail(err);
+  if (err) return bulkFail(deleted.length ? `${err} (${deleted.length} were rejected before this.)` : err, deleted);
   if (!deleted.length) return fail("These suggestions were already handled. Reload the page.");
   return { ok: true, count: deleted.length };
 }

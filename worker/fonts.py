@@ -4,6 +4,7 @@
 import functools
 import json
 import os
+import threading
 import time
 import urllib.parse
 import urllib.request
@@ -44,7 +45,18 @@ FAILED_RETRY_S = 600
 _failed = {}
 
 
+# One download at a time: the startup prefetch runs on a background thread while cards may
+# fetch the same file on demand, and both would otherwise write the same .part file.
+_DL_LOCK = threading.Lock()
+
+
 def _download(url, dest, timeout=60):
+    with _DL_LOCK:
+        if not os.path.exists(dest):  # the other thread may have just fetched it
+            _download_unlocked(url, dest, timeout)
+
+
+def _download_unlocked(url, dest, timeout):
     tmp = dest + ".part"
     req = urllib.request.Request(url, headers={"User-Agent": "unique-names-worker"})
     with urllib.request.urlopen(req, timeout=timeout) as r, open(tmp, "wb") as f:

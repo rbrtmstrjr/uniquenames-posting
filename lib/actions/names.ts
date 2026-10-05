@@ -4,7 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import type { Gender, NameStyle } from "@/lib/db/types";
 import { validateName } from "./validate";
 import { badIds, chunks, dedupeNames, nameKey, normalizeName, styleOf } from "./helpers";
-import { fail, requireOwner, type ActionResult } from "./result";
+import { bulkFail, fail, requireOwner, type ActionResult, type BulkResult } from "./result";
 
 // `style` is accepted for caller convenience but always derived from the name itself.
 export async function addNamesAction(rows: { name: string; meaning: string; gender: Gender; style?: NameStyle }[]): Promise<ActionResult<{ added: number; skipped: string[] }>> {
@@ -75,32 +75,34 @@ const MAX_BULK = 10000;
  * Run one pending-only statement per chunk of ids. A later chunk failing does not hide the
  * earlier chunks' changes: the page is revalidated whenever anything changed.
  */
-async function bulkPending(ids: string[], approve: boolean): Promise<ActionResult<{ count: number }>> {
+async function bulkPending(ids: string[], approve: boolean): Promise<BulkResult> {
   const bad = badIds(ids, MAX_BULK);
   if (bad) return fail(bad);
   const sb = await createClient();
-  let count = 0;
+  const done: string[] = [];
   let err: string | null = null;
   for (const part of chunks(ids, 100)) {
     const q = approve ? sb.from("names").update({ status: "available" }) : sb.from("names").delete();
     const { data, error } = await q.in("id", part).eq("status", "pending").select("id");
     if (error) { err = error.message; break; }
-    count += data?.length ?? 0;
+    for (const d of (data ?? []) as { id: string }[]) done.push(d.id);
   }
+  const count = done.length;
   if (count) { revalidatePath("/names"); if (approve) revalidatePath("/"); }
-  if (err) return fail(count ? `${err} (${count} were ${approve ? "approved" : "rejected"} before this.)` : err);
+  // The client keeps `done` rows in their new state and rolls back only the rest.
+  if (err) return bulkFail(count ? `${err} (${count} were ${approve ? "approved" : "rejected"} before this.)` : err, done);
   if (!count) return fail("These suggestions were already handled. Reload the page.");
   return { ok: true, count };
 }
 
 /** Approve AI suggestions: pending -> available (now usable in posts). Only pending rows change. */
-export async function approveNamesAction(ids: string[]): Promise<ActionResult<{ count: number }>> {
+export async function approveNamesAction(ids: string[]): Promise<BulkResult> {
   await requireOwner();
   return bulkPending(ids, true);
 }
 
 /** Reject AI suggestions: deletes them. Only pending rows can be removed this way. */
-export async function rejectNamesAction(ids: string[]): Promise<ActionResult<{ count: number }>> {
+export async function rejectNamesAction(ids: string[]): Promise<BulkResult> {
   await requireOwner();
   return bulkPending(ids, false);
 }

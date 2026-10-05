@@ -131,6 +131,38 @@ describe("Names: suggest + approve", () => {
   });
 });
 
+describe("Bulk approve/reject that fails part-way", () => {
+  it("names: rows the server already approved stay approved; only the rest go back to pending", async () => {
+    m.approveNamesAction.mockResolvedValue({ ok: false, error: "boom (1 were approved before this.)", done: ["Atlas"] });
+    render(<NamesTable names={[nm("Zephyr", "pending"), nm("Atlas", "pending")]} />);
+    fireEvent.click(screen.getByRole("button", { name: "Review" }));
+    fireEvent.click(screen.getByRole("button", { name: "Approve all (2)" }));
+    await waitFor(() => expect(screen.getByText("Zephyr")).toBeTruthy());
+    expect(screen.queryByText("Atlas")).toBeNull(); // not back in Pending
+    expect(screen.getByRole("button", { name: "Approve all (1)" })).toBeTruthy();
+  });
+
+  it("themes: rejected ones stay gone, the rest come back as pending", async () => {
+    m.rejectThemesAction.mockResolvedValue({ ok: false, error: "boom", done: ["Forest Nook"] });
+    render(<ThemeList themes={[th("Forest Nook", "pending", 9), th("Forest Two", "pending", 10)]} previews={[]} />);
+    fireEvent.click(screen.getByRole("button", { name: "Reject Forest Nook" }));
+    fireEvent.click(screen.getByRole("button", { name: "Reject Forest Two" }));
+    await waitFor(() => expect(m.rejectThemesAction).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.getByText("Forest Two")).toBeTruthy());
+    expect(screen.queryByText("Forest Nook")).toBeNull();
+  });
+
+  it("themes: approved ones stay in Up next, the rest return to Pending", async () => {
+    m.approveThemesAction.mockResolvedValue({ ok: false, error: "boom", done: ["Forest Two"] });
+    render(<ThemeList themes={[th("Forest Nook", "pending", 9), th("Forest Two", "pending", 10), th("Boho", "available", 1)]} previews={[]} />);
+    fireEvent.click(screen.getByRole("button", { name: "Approve all" }));
+    await waitFor(() => expect(screen.getByRole("region", { name: /Pending approval · 1/ })).toBeTruthy());
+    expect(within(screen.getByRole("region", { name: /Pending approval · 1/ })).getByText("Forest Nook")).toBeTruthy();
+    const upNext = screen.getByRole("heading", { name: /Up next · 2 left/ }).parentElement!;
+    expect(within(upNext).getByText("Forest Two")).toBeTruthy();
+  });
+});
+
 describe("Themes: pending approval section", () => {
   it("Approve all while one approve is in flight approves only the others, after it in Up next", async () => {
     const first = deferred<unknown>();

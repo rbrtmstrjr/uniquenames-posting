@@ -1,11 +1,15 @@
 # The font catalog: every id loads (files cached under worker/fonts/, downloaded once if
 # missing), weights apply to variable fonts, unknown ids fall back to Poppins.
+import os
 import shutil
 import tempfile
+import threading
+import time
 import unittest
 from unittest import mock
 
 import fonts
+import render
 
 
 class Catalog(unittest.TestCase):
@@ -112,6 +116,51 @@ class Downloads(unittest.TestCase):
         with mock.patch("fonts._download") as dl:  # a second run only tries what is still missing
             fonts.prefetch(log=lambda m: None)
         self.assertEqual([c.args[0].rsplit("/", 1)[1] for c in dl.call_args_list], ["Lora%5Bwght%5D.ttf"])
+
+
+class Startup(unittest.TestCase):
+    def test_font_download_runs_in_the_background_and_never_blocks_startup(self):
+        gate = threading.Event()
+
+        def slow(log=print):  # GitHub hanging
+            gate.wait(5)
+            return {"semibold": "p.ttf"}
+
+        r = render.ComfyRenderer("http://x", 10)
+        with mock.patch("render.ensure_fonts", side_effect=slow):
+            t0 = time.time()
+            t = render.ensure_fonts_in_background(r, log=lambda m: None)
+            self.assertLess(time.time() - t0, 1)  # returned at once: the heartbeat can start
+            self.assertIsNone(r.font_files)
+            gate.set()
+            t.join(5)
+        self.assertEqual(r.font_files, {"semibold": "p.ttf"})
+
+    def test_a_failed_background_download_is_logged_not_raised(self):
+        logs = []
+        r = render.ComfyRenderer("http://x", 10)
+        with mock.patch("render.ensure_fonts", side_effect=OSError("offline")):
+            render.ensure_fonts_in_background(r, log=logs.append).join(5)
+        self.assertTrue(logs and "offline" in logs[0])
+
+    def test_concurrent_downloads_of_one_file_fetch_it_once(self):
+        d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, d, True)
+        dest, calls = os.path.join(d, "f.ttf"), []
+
+        def fetch(url, dest, timeout):
+            calls.append(url)
+            time.sleep(0.2)
+            with open(dest, "wb") as f:
+                f.write(b"x")
+
+        with mock.patch("fonts._download_unlocked", side_effect=fetch):
+            ts = [threading.Thread(target=fonts._download, args=("u", dest)) for _ in range(3)]
+            for t in ts:
+                t.start()
+            for t in ts:
+                t.join(5)
+        self.assertEqual(calls, ["u"])
 
 
 if __name__ == "__main__":

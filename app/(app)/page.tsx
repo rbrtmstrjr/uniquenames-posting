@@ -6,6 +6,9 @@ import { Empty } from "@/components/ui/empty";
 import { ImageIcon } from "lucide-react";
 import { PageHeader } from "@/components/ui/page-header";
 
+// Create post waits on Gemini for the caption (9 s budget) plus a few DB round trips.
+export const maxDuration = 60;
+
 export default async function TodayPage() {
   const d = await getTodayData();
   const themesLeft = { boy: d.themes.filter((t) => t.gender === "boy").length, girl: d.themes.filter((t) => t.gender === "girl").length };
