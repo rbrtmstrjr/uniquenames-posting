@@ -20,7 +20,8 @@ export async function saveSettingsAction(s: SettingsInput): Promise<ActionResult
   if (error) {
     // Before migration 002 the caption_ai column does not exist: save everything else so the
     // owner's other changes are not lost, and say what is missing (AI stays on, the default).
-    if (!/caption_ai/.test(error.message)) return fail(error.message);
+    const missingColumn = /caption_ai/.test(error.message) && (error.code === "PGRST204" || /schema cache/i.test(error.message));
+    if (!missingColumn) return fail(error.message);
     const { error: again } = await sb.from("settings").update(base).eq("id", 1);
     if (again) return fail(again.message);
     revalidatePath("/", "layout");

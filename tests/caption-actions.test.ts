@@ -73,6 +73,50 @@ describe("createPostAction captions", () => {
     expect((await createPostAction(createInput)).ok).toBe(true);
     expect(generateJson).toHaveBeenCalledTimes(1);
   });
+
+  it("one AI deadline covers the action: a retry on another theme only gets the time left", async () => {
+    let now = 1_000_000;
+    const spy = vi.spyOn(Date, "now").mockImplementation(() => now);
+    try {
+      const theme2: ThemeRow = { ...theme, id: "44444444-4444-4444-8444-444444444444", title: "Forest Friends", sort_order: 2 };
+      let n = 0;
+      const inner = respond;
+      respond = (q) => {
+        if (q.table === "rpc:create_post") return { data: n++ === 0 ? { status: "conflict" } : { status: "ok", post_id: POST_ID } };
+        // The first theme is taken by the conflicting post, so the retry plans the next one.
+        if (q.table === "themes") return { data: n === 0 ? [theme, theme2] : [theme2] };
+        return inner(q);
+      };
+      generateJson.mockImplementation(async () => { now += 7000; return { ok: true, data: { caption: "Woodland baby boy names with soft moss and tiny acorns." } }; });
+      const { themeId: _t, ...auto } = createInput;
+      void _t;
+      expect((await createPostAction(auto)).ok).toBe(true);
+      expect(generateJson).toHaveBeenCalledTimes(2);
+      expect(generateJson.mock.calls[0][0].timeoutMs).toBe(9000);
+      expect(generateJson.mock.calls[1][0].timeoutMs).toBe(2000);
+    } finally { spy.mockRestore(); }
+  });
+
+  it("with the deadline spent, a retry on another theme uses the template without calling Gemini", async () => {
+    let now = 1_000_000;
+    const spy = vi.spyOn(Date, "now").mockImplementation(() => now);
+    try {
+      const theme2: ThemeRow = { ...theme, id: "44444444-4444-4444-8444-444444444444", sort_order: 2 };
+      let n = 0;
+      const inner = respond;
+      respond = (q) => {
+        if (q.table === "rpc:create_post") return { data: n++ === 0 ? { status: "conflict" } : { status: "ok", post_id: POST_ID } };
+        if (q.table === "themes") return { data: n === 0 ? [theme, theme2] : [theme2] };
+        return inner(q);
+      };
+      generateJson.mockImplementation(async () => { now += 9000; return { ok: false, error: "Gemini timed out." }; });
+      const { themeId: _t, ...auto } = createInput;
+      void _t;
+      expect((await createPostAction(auto)).ok).toBe(true);
+      expect(generateJson).toHaveBeenCalledTimes(1);
+      expect(createdCaption()).toBe("Lovely names for your baby boy.\n\n#babynames");
+    } finally { spy.mockRestore(); }
+  });
 });
 
 describe("rewriteCaptionAction", () => {
@@ -95,6 +139,15 @@ describe("rewriteCaptionAction", () => {
     generateJson.mockResolvedValueOnce({ ok: false, error: "Gemini error 500" });
     expect(await rewriteCaptionAction(POST_ID)).toMatchObject({ ok: false, error: expect.stringMatching(/unchanged/) });
     expect(fake.queries.filter((q) => q.table === "posts" && isUpdate(q))).toHaveLength(0);
+  });
+
+  it("a failed settings read returns an error and writes nothing (no caption without hashtags)", async () => {
+    const inner = respond;
+    respond = (q) => (q.table === "settings" ? { error: { message: "timeout" } } : inner(q));
+    generateJson.mockResolvedValue({ ok: true, data: { caption: "Beach-day baby boy names with a fresh sea breeze." } });
+    expect(await rewriteCaptionAction(POST_ID)).toMatchObject({ ok: false, error: expect.stringMatching(/settings/) });
+    expect(fake.queries.filter((q) => q.table === "posts" && isUpdate(q))).toHaveLength(0);
+    expect(generateJson).not.toHaveBeenCalled();
   });
 
   it("rejects a bad id without touching the database", async () => {
@@ -125,5 +178,24 @@ describe("saveSettingsAction caption_ai", () => {
     expect(settingsUpdates()[1]).not.toHaveProperty("caption_ai");
     first = true;
     expect(await saveSettingsAction({ ...input, caption_ai: true })).toEqual({ ok: true });
+  });
+
+  it("a PGRST204 code alone also counts as the missing column", async () => {
+    const inner = respond;
+    let first = true;
+    respond = (q) => {
+      if (q.table === "settings" && isUpdate(q) && first) { first = false; return { error: { message: "column caption_ai not found", code: "PGRST204" } as { message: string } }; }
+      return inner(q);
+    };
+    expect(await saveSettingsAction({ ...input, caption_ai: true })).toEqual({ ok: true });
+    expect(settingsUpdates()).toHaveLength(2);
+  });
+
+  it("any other error that mentions caption_ai is returned as is, with no second write", async () => {
+    const inner = respond;
+    respond = (q) => (q.table === "settings" && isUpdate(q)
+      ? { error: { message: "null value in column \"caption_ai\" violates not-null constraint", code: "23502" } as { message: string } } : inner(q));
+    expect(await saveSettingsAction(input)).toMatchObject({ ok: false, error: expect.stringMatching(/not-null/) });
+    expect(settingsUpdates()).toHaveLength(1);
   });
 });

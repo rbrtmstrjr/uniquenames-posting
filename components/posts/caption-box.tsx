@@ -1,5 +1,5 @@
 "use client";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Check, Copy, Loader2, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -15,6 +15,9 @@ export function CaptionBox({ postId, initial }: { postId: string; initial: strin
   const [rewriting, setRewriting] = useState(false);
   // The last save in flight, so Rewrite never races an edit's save (whichever lands last wins).
   const pendingSave = useRef<Promise<unknown>>(Promise.resolve());
+  // The box's latest text for the toast's Undo (its closure would only see the old render).
+  const textRef = useRef(text);
+  useEffect(() => { textRef.current = text; }, [text]);
 
   // Optimistic: treat the text as saved straight away (the Copy button and status line use it);
   // a failed save marks it unsaved again so the next blur retries, and says why.
@@ -43,8 +46,13 @@ export function CaptionBox({ postId, initial }: { postId: string; initial: strin
     if (!r.ok) { toast.error(r.error); return; }
     setText(r.caption);
     setSaved(r.caption);
+    textRef.current = r.caption;
     toast.success("New caption written", {
-      action: { label: "Undo", onClick: () => { setText(before); void persist(before, r.caption, true); } },
+      action: { label: "Undo", onClick: () => {
+        // Only undo onto the untouched rewrite: if the owner has edited since, Undo would throw that away.
+        if (textRef.current !== r.caption) { toast.error("The caption was edited after the rewrite, so Undo was skipped."); return; }
+        setText(before); void persist(before, r.caption, true);
+      } },
     });
   };
 

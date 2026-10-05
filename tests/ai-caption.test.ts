@@ -42,6 +42,17 @@ describe("sanitizeCaption", () => {
     expect(words.length).toBeLessThanOrEqual(CAPTION_MAX);
     expect(words.endsWith("…")).toBe(true);
   });
+  it("strips markdown and hashtags glued to punctuation", () => {
+    expect(sanitizeCaption("**Cozy** _pumpkin_ vibes for `baby girl` ~names~!#cute#fall Which is your favorite?"))
+      .toBe("Cozy pumpkin vibes for baby girl names! Which is your favorite?");
+    expect(sanitizeCaption("Sweet baby boy names for a beach day,#summer right?")).toBe("Sweet baby boy names for a beach day, right?");
+  });
+  it("cuts at a sentence end that lands exactly on the cap", () => {
+    // The "." is the 220th character; its following space is just past the cap.
+    const s = `Baby boy names ${"x".repeat(CAPTION_MAX - "Baby boy names ".length - 1)}. And more words here.`;
+    expect(s.indexOf(". ")).toBe(CAPTION_MAX - 1);
+    expect(sanitizeCaption(s)).toBe(s.slice(0, CAPTION_MAX));
+  });
   it("rejects text that is empty after cleaning", () => {
     expect(sanitizeCaption("#a #b #c")).toBeNull();
     expect(sanitizeCaption("  ")).toBeNull();

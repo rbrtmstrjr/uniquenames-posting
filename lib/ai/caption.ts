@@ -29,6 +29,7 @@ export const CAPTION_SYSTEM = [
   "Rules: say \"baby boy names\" or \"baby girl names\" (or close wording) so readers know what the post is.",
   "Do not list, quote or invent any names, and never state what a name means.",
   "Do not mention how many names there are.",
+  "The photos are a styled photoshoot set for name ideas, not a real family: never write as if a real baby or family exists (no \"our little one\", \"we loved watching\", \"my baby\"); talk about the set, the mood and the names.",
   "Use at most one emoji, or none. No hashtags, no @mentions, no links, no quotation marks.",
   "Return JSON: {\"caption\": \"...\"}.",
 ].join("\n");
@@ -59,7 +60,8 @@ const EMOJI_RE = /\p{Extended_Pictographic}(?:️|‍\p{Extended_Pictographic}|\
 export function sanitizeCaption(raw: string): string | null {
   let s = raw
     .replace(/https?:\/\/\S+/gi, "")
-    .replace(/(^|\s)[#@][\p{L}\p{N}_]+/gu, "$1")
+    .replace(/(?<![\p{L}\p{N}_])(?:[#@][\p{L}\p{N}_]+)+/gu, "") // hashtags/mentions, even glued ("names!#cute#baby")
+    .replace(/[*_`~]+/g, "") // markdown emphasis/code/strike
     .replace(/["“”„«»]/g, "")
     .replace(/(^|\s)['‘’]+|['‘’]+(?=\s|$|[.,!?])/g, "$1") // stray single quotes, keep apostrophes in words
     .replace(/\s+/g, " ")
@@ -73,8 +75,10 @@ export function sanitizeCaption(raw: string): string | null {
 
 /** Shorten at the last sentence end that fits, else at a word boundary with an ellipsis. */
 function cut(s: string): string {
+  // One extra character so a sentence ending exactly at the cap (its space at index MAX) counts.
+  let end = -1;
+  for (const m of s.slice(0, CAPTION_MAX + 1).matchAll(/[.!?](?=\s)/g)) if (m.index < CAPTION_MAX) end = m.index;
   const head = s.slice(0, CAPTION_MAX);
-  const end = Math.max(head.lastIndexOf(". "), head.lastIndexOf("! "), head.lastIndexOf("? "));
   if (end >= CAPTION_MIN) return head.slice(0, end + 1).trim();
   const space = head.slice(0, CAPTION_MAX - 1).lastIndexOf(" ");
   return `${head.slice(0, space > 0 ? space : CAPTION_MAX - 1).replace(/[\s,;:–-]+$/, "")}…`;

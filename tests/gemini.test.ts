@@ -50,6 +50,12 @@ describe("generateJson", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it("a 500 that arrives too close to the deadline is not retried", async () => {
+    fetchMock.mockImplementation(async () => status(500, "late"));
+    expect(await generateJson({ ...base, timeoutMs: 300 })).toEqual({ ok: false, error: "Gemini error 500: late" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("does not retry a 400", async () => {
     fetchMock.mockImplementation(async () => status(400, "bad"));
     expect(await generateJson(base)).toMatchObject({ ok: false });

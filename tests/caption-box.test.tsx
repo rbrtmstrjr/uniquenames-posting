@@ -60,6 +60,18 @@ describe("CaptionBox Rewrite caption", () => {
     expect(box().value).toBe("Edited by owner");
   });
 
+  it("Undo does nothing (and says so) once the owner has edited the rewritten caption", async () => {
+    rewriteCaptionAction.mockResolvedValueOnce({ ok: true, caption: "AI text" });
+    render(<CaptionBox postId="p1" initial="Old words" />);
+    await act(async () => { fireEvent.click(rewriteBtn()); });
+    fireEvent.change(box(), { target: { value: "AI text, tweaked by the owner" } });
+    const undo = toast.success.mock.calls.find((c) => c[0] === "New caption written")![1].action.onClick;
+    await act(async () => { undo(); });
+    expect(box().value).toBe("AI text, tweaked by the owner");
+    expect(updateCaptionAction).not.toHaveBeenCalled();
+    expect(toast.error).toHaveBeenCalledWith(expect.stringMatching(/Undo was skipped/));
+  });
+
   it("a failed rewrite keeps the text and toasts the reason", async () => {
     rewriteCaptionAction.mockResolvedValueOnce({ ok: false, error: "Could not write a new caption right now. Your caption is unchanged." });
     render(<CaptionBox postId="p1" initial="Keep me" />);

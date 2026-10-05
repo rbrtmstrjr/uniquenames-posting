@@ -5,7 +5,7 @@ import { planExtraCard, planPost, subjectKey } from "@/lib/planner";
 import type { Gender, NameRow, NameStyle, PostRow, SettingsRow, ThemeRow } from "@/lib/db/types";
 import { UUID_RE, validateCreatePost } from "./helpers";
 import { generateLockReason } from "./generate-guard";
-import { aiCaptionLine, captionAiOn, composeCaption, REWRITE_TIMEOUT_MS, withHashtags } from "@/lib/ai/caption";
+import { aiCaptionLine, CAPTION_TIMEOUT_MS, captionAiOn, composeCaption, REWRITE_TIMEOUT_MS, withHashtags } from "@/lib/ai/caption";
 import { fail, requireOwner, type ActionResult } from "./result";
 
 export async function createPostAction(input: {
@@ -17,12 +17,18 @@ export async function createPostAction(input: {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(input.postDate)) return fail("Pick a valid date.");
   const sb = await createClient();
   // The AI caption needs the theme the planner picks, so it runs right after the (parallel)
-  // reads and before create_post. It never throws and gives up after CAPTION_TIMEOUT_MS,
-  // falling back to the template: a post is never blocked or failed by AI. A conflict
-  // retry on the same theme reuses the line instead of asking Gemini twice.
+  // reads and before create_post. It never throws, and ONE deadline (CAPTION_TIMEOUT_MS) covers
+  // the whole action, so a conflict retry on a different theme only gets the time left; past it
+  // the template is used: a post is never blocked or failed by AI. A retry on the same theme
+  // reuses the line instead of asking Gemini twice.
+  const aiDeadline = Date.now() + CAPTION_TIMEOUT_MS;
   const lines = new Map<string, Promise<string | null>>();
   const lineFor = (theme: ThemeRow) => {
-    if (!lines.has(theme.id)) lines.set(theme.id, aiCaptionLine({ theme, gender: input.gender, style: input.style }));
+    const left = aiDeadline - Date.now();
+    if (!lines.has(theme.id)) {
+      if (left < 500) return Promise.resolve(null);
+      lines.set(theme.id, aiCaptionLine({ theme, gender: input.gender, style: input.style }, left));
+    }
     return lines.get(theme.id)!;
   };
   for (let attempt = 0; attempt < 2; attempt++) {
@@ -89,17 +95,19 @@ export async function rewriteCaptionAction(postId: string): Promise<ActionResult
   await requireOwner();
   if (!UUID_RE.test(postId ?? "")) return fail("Post not found.");
   const sb = await createClient();
-  const [{ data: post }, { data: settings }] = await Promise.all([
+  const [{ data: post }, { data: settings, error: settingsError }] = await Promise.all([
     sb.from("posts").select("id, gender, style, theme_id").eq("id", postId).maybeSingle(),
     sb.from("settings").select("hashtags").eq("id", 1).maybeSingle(),
   ]);
   if (!post) return fail("Post not found.");
+  // Without the settings row the hashtags are unknown: writing would drop them, so stop here.
+  if (settingsError || !settings) return fail("Could not read your settings. Your caption is unchanged — try again in a moment.");
   const p = post as Pick<PostRow, "id" | "gender" | "style" | "theme_id">;
   const { data: theme } = await sb.from("themes").select("*").eq("id", p.theme_id).maybeSingle();
   if (!theme) return fail("This post's theme was deleted, so there is nothing to write about.");
   const line = await aiCaptionLine({ theme: theme as ThemeRow, gender: p.gender, style: p.style }, REWRITE_TIMEOUT_MS);
   if (!line) return fail("Could not write a new caption right now. Your caption is unchanged — try again in a moment.");
-  const caption = withHashtags(line, (settings as { hashtags?: string } | null)?.hashtags ?? "");
+  const caption = withHashtags(line, (settings as { hashtags?: string }).hashtags ?? "");
   const { data, error } = await sb.from("posts").update({ caption }).eq("id", postId).select("id");
   if (error) return fail(error.message);
   return data?.length ? { ok: true, caption } : fail("Post not found.");
