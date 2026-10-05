@@ -3,9 +3,9 @@
 // without a network. Each query is { table, ops: [[method, ...args], ...] }.
 export type Op = [string, ...unknown[]];
 export interface Query { table: string; ops: Op[] }
-export type Respond = (q: Query) => { data?: unknown; error?: { message: string } | null } | undefined;
+export type Respond = (q: Query) => { data?: unknown; error?: { message: string; code?: string } | null } | undefined;
 
-const CHAIN = ["select", "insert", "update", "delete", "upsert", "eq", "neq", "ilike", "in", "is", "not", "order", "limit", "single", "maybeSingle"];
+const CHAIN = ["select", "insert", "update", "delete", "upsert", "eq", "neq", "ilike", "in", "is", "not", "order", "limit", "range", "or", "single", "maybeSingle"];
 
 export function fakeSupabase(respond: Respond) {
   const queries: Query[] = [];

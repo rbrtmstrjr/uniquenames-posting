@@ -4,9 +4,25 @@ import { hashSeed } from "@/lib/planner/random";
 
 export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-/** Straighten curly apostrophes, collapse inner whitespace and trim: the stored form of a name. */
-export const normalizeName = (name: string): string => normalizeQuotes(name).replace(/\s+/g, " ").trim();
-/** Case-insensitive dedup key; matches the lower(name) unique index. */
+/**
+ * One word part ("arlo", "MARY", "McKenzie"): all-lower or all-upper becomes "Arlo"/"Mary";
+ * deliberate mixed case (McKenzie, DeAndre) is kept, only its first letter is raised.
+ */
+function capPart(p: string): string {
+  if (!p) return p;
+  const lower = p.toLocaleLowerCase();
+  const body = p === lower || (p.length > 1 && p === p.toLocaleUpperCase()) ? lower : p;
+  return body.charAt(0).toLocaleUpperCase() + body.slice(1);
+}
+
+/**
+ * The stored form of a name, used by EVERY insert/edit path (manual add, paste, card edit,
+ * AI suggestions): straight apostrophes, single spaces, trimmed, and each word (and each
+ * hyphenated part) starting with a capital, so "arlo   zenith" is saved as "Arlo Zenith".
+ */
+export const normalizeName = (name: string): string =>
+  normalizeQuotes(name).replace(/\s+/g, " ").trim().split(" ").map((w) => w.split("-").map(capPart).join("-")).join(" ");
+/** Case- and whitespace-insensitive dedup key (names are stored normalized, matching the lower(name) unique index). */
 export const nameKey = (name: string): string => normalizeName(name).toLowerCase();
 export const styleOf = (name: string): NameStyle => (normalizeName(name).split(" ").length > 1 ? "two-word" : "single");
 
@@ -48,3 +64,14 @@ export function dedupeNames<T extends { name: string }>(rows: T[], have: Set<str
   }
   return { fresh, skipped };
 }
+
+/** A list of row ids from the client: non-empty, at most `max`, every one a UUID. Returns an error or null. */
+export function badIds(ids: unknown, max: number): string | null {
+  if (!Array.isArray(ids) || ids.length === 0) return "Nothing selected.";
+  if (ids.length > max) return `Pick at most ${max} at a time.`;
+  if (!ids.every((id) => typeof id === "string" && UUID_RE.test(id))) return "Bad id. Reload the page and try again.";
+  return null;
+}
+
+/** Split a list into chunks (long `in (...)` filters travel in the URL). */
+export const chunks = <T,>(xs: T[], size: number): T[][] => Array.from({ length: Math.ceil(xs.length / size) }, (_, i) => xs.slice(i * size, (i + 1) * size));

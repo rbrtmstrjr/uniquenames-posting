@@ -4,7 +4,8 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { NameRow } from "@/lib/db/types";
 import { polyfillRadix } from "./helpers/radix-jsdom";
 
-vi.mock("@/lib/actions/names", () => ({ addNamesAction: vi.fn(), updateNameAction: vi.fn(), setSkipAction: vi.fn(), deleteNameAction: vi.fn() }));
+vi.mock("@/lib/actions/names", () => ({ addNamesAction: vi.fn(), updateNameAction: vi.fn(), setSkipAction: vi.fn(), deleteNameAction: vi.fn(), approveNamesAction: vi.fn(), rejectNamesAction: vi.fn() }));
+vi.mock("@/lib/actions/suggest", () => ({ suggestNamesAction: vi.fn() }));
 vi.mock("@/lib/actions/call", () => ({ callAction: vi.fn(async () => ({ ok: true })), optimistic: vi.fn(async () => ({ ok: true })) }));
 const { NamesTable } = await import("@/components/names/names-table");
 
@@ -30,8 +31,10 @@ describe("Names page: pending filter", () => {
     expect(screen.getByText("Zephyr")).toBeTruthy();
     expect(screen.getByText("Orion")).toBeTruthy();
     expect(screen.queryByText("Aaron")).toBeNull();
-    // a pending name can be edited or removed, but not skipped
-    expect(screen.getByRole("button", { name: "Delete Zephyr" })).toBeTruthy();
+    // a pending name can be approved, edited or rejected, but not skipped or deleted
+    expect(screen.getByRole("button", { name: "Reject Zephyr" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Approve Zephyr" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Delete Zephyr" })).toBeNull();
     expect(screen.getByRole("button", { name: "Edit Zephyr" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Skip Zephyr" })).toBeNull();
   });

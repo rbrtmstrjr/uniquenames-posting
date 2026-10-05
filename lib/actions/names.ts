@@ -3,7 +3,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import type { Gender, NameStyle } from "@/lib/db/types";
 import { validateName } from "./validate";
-import { dedupeNames, nameKey, normalizeName, styleOf } from "./helpers";
+import { badIds, chunks, dedupeNames, nameKey, normalizeName, styleOf } from "./helpers";
 import { fail, requireOwner, type ActionResult } from "./result";
 
 // `style` is accepted for caller convenience but always derived from the name itself.
@@ -66,4 +66,41 @@ export async function deleteNameAction(id: string): Promise<ActionResult> {
   if (!data?.length) return fail("Names that were used in a post cannot be deleted. Mark it Skip instead.");
   revalidatePath("/names");
   return { ok: true };
+}
+
+const MAX_BULK = 1000;
+
+/** Approve AI suggestions: pending -> available (now usable in posts). Only pending rows change. */
+export async function approveNamesAction(ids: string[]): Promise<ActionResult<{ count: number }>> {
+  await requireOwner();
+  const bad = badIds(ids, MAX_BULK);
+  if (bad) return fail(bad);
+  const sb = await createClient();
+  let count = 0;
+  for (const part of chunks(ids, 100)) {
+    const { data, error } = await sb.from("names").update({ status: "available" }).in("id", part).eq("status", "pending").select("id");
+    if (error) return fail(error.message);
+    count += data?.length ?? 0;
+  }
+  revalidatePath("/names");
+  revalidatePath("/");
+  if (!count) return fail("These suggestions were already handled. Reload the page.");
+  return { ok: true, count };
+}
+
+/** Reject AI suggestions: deletes them. Only pending rows can be removed this way. */
+export async function rejectNamesAction(ids: string[]): Promise<ActionResult<{ count: number }>> {
+  await requireOwner();
+  const bad = badIds(ids, MAX_BULK);
+  if (bad) return fail(bad);
+  const sb = await createClient();
+  let count = 0;
+  for (const part of chunks(ids, 100)) {
+    const { data, error } = await sb.from("names").delete().in("id", part).eq("status", "pending").select("id");
+    if (error) return fail(error.message);
+    count += data?.length ?? 0;
+  }
+  revalidatePath("/names");
+  if (!count) return fail("These suggestions were already handled. Reload the page.");
+  return { ok: true, count };
 }

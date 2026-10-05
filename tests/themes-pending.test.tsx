@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import type { ThemeRow } from "@/lib/db/types";
 import { polyfillRadix } from "./helpers/radix-jsdom";
 
@@ -9,9 +9,10 @@ vi.mock("@/lib/realtime/use-table", () => ({ useRealtimeRows: (_t: string, initi
 vi.mock("@/lib/realtime/signed-urls", () => ({ useSignedUrls: () => () => undefined }));
 vi.mock("@/lib/supabase/client", () => ({ createClient: () => ({}) }));
 vi.mock("@/lib/actions/themes", () => ({
-  makePreviewAction: vi.fn(), moveThemeNextAction: vi.fn(), reorderThemesAction: vi.fn(), setArchivedAction: vi.fn(), saveThemeAction: vi.fn(),
+  makePreviewAction: vi.fn(), moveThemeNextAction: vi.fn(), reorderThemesAction: vi.fn(), setArchivedAction: vi.fn(), saveThemeAction: vi.fn(), approveThemesAction: vi.fn(), rejectThemesAction: vi.fn(),
 }));
 vi.mock("@/lib/actions/call", () => ({ callAction: vi.fn(async () => ({ ok: true })), optimistic: vi.fn(async () => ({ ok: true })) }));
+vi.mock("@/lib/actions/suggest", () => ({ suggestThemesAction: vi.fn() }));
 const { ThemeList } = await import("@/components/themes/theme-list");
 
 beforeAll(polyfillRadix);
@@ -29,11 +30,11 @@ describe("Themes page: pending suggestions", () => {
     const upNext = screen.getByRole("heading", { name: /Up next · 1 left/ }).parentElement!;
     expect(within(upNext).getByText("Boho")).toBeTruthy();
     expect(within(upNext).queryByText("Suggested Sky")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: /Pending · 1/ }));
-    expect(screen.getByText("Suggested Sky")).toBeTruthy();
+    const pending = screen.getByRole("region", { name: /Pending approval · 1/ });
+    expect(within(pending).getByText("Suggested Sky")).toBeTruthy();
   });
   it("shows no Pending section while nothing is pending", () => {
     render(<ThemeList themes={[theme("Boho", "available")]} previews={[]} />);
-    expect(screen.queryByRole("button", { name: /Pending/ })).toBeNull();
+    expect(screen.queryByRole("region", { name: /Pending/ })).toBeNull();
   });
 });

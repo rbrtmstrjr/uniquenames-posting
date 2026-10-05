@@ -5,6 +5,7 @@ import { BABY_SHOTS, PREVIEW_MEANING, PREVIEW_NAME, buildPrompt, hashSeed } from
 import type { ThemeRow } from "@/lib/db/types";
 import { validateTheme, type ThemeInput } from "./validate";
 import { generateLockReason } from "./generate-guard";
+import { badIds } from "./helpers";
 import { fail, requireOwner, type ActionResult } from "./result";
 
 export async function saveThemeAction(input: ThemeInput & { id?: string }): Promise<ActionResult<{ id: string }>> {
@@ -62,11 +63,50 @@ export async function moveThemeNextAction(id: string): Promise<ActionResult> {
   await requireOwner();
   const sb = await createClient();
   const { data: first } = await sb.from("themes").select("sort_order").order("sort_order", { ascending: true }).limit(1);
-  const { error } = await sb.from("themes").update({ sort_order: ((first?.[0]?.sort_order as number) ?? 1) - 1 }).eq("id", id);
+  // Only a theme in Up next can jump the line (never a pending, used or archived one).
+  const { data, error } = await sb.from("themes").update({ sort_order: ((first?.[0]?.sort_order as number) ?? 1) - 1 }).eq("id", id).eq("status", "available").select("id");
   if (error) return fail(error.message);
+  if (!data?.length) return fail("Only themes in Up next can be moved.");
   revalidatePath("/themes");
   revalidatePath("/");
   return { ok: true };
+}
+
+const MAX_THEMES = 100;
+
+/**
+ * Approve AI-suggested themes: pending -> available, placed at the END of Up next in the
+ * order given (themes added since the suggestion stay ahead of them). Only pending rows change.
+ */
+export async function approveThemesAction(ids: string[]): Promise<ActionResult<{ count: number }>> {
+  await requireOwner();
+  const bad = badIds(ids, MAX_THEMES);
+  if (bad) return fail(bad);
+  const sb = await createClient();
+  const { data: last, error: le } = await sb.from("themes").select("sort_order").neq("status", "pending").order("sort_order", { ascending: false }).limit(1);
+  if (le) return fail(le.message);
+  const base = ((last?.[0]?.sort_order as number) ?? 0) + 1;
+  const rs = await Promise.all(ids.map((id, i) =>
+    sb.from("themes").update({ status: "available", sort_order: base + i }).eq("id", id).eq("status", "pending").select("id")));
+  const err = rs.find((r) => r.error)?.error;
+  const count = rs.reduce((n, r) => n + (r.data?.length ?? 0), 0);
+  if (count) { revalidatePath("/", "layout"); revalidatePath("/themes"); }
+  if (err) return fail(err.message);
+  if (!count) return fail("These suggestions were already handled. Reload the page.");
+  return { ok: true, count };
+}
+
+/** Reject AI-suggested themes: deletes them (and any preview made of them). Only pending themes. */
+export async function rejectThemesAction(ids: string[]): Promise<ActionResult<{ count: number }>> {
+  await requireOwner();
+  const bad = badIds(ids, MAX_THEMES);
+  if (bad) return fail(bad);
+  const sb = await createClient();
+  const { data, error } = await sb.from("themes").delete().in("id", ids).eq("status", "pending").select("id");
+  if (error) return fail(error.message);
+  revalidatePath("/themes");
+  if (!data?.length) return fail("These suggestions were already handled. Reload the page.");
+  return { ok: true, count: data.length };
 }
 
 export async function makePreviewAction(themeId: string): Promise<ActionResult<{ cardId: string }>> {

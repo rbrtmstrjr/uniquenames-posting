@@ -20,6 +20,16 @@ describe("name helpers", () => {
     expect(styleOf("Arlo  Zenith")).toBe("two-word");
     expect(styleOf(" Arlo ")).toBe("single");
   });
+  it("gives every name consistent capitals, keeping deliberate mixed case", () => {
+    expect(normalizeName("arlo   zenith")).toBe("Arlo Zenith");
+    expect(normalizeName("ARLO ZENITH")).toBe("Arlo Zenith");
+    expect(normalizeName("mary-jane")).toBe("Mary-Jane");
+    expect(normalizeName("McKenzie deAndre")).toBe("McKenzie DeAndre");
+    expect(normalizeName("d’angelo")).toBe("D'angelo");
+    expect(normalizeName("O'Brien")).toBe("O'Brien");
+    expect(normalizeName("élodie")).toBe("Élodie");
+    expect(nameKey(" arlo  ZENITH ")).toBe(nameKey("Arlo Zenith"));
+  });
   it("dedupes against existing and within the batch", () => {
     const have = new Set(["arlo"]);
     const { fresh, skipped } = dedupeNames([{ name: "ARLO" }, { name: "Kai  Rowan" }, { name: "kai rowan" }], have);

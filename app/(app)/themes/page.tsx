@@ -3,6 +3,9 @@ import type { CardRow, ThemeRow } from "@/lib/db/types";
 import { ThemeList } from "@/components/themes/theme-list";
 import { PageHeader } from "@/components/ui/page-header";
 
+// "Suggest with AI" server actions run on this route and can wait ~50 s for Gemini.
+export const maxDuration = 60;
+
 export default async function ThemesPage() {
   const sb = await createClient();
   const [{ data: themes }, { data: previews }] = await Promise.all([

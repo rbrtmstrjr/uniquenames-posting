@@ -1,7 +1,7 @@
 "use client";
 import { useCallback, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { Archive, ArchiveRestore, ArrowUpToLine, GripVertical, Loader2, Palette, Pencil, Plus, Sparkles } from "lucide-react";
+import { Archive, ArchiveRestore, ArrowUpToLine, Check, GripVertical, Loader2, Palette, Pencil, Plus, Sparkles, X } from "lucide-react";
 import { DndContext, KeyboardSensor, PointerSensor, TouchSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, arrayMove, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
@@ -17,7 +17,10 @@ import { useRealtimeRows } from "@/lib/realtime/use-table";
 import { useSignedUrls } from "@/lib/realtime/signed-urls";
 import { useWorkerContext } from "@/components/shell/app-shell";
 import { createClient } from "@/lib/supabase/client";
-import { makePreviewAction, moveThemeNextAction, reorderThemesAction, setArchivedAction } from "@/lib/actions/themes";
+import { approveThemesAction, makePreviewAction, moveThemeNextAction, rejectThemesAction, reorderThemesAction, setArchivedAction } from "@/lib/actions/themes";
+import { suggestThemesAction } from "@/lib/actions/suggest";
+import { THEME_COUNT } from "@/lib/ai/suggest-filter";
+import { SuggestDialog } from "@/components/ui/suggest-dialog";
 import { callAction, optimistic } from "@/lib/actions/call";
 import type { ActionResult } from "@/lib/actions/result";
 import { Dialog } from "@/components/ui/dialog";
@@ -25,7 +28,61 @@ import { GenerateLockNote } from "@/components/shell/generate-lock-note";
 import { canGenerate } from "@/lib/status/worker-health";
 import { ThemeForm } from "./theme-form";
 
-type Pending = "preview" | "archive" | "restore" | "next";
+type Pending = "preview" | "archive" | "restore" | "next" | "approve" | "reject";
+
+/** The theme's latest preview card, or a "Make preview" button (obeys the Generate lock). */
+function PreviewSlot({ title, pending, preview, url, onOpen, onPreview }: {
+  title: string; pending?: Pending; preview: CardRow | null; url?: string; onOpen: () => void; onPreview: () => void;
+}) {
+  const { health } = useWorkerContext();
+  const gen = canGenerate(health);
+  return (
+    <div className={preview?.status === "failed" ? "w-36 shrink-0 sm:w-40" : "w-24 shrink-0 sm:w-28"}>
+      {preview ? <CardTile card={preview} url={url} health={health} queuePos={0} onOpen={onOpen} onRetry={onPreview} />
+        : (
+          <button type="button" onClick={onPreview} disabled={!!pending || !gen.ok} aria-busy={pending === "preview"} aria-label={`Make a preview of ${title}`}
+            className="grid aspect-square w-full place-items-center rounded-xl border-2 border-dashed border-line text-[11px] font-semibold text-muted transition hover:border-accent hover:text-accent active:scale-[.98] disabled:opacity-55">
+            <span className="flex flex-col items-center gap-1" aria-hidden>
+              {pending === "preview" ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
+              {pending === "preview" ? "Starting…" : "Make preview"}
+            </span>
+          </button>
+        )}
+    </div>
+  );
+}
+
+/** An AI-suggested theme waiting for approval: the full set description, a preview, Approve / Edit / Reject. */
+function PendingRow({ t, pending, preview, url, onOpen, onPreview, onApprove, onEdit, onReject }: {
+  t: ThemeRow; pending?: Pending; preview: CardRow | null; url?: string; onOpen: () => void; onPreview: () => void; onApprove: () => void; onEdit: () => void; onReject: () => void;
+}) {
+  const gen = canGenerate(useWorkerContext().health);
+  const busy = !!pending;
+  return (
+    <li className="flex gap-3 rounded-2xl border border-dashed border-accent/50 bg-surface p-3">
+      <PreviewSlot title={t.title} pending={pending} preview={preview} url={url} onOpen={onOpen} onPreview={onPreview} />
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="break-words font-semibold text-ink">{t.title}</span>
+          <Badge tone="accent">Suggested</Badge>
+        </div>
+        <dl className="mt-1 grid gap-0.5 text-xs text-muted">
+          <div><dt className="inline font-semibold">Backdrop: </dt><dd className="inline">{t.backdrop}</dd></div>
+          <div><dt className="inline font-semibold">Outfit: </dt><dd className="inline">{t.outfit}</dd></div>
+          <div><dt className="inline font-semibold">Props: </dt><dd className="inline">{t.props}</dd></div>
+          <div><dt className="inline font-semibold">Light: </dt><dd className="inline">{t.lighting}</dd></div>
+          <div><dt className="inline font-semibold">Colors: </dt><dd className="inline">{t.palette}</dd></div>
+        </dl>
+        <div className="mt-2 flex flex-wrap gap-1">
+          <Button size="sm" disabled={busy} loading={pending === "approve"} onClick={onApprove} aria-label={`Approve ${t.title}`}>{pending !== "approve" && <Check className="size-4" aria-hidden />} Approve</Button>
+          <Button variant="ghost" size="sm" disabled={busy} onClick={onEdit} aria-label={`Edit ${t.title}`}><Pencil className="size-4" aria-hidden /> Edit</Button>
+          {preview && <Button variant="ghost" size="sm" disabled={busy || !gen.ok} loading={pending === "preview"} onClick={onPreview}>{pending !== "preview" && <Sparkles className="size-4" aria-hidden />} New preview</Button>}
+          <Button variant="ghost" size="sm" disabled={busy} loading={pending === "reject"} onClick={onReject} aria-label={`Reject ${t.title}`}>{pending !== "reject" && <X className="size-4 text-bad" aria-hidden />} Reject</Button>
+        </div>
+      </div>
+    </li>
+  );
+}
 
 function Row({ t, next, pending, preview, url, onEdit, onOpen, onPreview, onArchive, onNext }: {
   t: ThemeRow; next: boolean; pending?: Pending; preview: CardRow | null; url?: string; onEdit: () => void; onOpen: () => void; onPreview: () => void; onArchive: () => void; onNext: () => void;
@@ -41,18 +98,7 @@ function Row({ t, next, pending, preview, url, onEdit, onOpen, onPreview, onArch
         aria-label={`Reorder ${t.title}. Press space, then the arrow keys, then space again.`} {...attributes} {...listeners}>
         <GripVertical className="size-5" aria-hidden />
       </button>
-      <div className={preview?.status === "failed" ? "w-36 shrink-0 sm:w-40" : "w-24 shrink-0 sm:w-28"}>
-        {preview ? <CardTile card={preview} url={url} health={health} queuePos={0} onOpen={onOpen} onRetry={onPreview} />
-          : (
-            <button type="button" onClick={onPreview} disabled={busy || !gen.ok} aria-busy={pending === "preview"}
-              className="grid aspect-square w-full place-items-center rounded-xl border-2 border-dashed border-line text-[11px] font-semibold text-muted transition hover:border-accent hover:text-accent active:scale-[.98] disabled:opacity-55">
-              <span className="flex flex-col items-center gap-1">
-                {pending === "preview" ? <Loader2 className="size-4 animate-spin" aria-hidden /> : <Sparkles className="size-4" aria-hidden />}
-                {pending === "preview" ? "Starting…" : "Make preview"}
-              </span>
-            </button>
-          )}
-      </div>
+      <PreviewSlot title={t.title} pending={pending} preview={preview} url={url} onOpen={onOpen} onPreview={onPreview} />
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
           <span className="font-semibold text-ink">{t.title}</span>
@@ -77,6 +123,9 @@ export function ThemeList({ themes: serverThemes, previews: initialPreviews }: {
   const [pending, setPending] = useState<Map<string, Pending>>(new Map());
   const [reordering, setReordering] = useState(false);
   const [openPreviewId, setOpenPreviewId] = useState<string | null>(null);
+  const [suggest, setSuggest] = useState(false);
+  const [sgGender, setSgGender] = useState<Gender>("boy");
+  const [confirmRejectAll, setConfirmRejectAll] = useState(false);
   // Local copy for optimistic archive/restore. Each action's revalidatePath re-renders this page
   // in the same response: then take the server rows and drop the optimistic drag order
   // (adjust state during render).
@@ -132,6 +181,24 @@ export function ThemeList({ themes: serverThemes, previews: initialPreviews }: {
     return act(t.id, "next", () => moveThemeNextAction(t.id), `${t.title} is next`,
       () => setOrder([t.id, ...ids.filter((x) => x !== t.id)]), () => setOrder(previous));
   };
+  // Approve/reject suggestions, one or many: they move/disappear at once, a failure puts them back.
+  const decide = async (list: ThemeRow[], approve: boolean) => {
+    const rows = list.filter((t) => t.status === "pending" && !pending.has(t.id));
+    if (!rows.length) return;
+    const ids = rows.map((t) => t.id);
+    const idSet = new Set(ids);
+    setPending((m) => { const n = new Map(m); ids.forEach((id) => n.set(id, approve ? "approve" : "reject")); return n; });
+    const end = Math.max(0, ...themes.filter((t) => t.status !== "pending").map((t) => t.sort_order));
+    const r = await optimistic(
+      () => setThemes((all) => (approve
+        ? all.map((x) => (idSet.has(x.id) ? { ...x, status: "available" as const, sort_order: end + 1 + ids.indexOf(x.id) } : x))
+        : all.filter((x) => !idSet.has(x.id)))),
+      () => setThemes((all) => [...all.filter((x) => !idSet.has(x.id)), ...rows]),
+      () => (approve ? approveThemesAction(ids) : rejectThemesAction(ids)));
+    setPending((m) => { const n = new Map(m); ids.forEach((id) => n.delete(id)); return n; });
+    const what = rows.length === 1 ? rows[0].title : `${rows.length} themes`;
+    if (r.ok) toast.success(approve ? `${what} approved: added to the end of Up next` : `${what} rejected`); else toast.error(r.error);
+  };
   const makePreview = (t: ThemeRow) => act(t.id, "preview", () => makePreviewAction(t.id), "Making a preview… it appears here in about 30 s");
 
   const onDragEnd = async (e: DragEndEvent) => {
@@ -150,9 +217,34 @@ export function ThemeList({ themes: serverThemes, previews: initialPreviews }: {
     <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <Segmented label="Gender" value={gender} onChange={(g) => { setGender(g); setOrder(null); }} options={[{ value: "boy", label: "Boy themes" }, { value: "girl", label: "Girl themes" }]} />
-        <Button onClick={() => setForm({ open: true, editing: null })}><Plus className="size-4" aria-hidden /> New theme</Button>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="subtle" onClick={() => { setSgGender(gender); setSuggest(true); }}><Sparkles className="size-4" aria-hidden /> Suggest with AI</Button>
+          <Button onClick={() => setForm({ open: true, editing: null })}><Plus className="size-4" aria-hidden /> New theme</Button>
+        </div>
       </div>
       {!gen.ok && <GenerateLockNote reason={gen.reason} extra="Previews are paused until then." />}
+      {pendingThemes.length > 0 && (
+        <section aria-labelledby="pending-themes" className="rounded-2xl border border-accent/40 bg-accent-soft/40 p-3 sm:p-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 id="pending-themes" className="text-xs font-bold uppercase tracking-[.08em] text-ink">Pending approval · {pendingThemes.length}</h2>
+            <div className="flex flex-wrap gap-2">
+              <Button size="sm" onClick={() => void decide(pendingThemes, true)}><Check className="size-4" aria-hidden /> Approve all</Button>
+              <Button size="sm" variant="danger" onClick={() => setConfirmRejectAll(true)}><X className="size-4" aria-hidden /> Reject all</Button>
+            </div>
+          </div>
+          <p className="mt-1 text-xs text-muted">AI-suggested themes. Make a preview to judge the look; approved themes join the end of Up next, rejected ones are deleted.</p>
+          <ul className="mt-3 space-y-2">
+            {pendingThemes.map((t) => {
+              const p = latestPreview.get(t.id) ?? null;
+              return (
+                <PendingRow key={t.id} t={t} pending={pending.get(t.id)} preview={p} url={urlFor(p?.card_path)}
+                  onOpen={() => setOpenPreviewId(t.id)} onPreview={() => void makePreview(t)}
+                  onApprove={() => void decide([t], true)} onEdit={() => setForm({ open: true, editing: t })} onReject={() => void decide([t], false)} />
+              );
+            })}
+          </ul>
+        </section>
+      )}
       <section>
         <h2 className="mb-2 text-xs font-bold uppercase tracking-[.08em] text-muted">Up next · {available.length} left</h2>
         {available.length === 0 ? (
@@ -177,15 +269,6 @@ export function ThemeList({ themes: serverThemes, previews: initialPreviews }: {
           </DndContext>
         )}
       </section>
-      {pendingThemes.length > 0 && (
-        <Disclosure summary={`Pending · ${pendingThemes.length}`} className="rounded-2xl border border-line bg-surface p-4" triggerClassName="text-sm text-ink">
-          <p className="mt-1 text-xs text-muted">Suggested themes waiting for your approval. They are not used in posts until approved.</p>
-          <ul className="mt-3 space-y-1">{pendingThemes.map((t) => (
-            <li key={t.id} className="flex items-center justify-between gap-2 text-sm"><span className="min-w-0 break-words text-ink">{t.title}</span>
-              <Button variant="ghost" size="sm" onClick={() => setForm({ open: true, editing: t })}><Pencil className="size-4" aria-hidden /> Edit</Button></li>
-          ))}</ul>
-        </Disclosure>
-      )}
       {used.length > 0 && (
         <Disclosure summary={`Used · ${used.length}`} className="rounded-2xl border border-line bg-surface p-4" triggerClassName="text-sm text-ink">
           <ul className="mt-3 space-y-1 text-sm">{used.map((t) => <li key={t.id} className="flex justify-between gap-2"><span className="text-ink">{t.title}</span><span className="text-muted">{t.used_on}</span></li>)}</ul>
@@ -216,6 +299,18 @@ export function ThemeList({ themes: serverThemes, previews: initialPreviews }: {
           </div>
         )}
       </Dialog>
+      <Dialog open={confirmRejectAll} onOpenChange={setConfirmRejectAll} title={`Reject ${pendingThemes.length} suggested themes?`} description="They are deleted, with any previews made of them. This can't be undone.">
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" onClick={() => setConfirmRejectAll(false)}>Cancel</Button>
+          <Button variant="danger" onClick={() => { setConfirmRejectAll(false); void decide(pendingThemes, false); }}>Reject all</Button>
+        </div>
+      </Dialog>
+      <SuggestDialog open={suggest} onOpenChange={setSuggest} noun="theme" title="Suggest themes with AI"
+        description="Gemini designs new photoshoot sets. Titles or prop sets you already have are skipped; the rest wait for your approval."
+        range={THEME_COUNT} defaultCount={5} ideaPlaceholder="e.g. autumn harvest, under the sea, cozy winter"
+        fields={<Segmented label="Gender" value={sgGender} onChange={setSgGender} options={[{ value: "boy", label: "Boy" }, { value: "girl", label: "Girl" }]} />}
+        run={(count, vibe) => suggestThemesAction({ gender: sgGender, count, vibe })}
+        onReview={() => { setGender(sgGender); setOrder(null); }} />
       {/* saveThemeAction revalidates /themes, which re-renders this list in the same response */}
       <ThemeForm open={form.open} editing={form.editing} defaultGender={gender} onOpenChange={(o) => setForm((f) => ({ ...f, open: o }))} onSaved={() => {}} />
     </div>
