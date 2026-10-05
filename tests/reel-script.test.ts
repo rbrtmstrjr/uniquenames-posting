@@ -55,6 +55,9 @@ describe("reelScriptPrompt", () => {
     expect(prompt).toMatch(/8-12 words/);
     expect(prompt).toMatch(/14 words/);
     expect(prompt).toMatch(/ACTION and SETTING/);
+    expect(prompt).toContain("EXACTLY 30-40 scenes");
+    expect(prompt).toMatch(/BEFORE ANSWERING, COUNT/);
+    expect(reelScriptPrompt({ maxScenes: 10, alreadyMade: [] }).prompt).toContain("EXACTLY 8-10 scenes");
     expect(prompt).toMatch(/Only the first 1-2 lines are the 'hook' beat/);
     expect(prompt).not.toMatch(/\bcamera\b/i);
   });
@@ -95,6 +98,7 @@ describe("scenePrompt", () => {
 
 describe("writeReelScript", () => {
   const input = { maxScenes: 40, alreadyMade: [] };
+  const input10 = { maxScenes: 10, alreadyMade: [] };
 
   it("uses the script model with the ported prompt and returns a typed script", async () => {
     generateJson.mockResolvedValueOnce({ ok: true, data: script(30) });
@@ -116,15 +120,15 @@ describe("writeReelScript", () => {
 
   it("uses the caller's remaining time budget when given", async () => {
     generateJson.mockResolvedValueOnce({ ok: true, data: script(10) });
-    await writeReelScript({ ...input, timeoutMs: 70_000 });
+    await writeReelScript({ ...input10, timeoutMs: 70_000 });
     expect(generateJson.mock.calls[0][0].timeoutMs).toBe(70_000);
   });
 
   it("rejects a missing or unknown stage", async () => {
     generateJson.mockResolvedValueOnce({ ok: true, data: script(10, { stage: "teen" }) });
-    expect(await writeReelScript(input)).toMatchObject({ ok: false });
+    expect(await writeReelScript(input10)).toMatchObject({ ok: false });
     generateJson.mockResolvedValueOnce({ ok: true, data: script(10, { stage: undefined }) });
-    expect(await writeReelScript(input)).toMatchObject({ ok: false });
+    expect(await writeReelScript(input10)).toMatchObject({ ok: false });
   });
 
   it("trims scenes beyond the max", async () => {
@@ -133,49 +137,63 @@ describe("writeReelScript", () => {
     expect(r.ok && r.script.scenes.length).toBe(40);
   });
 
+  it("rejects a script under 75% of the max scenes", async () => {
+    generateJson.mockResolvedValueOnce({ ok: true, data: script(29) });
+    expect(await writeReelScript(input)).toEqual({ ok: false, error: "Script too short: 29 scenes (needs at least 30)." });
+    generateJson.mockResolvedValueOnce({ ok: true, data: script(8) });
+    expect(await writeReelScript(input10)).toMatchObject({ ok: true });
+  });
+
+  it("rejects a script under 80% of the word-budget minimum", async () => {
+    const s = script(32);
+    s.scenes = s.scenes.map((x, i) => (i === 0 ? x : { ...x, narration: "You hold them close, mama." }));
+    generateJson.mockResolvedValueOnce({ ok: true, data: s });
+    expect(await writeReelScript(input)).toEqual({ ok: false, error: "Script too short: 165 words (needs at least 264)." });
+  });
+
   it("rejects too few scenes", async () => {
     generateJson.mockResolvedValueOnce({ ok: true, data: script(1) });
-    expect(await writeReelScript(input)).toMatchObject({ ok: false });
+    expect(await writeReelScript(input10)).toMatchObject({ ok: false });
   });
 
   it("rejects an empty narration line", async () => {
     const s = script(10);
     s.scenes[3] = scene(3, "   ");
     generateJson.mockResolvedValueOnce({ ok: true, data: s });
-    expect(await writeReelScript(input)).toMatchObject({ ok: false, error: expect.stringMatching(/line 4/i) });
+    expect(await writeReelScript(input10)).toMatchObject({ ok: false, error: expect.stringMatching(/line 4/i) });
   });
 
   it("rejects a line longer than 14 words", async () => {
     const s = script(10);
     s.scenes[2] = scene(2, "one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen");
     generateJson.mockResolvedValueOnce({ ok: true, data: s });
-    expect(await writeReelScript(input)).toMatchObject({ ok: false });
+    expect(await writeReelScript(input10)).toMatchObject({ ok: false });
   });
 
   it("rejects a missing cast member, a missing title or a too-long title", async () => {
     generateJson.mockResolvedValueOnce({ ok: true, data: script(10, { cast: { adult: cast.adult, child: " " } }) });
-    expect(await writeReelScript(input)).toMatchObject({ ok: false });
+    expect(await writeReelScript(input10)).toMatchObject({ ok: false });
     generateJson.mockResolvedValueOnce({ ok: true, data: script(10, { cast: undefined }) });
-    expect(await writeReelScript(input)).toMatchObject({ ok: false });
+    expect(await writeReelScript(input10)).toMatchObject({ ok: false });
     generateJson.mockResolvedValueOnce({ ok: true, data: script(10, { title: "" }) });
-    expect(await writeReelScript(input)).toMatchObject({ ok: false });
+    expect(await writeReelScript(input10)).toMatchObject({ ok: false });
     generateJson.mockResolvedValueOnce({ ok: true, data: script(10, { title: "x".repeat(81) }) });
-    expect(await writeReelScript(input)).toMatchObject({ ok: false });
+    expect(await writeReelScript(input10)).toMatchObject({ ok: false });
   });
 
   it("passes a Gemini failure through and never throws", async () => {
     generateJson.mockResolvedValueOnce({ ok: false, error: "Gemini timed out." });
     expect(await writeReelScript(input)).toEqual({ ok: false, error: "Gemini timed out." });
     generateJson.mockRejectedValueOnce(new Error("boom"));
-    expect(await writeReelScript(input)).toMatchObject({ ok: false });
+    expect(await writeReelScript(input10)).toMatchObject({ ok: false });
   });
 
   it("turns 'at/into/toward the camera' into 'toward the viewer' in ideas and cast", async () => {
-    const s = script(5, { cast: { adult: `${cast.adult}, smiling into the camera`, child: cast.child } });
+    const s = script(10, { cast: { adult: `${cast.adult}, smiling into the camera`, child: cast.child } });
     s.scenes[1] = { beat: "build", narration: "You hold them close.", idea: "The mom doll smiles at the camera." };
     s.scenes[2] = { beat: "build", narration: "You hold them close.", idea: "The baby doll crawls toward a camera." };
     generateJson.mockResolvedValueOnce({ ok: true, data: s });
-    const r = await writeReelScript(input);
+    const r = await writeReelScript(input10);
     expect(r.ok).toBe(true);
     if (r.ok) {
       expect(r.script.scenes[1].idea).toBe("The mom doll smiles toward the viewer.");
