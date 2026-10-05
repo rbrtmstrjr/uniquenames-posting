@@ -7,6 +7,7 @@ import type { WorkerHealth } from "@/lib/status/worker-health";
 import { formatElapsed } from "@/lib/status/eta";
 import { useNow } from "@/lib/realtime/hooks";
 import { cn } from "@/lib/utils/cn";
+import { FadeImage } from "@/components/ui/fade-image";
 
 export function CardTile({ card, url, health, queuePos, onOpen, onRetry, selection, className }: {
   card: CardRow; url?: string; health: WorkerHealth; queuePos: number; onOpen?: () => void; onRetry?: () => void | Promise<void>;
@@ -16,7 +17,8 @@ export function CardTile({ card, url, health, queuePos, onOpen, onRetry, selecti
   const v = cardVisual(card, health);
   const now = useNow(1000);
   const elapsed = card.started_at ? Math.max(0, (now - Date.parse(card.started_at)) / 1000) : 0;
-  const showImage = !!url && (v === "done" || v === "restamp" || v === "regenerating" || (v === "waiting" && !!card.card_path) || (v === "failed" && !!card.card_path));
+  // The card has a picture to show (its signed URL may still be on the way: FadeImage shimmers until then).
+  const showImage = !!card.card_path && (v === "done" || v === "restamp" || v === "regenerating" || v === "waiting" || v === "failed");
   const label = `${card.name}: ${({ queued: "in line", generating: "being made", regenerating: "being remade", restamp: "updating text", done: "ready", failed: "failed", waiting: "waiting for your PC" } as const)[v]}`;
 
   const retry = async () => {
@@ -28,9 +30,8 @@ export function CardTile({ card, url, health, queuePos, onOpen, onRetry, selecti
   const media = (
     <>
       {showImage && (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img key={url} src={url} alt="" loading="lazy" decoding="async"
-          className={cn("size-full object-cover animate-pop transition duration-500", v === "regenerating" && "scale-[1.02] opacity-30 blur-[2px]", selection && !selection.selected && "opacity-45 saturate-50")} />
+        <FadeImage src={url}
+          className={cn(v === "regenerating" && "scale-[1.02] opacity-30 blur-[2px]", selection && !selection.selected && "opacity-45 saturate-50")} />
       )}
       {(v === "generating" || v === "regenerating") && <div className={cn("absolute inset-0 shimmer animate-shimmer", v === "regenerating" && "opacity-60")} aria-hidden />}
     </>
