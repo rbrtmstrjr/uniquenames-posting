@@ -224,4 +224,36 @@ describe("planExtraCard", () => {
     expect(r.card.name_id).not.toBe(boys[0].id);
     expect(isPropsOnly(r.card.shot)).toBe(false);
   });
+
+  it("never repeats a shot the post already has, and prefers an unused angle (owner: added cards looked like #1 and #4)", () => {
+    const r = planPost({ request: { ...req, count: 13 }, names: boys, themes, settings });
+    if (!r.ok) throw new Error(r.reason);
+    const usedShots = r.cards.map((c) => c.shot);
+    const usedAngles = new Set(usedShots.filter((s) => !isPropsOnly(s)).map((s) => shotSpec(s)?.angle));
+    for (let i = 0; i < 40; i++) {
+      const e = planExtraCard({ theme: themes[0], gender: "boy", style: "two-word", names: boys, usedNameIds: [], nextPosition: 14,
+        salt: `post-1|${i}`, subjectKey: subjectKey(req.postDate, "boy", "two-word"), usedShots });
+      if (!e.ok) throw new Error(e.reason);
+      expect(usedShots).not.toContain(e.card.shot);
+      const lib = sessionShots(pickSubject(subjectKey(req.postDate, "boy", "two-word")).session);
+      const freeAngle = lib.slice(1).some((s) => !usedShots.includes(s.text) && !usedAngles.has(s.angle));
+      if (freeAngle) expect(usedAngles.has(shotSpec(e.card.shot)?.angle)).toBe(false);
+    }
+  });
+
+  it("adds cards one after another without repeating until the library runs out", () => {
+    const usedShots: string[] = [];
+    const subjKey = subjectKey(req.postDate, "boy", "two-word");
+    const lib = sessionShots(pickSubject(subjKey).session);
+    for (let i = 0; i < lib.length - 1; i++) {
+      const e = planExtraCard({ theme: themes[0], gender: "boy", style: "two-word", names: boys, usedNameIds: [], nextPosition: i + 1,
+        salt: `p|${i}`, subjectKey: subjKey, usedShots });
+      if (!e.ok) throw new Error(e.reason);
+      expect(usedShots).not.toContain(e.card.shot);
+      usedShots.push(e.card.shot);
+    }
+    // library exhausted: still plans a card (least-used shot) instead of failing
+    const more = planExtraCard({ theme: themes[0], gender: "boy", style: "two-word", names: boys, usedNameIds: [], nextPosition: 99, salt: "p|x", subjectKey: subjKey, usedShots });
+    expect(more.ok).toBe(true);
+  });
 });

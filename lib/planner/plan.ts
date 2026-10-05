@@ -2,7 +2,7 @@ import type { Gender, NameRow, NameStyle, SettingsRow, ThemeRow } from "@/lib/db
 import { buildCaption } from "./caption";
 import { buildPrompt, pickSubject, randomSubject, type Subject } from "./prompt";
 import { hashSeed, seededRandom, shuffle } from "./random";
-import { buildMixedShotSpecs, buildShots, dealAges, sessionShots } from "./shots";
+import { buildMixedShotSpecs, buildShots, dealAges, sessionShots, shotSpec, type ShotSpec } from "./shots";
 import { SUBJECT_AGES, type AgeChoice } from "./age";
 
 /** One key per post for its child (look, and session for older posts): add-a-card reuses it so extra cards match. */
@@ -90,8 +90,29 @@ export interface ExtraCardInput {
   subjectKey?: string;
   /** The post's subject_age: random = a new child of a random age; a fixed age = the post's child; null = the original baby. */
   age?: AgeChoice | null;
+  /** The shot text of every card already in the post, so the new card never repeats one. */
+  usedShots?: string[];
 }
 export type ExtraCardResult = { ok: true; card: PlannedCard } | { ok: false; reason: string };
+
+/**
+ * The shot for an added card. Same set + same child + same shot makes a near-copy of an
+ * existing card (seeds alone barely change Z-Image's framing), so: never the cover, never a
+ * shot the post already has, and an angle the post hasn't used yet when one is left. Once the
+ * library runs out, the least-used shot.
+ */
+export function pickExtraShot(lib: ShotSpec[], usedShots: string[], rng: () => number): ShotSpec {
+  const pool = lib.slice(1);
+  const usedAngles = new Set(usedShots.map((s) => shotSpec(s)).filter((s) => s && s.kind === "baby").map((s) => s!.angle));
+  const fresh = pool.filter((s) => !usedShots.includes(s.text));
+  const freshAngle = fresh.filter((s) => !usedAngles.has(s.angle));
+  const pick = (from: ShotSpec[]) => from[Math.floor(rng() * from.length)];
+  if (freshAngle.length) return pick(freshAngle);
+  if (fresh.length) return pick(fresh);
+  const uses = (s: ShotSpec) => usedShots.filter((u) => u === s.text).length;
+  const least = Math.min(...pool.map(uses));
+  return pick(pool.filter((s) => uses(s) === least));
+}
 
 export function planExtraCard(i: ExtraCardInput): ExtraCardResult {
   const pool = availablePool(i.names, i.gender, i.style).filter((n) => !i.usedNameIds.includes(n.id));
@@ -101,8 +122,7 @@ export function planExtraCard(i: ExtraCardInput): ExtraCardResult {
   const subject = i.age === "random"
     ? randomSubject(SUBJECT_AGES[Math.floor(rng() * SUBJECT_AGES.length)], rng)
     : pickSubject(i.subjectKey ?? i.salt, i.age ?? undefined);
-  const lib = sessionShots(subject.session);
-  const shot = lib[1 + Math.floor(rng() * (lib.length - 1))].text;
+  const shot = pickExtraShot(sessionShots(subject.session), i.usedShots ?? [], rng).text;
   return {
     ok: true,
     card: { position: i.nextPosition, name_id: pick.id, name: pick.name.trim(), meaning: pick.meaning.trim(), shot,
