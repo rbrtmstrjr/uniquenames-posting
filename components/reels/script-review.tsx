@@ -86,9 +86,12 @@ export function ScriptReview({ reel, scenes, onApproved }: { reel: ReelRow; scen
     const payload = { title: oneLine(title), lines: dirtyLines.map((l) => ({ id: l.id, narration: oneLine(l.narration), idea: oneLine(l.idea) })) };
     const r = await callAction(() => saveReelScriptAction(reel.id, payload));
     if (!r.ok) { toast.error(r.error); return false; }
-    setSaved((prev) => ({ ...prev, ...Object.fromEntries(payload.lines.map((l) => [l.id, { narration: l.narration, idea: l.idea }])) }));
+    const sent: Record<string, Text> = Object.fromEntries(payload.lines.map((l) => [l.id, { narration: l.narration, idea: l.idea }]));
+    setSaved((prev) => ({ ...prev, ...sent }));
     setSavedTitle(payload.title);
-    setEdits({}); setTitleEdit(null);
+    // Only drop edits that are exactly what was saved: anything typed while saving stays (and stays dirty).
+    setEdits((prev) => Object.fromEntries(Object.entries(prev).filter(([id, e]) => !(sent[id] && same(e, sent[id])))));
+    setTitleEdit((prev) => (prev !== null && oneLine(prev) === payload.title ? null : prev));
     if (!quiet) toast.success("Script saved");
     return true;
   };

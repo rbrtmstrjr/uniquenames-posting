@@ -33,6 +33,11 @@ const toItems = (data: unknown[]): ReelListItem[] => data.map((r) => {
   return { ...rest, scenes: [...(reel_scenes ?? [])].sort((a, b) => a.position - b.position) };
 });
 
+const DEBOUNCE_MS = 500;
+const MAX_WAIT_MS = 3000;
+/** Debounced reload with a max wait: a steady stream of image updates still reloads every ~3 s. */
+export const nextLoadDelay = (sinceFirstKick: number) => Math.max(0, Math.min(DEBOUNCE_MS, MAX_WAIT_MS - sinceFirstKick));
+
 /** The list stays live: any reel or image change reloads it (debounced), so badges move on their own. */
 function useLiveReels(initial: ReelListItem[]) {
   const [rows, setRows] = useState(initial);
@@ -49,7 +54,13 @@ function useLiveReels(initial: ReelListItem[]) {
         if (!error && data && !gone) setRows(toItems(data));
       } catch { /* keep what we have */ }
     };
-    const kick = () => { clearTimeout(t); t = setTimeout(() => void load(), 500); };
+    let firstKick = 0;
+    const kick = () => {
+      const now = Date.now();
+      if (!t) firstKick = now;
+      clearTimeout(t);
+      t = setTimeout(() => { t = undefined; void load(); }, nextLoadDelay(now - firstKick));
+    };
     void realtimeAuthReady(sb).then(() => {
       if (gone) return;
       ch = sb.channel(`reels-list:${crypto.randomUUID()}`)

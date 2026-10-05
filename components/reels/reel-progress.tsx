@@ -38,6 +38,9 @@ const TILE_CHIP: Record<ReelSceneStatus, string> = {
 };
 
 /** A file name Windows and phones accept: "<title>.mp4". */
+/** Reel statuses where images are still being made: a redo only requeues the image. */
+const MAKING: ReelRow["status"][] = ["queued", "voicing", "imaging"];
+
 const fileName = (title: string) => `${title.replace(/[\\/:*?"<>|]+/g, "").replace(/\s+/g, " ").trim() || "reel"}.mp4`;
 
 /**
@@ -63,6 +66,12 @@ export function ReelProgress({ reel, scenes, onPatchScene, onPatchReel }: {
   const stuck = scenes.filter((s) => canSkipScene(reel.status, s) || (reel.status === "needs_attention" && s.status === "failed"));
   const open = scenes.find((s) => s.id === openId) ?? null;
   const firstDone = scenes.find((s) => s.status === "done" && s.photo_path);
+  // The first signed URL stays on the <video> while the preview path is the same: a re-sign
+  // (every ~50 min) must not restart playback. A new path (new render) gets a fresh URL and element.
+  const signedPreview = urlFor(reel.preview_path);
+  const [video, setVideo] = useState<{ path: string; url: string } | null>(null);
+  if (reel.preview_path && signedPreview && video?.path !== reel.preview_path) setVideo({ path: reel.preview_path, url: signedPreview });
+  const videoSrc = video && video.path === reel.preview_path ? video.url : signedPreview;
 
   const run = async (key: string, fn: () => Promise<ActionResult>, ok: string, after?: () => void) => {
     if (busy) return false;
@@ -75,7 +84,11 @@ export function ReelProgress({ reel, scenes, onPatchScene, onPatchReel }: {
     return true;
   };
   const redo = (s: ReelSceneRow) => run(`redo-${s.id}`, () => redoReelSceneAction(s.id), `Making image ${s.position} again…`,
-    () => onPatchScene?.(s.id, { status: "queued", error: null, attempts: 0 }));
+    () => {
+      onPatchScene?.(s.id, { status: "queued", error: null, attempts: 0 });
+      // A reel that was ready / stopped goes back in line without its video (the server did the same).
+      if (!MAKING.includes(reel.status)) onPatchReel?.({ status: "queued", preview_path: null, pc_path: null });
+    });
   const skip = (s: ReelSceneRow) => run(`skip-${s.id}`, () => skipReelSceneAction(s.id), `Image ${s.position} skipped`,
     () => onPatchScene?.(s.id, { status: "skipped", error: null }));
   const retry = () => run("retry", () => retryReelAction(reel.id), "Back in line for your PC", () => onPatchReel?.({ status: "queued", error: null }));
@@ -103,7 +116,7 @@ export function ReelProgress({ reel, scenes, onPatchScene, onPatchReel }: {
             {created} · {counts.total} images{reel.duration_s ? ` · ${clock(reel.duration_s)}` : ""}{reel.stage ? ` · ${reel.stage[0].toUpperCase()}${reel.stage.slice(1)}` : ""}
           </p>
         </div>
-        <span data-testid="reel-status"><Badge tone={progress.tone} pulse={working && reel.status !== "queued"}>{progress.label}</Badge></span>
+        <span data-testid="reel-status" aria-live="polite"><Badge tone={progress.tone} pulse={working && reel.status !== "queued"}>{progress.label}</Badge></span>
       </div>
 
       {reel.status === "failed" && (
@@ -150,7 +163,7 @@ export function ReelProgress({ reel, scenes, onPatchScene, onPatchReel }: {
           {reel.status === "ready" && reel.preview_path ? (
             <Panel title="Video">
               <div className="mx-auto aspect-[9/16] w-full max-w-[min(100%,340px)] overflow-hidden rounded-xl bg-black max-lg:max-h-[70dvh] max-lg:w-auto">
-                <video key={reel.preview_path} src={urlFor(reel.preview_path)} poster={firstDone ? urlFor(firstDone.photo_path) : undefined}
+                <video key={reel.preview_path} src={videoSrc} poster={firstDone ? urlFor(firstDone.photo_path) : undefined}
                   controls playsInline preload="metadata" className="size-full object-contain" aria-label={`${reel.title} preview`} />
               </div>
               <div className="mt-3 flex flex-wrap gap-2">
@@ -212,7 +225,7 @@ export function ReelProgress({ reel, scenes, onPatchScene, onPatchReel }: {
                   className={cn("group relative block aspect-[9/16] w-full overflow-hidden rounded-xl bg-surface-2 text-left transition active:scale-[.98] focus-visible:outline-2 focus-visible:outline-accent",
                     s.status === "failed" && "ring-2 ring-bad/60")}>
                   {s.photo_path && s.status !== "generating" && s.status !== "queued"
-                    ? <FadeImage src={urlFor(s.photo_path)} alt={`Image ${s.position}: ${s.narration}`} className={s.status === "skipped" ? "opacity-40 grayscale" : undefined} />
+                    ? <FadeImage key={s.photo_path} src={urlFor(s.photo_path)} alt={`Image ${s.position}: ${s.narration}`} className={s.status === "skipped" ? "opacity-40 grayscale" : undefined} />
                     : <div className={cn("absolute inset-0", s.status === "generating" && "shimmer animate-shimmer")} />}
                   <span className="absolute left-1.5 top-1.5 grid min-w-6 place-items-center rounded-md bg-black/50 px-1 text-[11px] font-bold tabular-nums text-white">{s.position}</span>
                   {s.status !== "done" && (
@@ -237,7 +250,7 @@ export function ReelProgress({ reel, scenes, onPatchScene, onPatchReel }: {
           <div className="space-y-3">
             <div className="relative mx-auto aspect-[9/16] max-h-[52dvh] overflow-hidden rounded-xl bg-surface-2">
               {open.photo_path && open.status !== "queued" && open.status !== "generating"
-                ? <FadeImage src={urlFor(open.photo_path)} loading="eager" />
+                ? <FadeImage key={open.photo_path} src={urlFor(open.photo_path)} loading="eager" />
                 : <div className="grid size-full place-items-center px-4 text-center text-sm text-muted">{SCENE_LABEL[open.status]}</div>}
             </div>
             <div className="flex items-center gap-2 text-sm">
@@ -250,12 +263,12 @@ export function ReelProgress({ reel, scenes, onPatchScene, onPatchReel }: {
             )}
             <div className="flex flex-wrap justify-end gap-2">
               {canSkipScene(reel.status, open) && (
-                <Button variant="ghost" loading={busy === `skip-${open.id}`} onClick={async () => { if (await skip(open)) setOpenId(null); }}>
+                <Button variant="ghost" loading={busy === `skip-${open.id}`} disabled={!!busy && busy !== `skip-${open.id}`} onClick={async () => { if (await skip(open)) setOpenId(null); }}>
                   <SkipForward className="size-4" aria-hidden /> Skip image
                 </Button>
               )}
               {canRedoScene(reel.status, open) ? (
-                <Button loading={busy === `redo-${open.id}`} disabled={!gen.ok} onClick={async () => { if (await redo(open)) setOpenId(null); }}>
+                <Button loading={busy === `redo-${open.id}`} disabled={!gen.ok || (!!busy && busy !== `redo-${open.id}`)} onClick={async () => { if (await redo(open)) setOpenId(null); }}>
                   <RefreshCw className="size-4" aria-hidden /> New picture
                 </Button>
               ) : (

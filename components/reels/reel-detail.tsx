@@ -1,6 +1,7 @@
 "use client";
 import Link from "next/link";
-import { useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo } from "react";
+import { useRouter } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import type { ReelRow, ReelSceneRow } from "@/lib/db/types";
 import { createClient } from "@/lib/supabase/client";
@@ -25,6 +26,10 @@ export function ReelDetail({ reel: initialReel, scenes: initialScenes }: { reel:
   const [reels, setReels] = useRealtimeRows<ReelRow>("reels", reelSeed, { key: `reel-${id}`, filter: `id=eq.${id}`, refetch: refetchReel });
   const [scenes, setScenes] = useRealtimeRows<ReelSceneRow>("reel_scenes", initialScenes, { key: `reel-scenes-${id}`, filter: `reel_id=eq.${id}`, sort: byPosition, refetch: refetchScenes });
   const reel = reels[0] ?? initialReel;
+  const router = useRouter();
+  // Deleted elsewhere (another tab or phone): realtime empties the row -> back to the list.
+  const gone = reels.length === 0;
+  useEffect(() => { if (gone) router.replace("/reels"); }, [gone, router]);
 
   const patchReel = (p: Partial<ReelRow>) => setReels((prev) => prev.map((r) => ({ ...r, ...p })));
   const patchScene = (sid: string, p: Partial<ReelSceneRow>) => setScenes((prev) => prev.map((s) => (s.id === sid ? { ...s, ...p } : s)));

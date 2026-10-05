@@ -7,20 +7,25 @@ import { reelProgress, reelSteps, clock, estimateSeconds } from "@/lib/reels/sta
 
 const push = vi.fn();
 const refresh = vi.fn();
-vi.mock("next/navigation", () => ({ useRouter: () => ({ push, refresh }), usePathname: () => "/reels" }));
+const replace = vi.fn();
+vi.mock("next/navigation", () => ({ useRouter: () => ({ push, refresh, replace }), usePathname: () => "/reels" }));
 vi.mock("next/link", () => ({ default: ({ href, children, ...rest }: { href: string; children: React.ReactNode }) => <a href={href} {...rest}>{children}</a> }));
 let health = "ready";
 vi.mock("@/components/shell/app-shell", () => ({ useWorkerContext: () => ({ health, lastSeen: "now", row: null }) }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+let signVersion = 0;
 const download = vi.fn(async (...a: string[]) => `https://dl/${a[0]}`);
 vi.mock("@/lib/realtime/signed-urls", () => ({
-  useSignedUrls: () => (p?: string | null) => (p ? `https://signed/${p}` : undefined),
+  useSignedUrls: () => (p?: string | null) => (p ? `https://signed/${p}${signVersion ? `?s=${signVersion}` : ""}` : undefined),
   signedDownloadUrl: (p: string, name: string, bucket: string) => download(p, name, bucket),
 }));
 vi.mock("@/lib/supabase/client", () => {
   const ch = { on: () => ch, subscribe: () => ch };
   return { createClient: () => ({ channel: () => ch, removeChannel: async () => {}, from: () => ({}) }), realtimeAuthReady: async () => {} };
 });
+// ReelDetail's realtime rows: null = pass the initial rows through; [] = the reel was deleted.
+let rows: unknown[] | null = null;
+vi.mock("@/lib/realtime/use-table", () => ({ useRealtimeRows: (_t: string, initial: unknown[]) => [rows ?? initial, () => {}] }));
 const ok = async () => ({ ok: true as const });
 const actions = vi.hoisted(() => ({
   saveReelScriptAction: vi.fn(), approveReelAction: vi.fn(), rewriteReelScriptAction: vi.fn(), deleteReelAction: vi.fn(),
@@ -34,6 +39,8 @@ const { ReelProgress } = await import("@/components/reels/reel-progress");
 const { ReelList, ReelsSetup } = await import("@/components/reels/reel-list");
 const { NewReelForm } = await import("@/components/reels/new-reel-form");
 const { NAV } = await import("@/components/shell/nav");
+const { ReelDetail } = await import("@/components/reels/reel-detail");
+const { nextLoadDelay } = await import("@/components/reels/reel-list");
 
 beforeAll(polyfillRadix);
 afterEach(() => {
@@ -97,6 +104,25 @@ describe("ScriptReview", () => {
     expect(actions.saveReelScriptAction).toHaveBeenCalledWith(RID, {
       title: "Why toddlers say no", lines: [{ id: sid(2), narration: "A shorter second line", idea: "Idea 2" }],
     });
+  });
+
+  it("a save keeps edits typed while it was saving (only what was saved is cleared)", async () => {
+    let finish!: (v: { ok: true }) => void;
+    actions.saveReelScriptAction.mockImplementation(() => new Promise((res) => { finish = res; }));
+    render(<ScriptReview reel={reel()} scenes={scenes(3)} />);
+    fireEvent.change(screen.getByRole("textbox", { name: "Line 1 narration" }), { target: { value: "First edit here" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Reel title" }), { target: { value: "New title" } });
+    fireEvent.click(btn(/^Save/));
+    // typed while the save is in flight
+    fireEvent.change(screen.getByRole("textbox", { name: "Line 2 narration" }), { target: { value: "Typed during save" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Reel title" }), { target: { value: "Newer title" } });
+    await act(async () => { finish({ ok: true }); });
+    expect((screen.getByRole("textbox", { name: "Line 1 narration" }) as HTMLTextAreaElement).value).toBe("First edit here");
+    expect((screen.getByRole("textbox", { name: "Line 2 narration" }) as HTMLTextAreaElement).value).toBe("Typed during save");
+    expect((screen.getByRole("textbox", { name: "Reel title" }) as HTMLInputElement).value).toBe("Newer title");
+    expect(screen.getByTestId("words-1").textContent).not.toContain("edited");
+    expect(screen.getByTestId("words-2").textContent).toContain("edited");
+    expect(btn(/^Save/)).toBeTruthy(); // still something to save
   });
 
   it("warns on a line over 14 words and blocks Save with the reason", () => {
@@ -208,6 +234,54 @@ describe("ReelProgress", () => {
     await waitFor(() => expect(actions.rerenderReelAction).toHaveBeenCalledWith(RID));
   });
 
+  it("the status label is a polite live region", () => {
+    render(<ReelProgress reel={reel({ status: "queued" })} scenes={scenes(1, "queued")} />);
+    expect(screen.getByTestId("reel-status").getAttribute("aria-live")).toBe("polite");
+  });
+
+  it("redo on a ready reel also puts the reel back in line without its video (optimistic)", async () => {
+    const onPatchReel = vi.fn(), onPatchScene = vi.fn();
+    render(<ReelProgress reel={reel({ status: "ready", voice_path: "v", words: w, preview_path: "p.mp4", pc_path: "C:/x.mp4" })}
+      scenes={[scene(1, { status: "done", photo_path: "a.jpg" })]} onPatchReel={onPatchReel} onPatchScene={onPatchScene} />);
+    fireEvent.click(screen.getByRole("button", { name: /Open image 1/ }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: /New picture/ }));
+    await waitFor(() => expect(onPatchReel).toHaveBeenCalledWith({ status: "queued", preview_path: null, pc_path: null }));
+    expect(onPatchScene).toHaveBeenCalledWith(sid(1), expect.objectContaining({ status: "queued" }));
+  });
+
+  it("redo while images are still being made only patches the image", async () => {
+    const onPatchReel = vi.fn();
+    render(<ReelProgress reel={reel({ status: "imaging", voice_path: "v", words: w })} scenes={[scene(1, { status: "failed", attempts: 3 })]} onPatchReel={onPatchReel} />);
+    fireEvent.click(within(screen.getByTestId("attention-banner")).getByRole("button", { name: /Retry image/ }));
+    await waitFor(() => expect(actions.redoReelSceneAction).toHaveBeenCalled());
+    expect(onPatchReel).not.toHaveBeenCalled();
+  });
+
+  it("dialog buttons are disabled while another action runs", async () => {
+    let finish!: (v: { ok: true }) => void;
+    actions.skipReelSceneAction.mockImplementation(() => new Promise((res) => { finish = res; }));
+    render(<ReelProgress reel={reel({ status: "needs_attention", voice_path: "v", words: w })} scenes={[scene(1, { status: "failed", attempts: 3 }), scene(2, { status: "failed", attempts: 3 })]} />);
+    fireEvent.click(within(screen.getByTestId("attention-banner")).getAllByRole("button", { name: /Skip image/ })[0]);
+    fireEvent.click(screen.getByRole("button", { name: /Open image 2/ }));
+    const dialog = screen.getByRole("dialog");
+    expect((within(dialog).getByRole("button", { name: /Skip image/ }) as HTMLButtonElement).disabled).toBe(true);
+    expect((within(dialog).getByRole("button", { name: /New picture/ }) as HTMLButtonElement).disabled).toBe(true);
+    await act(async () => { finish({ ok: true }); });
+  });
+
+  it("keeps the first signed video URL while the preview path is the same; video and tiles follow a new path", () => {
+    const r = reel({ status: "ready", voice_path: "v", words: w, preview_path: "r/preview-v3.mp4" });
+    const { container, rerender } = render(<ReelProgress reel={r} scenes={[scene(1, { status: "done", photo_path: "r/scenes/1-v2.jpg" })]} />);
+    const first = container.querySelector("video")!.getAttribute("src");
+    signVersion = 1; // a re-sign hands back a different URL for the same path
+    rerender(<ReelProgress reel={{ ...r }} scenes={[scene(1, { status: "done", photo_path: "r/scenes/1-v2.jpg" })]} />);
+    expect(container.querySelector("video")!.getAttribute("src")).toBe(first);
+    rerender(<ReelProgress reel={{ ...r, preview_path: "r/preview-v4.mp4" }} scenes={[scene(1, { status: "done", photo_path: "r/scenes/1-v3.jpg" })]} />);
+    expect(container.querySelector("video")!.getAttribute("src")).toContain("r/preview-v4.mp4");
+    expect(screen.getByRole("img", { name: /Image 1/ }).getAttribute("src")).toContain("r/scenes/1-v3.jpg");
+    signVersion = 0;
+  });
+
   it("tap an image → dialog with Redo", async () => {
     render(<ReelProgress reel={reel({ status: "ready", voice_path: "v", words: w, preview_path: "p.mp4" })} scenes={[scene(1, { status: "done", photo_path: "a.jpg" })]} />);
     fireEvent.click(screen.getByRole("button", { name: /Open image 1/ }));
@@ -251,6 +325,19 @@ describe("list, new reel, setup, nav", () => {
     await act(async () => { fireEvent.click(btn(/Write script/)); });
     expect(screen.getByRole("alert").textContent).toContain("Could not write the script: timeout");
     expect(btn(/Try again/)).toBeTruthy();
+  });
+
+  it("list reloads are debounced with a 3 s max wait", () => {
+    expect(nextLoadDelay(0)).toBe(500);
+    expect(nextLoadDelay(2800)).toBe(200);
+    expect(nextLoadDelay(5000)).toBe(0);
+  });
+
+  it("a reel deleted elsewhere sends the page back to the list", async () => {
+    rows = [];
+    render(<ReelDetail reel={reel({ status: "queued" })} scenes={[]} />);
+    await waitFor(() => expect(replace).toHaveBeenCalledWith("/reels"));
+    rows = null;
   });
 
   it("nav has a Reels tab", () => {
