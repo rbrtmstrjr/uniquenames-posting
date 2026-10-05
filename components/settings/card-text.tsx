@@ -243,8 +243,9 @@ export function TextPreview({ t, sample, aspect, handle }: { t: TextSettings; sa
         {lay && (
           <div className="absolute flex flex-col" style={{
             left: `${LAYOUT.padX * 100}%`, right: `${LAYOUT.padX * 100}%`,
-            top: vert === "auto" ? band[0] * H : LAYOUT.padTop * H,
-            bottom: vert === "auto" ? H - band[1] * H : LAYOUT.padBottom * H,
+            // Middle centres on the full height, like the worker (y = (H - h) / 2).
+            top: vert === "auto" ? band[0] * H : vert === "middle" ? 0 : LAYOUT.padTop * H,
+            bottom: vert === "auto" ? H - band[1] * H : vert === "middle" ? 0 : LAYOUT.padBottom * H,
             justifyContent: vert === "top" ? "flex-start" : vert === "bottom" ? "flex-end" : "center",
           }}>
             <div ref={block} className={cn("flex flex-col", align)} style={{ color: inks.text.color, textShadow: shadow(inks.text) }}>

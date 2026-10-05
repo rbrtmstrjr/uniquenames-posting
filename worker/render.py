@@ -304,21 +304,38 @@ def layout_text(size, name, meaning, handle, style, band="top", log=print):
             return right - bb[2]
         return W / 2 - (bb[0] + bb[2]) / 2
 
+    mk = fonts.load_safe(style.mark_font, LAYOUT["bodyWeight"], max(1, _px(style.mark_size * k)), log)
+    mb = mk.getbbox(handle)
+    # The watermark sits bottom-right, out of the text's way; bottom-right text pushes it left.
+    mx = W * LAYOUT["markInsetX"] - mb[0] if pos == "bottom-right" else W - W * LAYOUT["markInsetX"] - mb[2]
+    my = H - H * LAYOUT["markInsetBottom"] - mb[3]
+    mark = {"text": handle, "font": mk, "xy": (mx, my), "box": (mx + mb[0], my + mb[1], mx + mb[2], my + mb[3])}
+
+    # The text block lives between the top padding and the bottom padding, and never reaches
+    # the watermark row (on a short, wide card 10% of the height is less than a big watermark).
+    lo = H * LAYOUT["padTop"]
+    bottom = min(H - H * LAYOUT["padBottom"], mark["box"][1] - W * LAYOUT["gap"] / 2)
+
     title = name.upper() if fonts.caps(style.title_font) else name
-    tf = fit_title(style.title_font, title, style.title_size * k, max_w, log)
-    mf, lines = fit_meaning(style.meaning_font, meaning, style.meaning_size * k, max_w, log)
+    scale = 1.0
+    while True:
+        # A block taller than the space shrinks (title and meaning together) instead of overflowing.
+        tf = fit_title(style.title_font, title, style.title_size * k * scale, max_w, log)
+        mf, lines = fit_meaning(style.meaning_font, meaning, style.meaning_size * k * scale, max_w, log)
+        parts = []
+        tb = tf.getbbox(title)
+        parts.append({"text": title, "font": tf, "y": 0, "bb": tb})
+        first = mf.getbbox(lines[0])
+        pitch = mf.size * (1 + LAYOUT["lineGap"])
+        for i, ln in enumerate(lines):
+            parts.append({"text": ln, "font": mf, "y": tb[3] + W * LAYOUT["gap"] * scale - first[1] + i * pitch, "bb": mf.getbbox(ln)})
+        top = min(p["y"] + p["bb"][1] for p in parts)
+        height = max(p["y"] + p["bb"][3] for p in parts) - top
+        if height <= bottom - lo or scale < 0.15:
+            break
+        scale *= 0.9
 
-    parts = []
-    tb = tf.getbbox(title)
-    parts.append({"text": title, "font": tf, "y": 0, "bb": tb})
-    first = mf.getbbox(lines[0])
-    pitch = mf.size * (1 + LAYOUT["lineGap"])
-    for i, ln in enumerate(lines):
-        parts.append({"text": ln, "font": mf, "y": tb[3] + W * LAYOUT["gap"] - first[1] + i * pitch, "bb": mf.getbbox(ln)})
-
-    top = min(p["y"] + p["bb"][1] for p in parts)
-    height = max(p["y"] + p["bb"][3] for p in parts) - top
-    lo, hi = H * LAYOUT["padTop"], H - H * LAYOUT["padBottom"] - height
+    hi = bottom - height
     if vert == "top":
         y = lo
     elif vert == "middle":
@@ -336,13 +353,6 @@ def layout_text(size, name, meaning, handle, style, band="top", log=print):
         bb = p["bb"]
         x, py = x_for(bb), p["y"] + dy
         out.append({"text": p["text"], "font": p["font"], "xy": (x, py), "box": (x + bb[0], py + bb[1], x + bb[2], py + bb[3])})
-
-    mk = fonts.load_safe(style.mark_font, LAYOUT["bodyWeight"], max(1, _px(style.mark_size * k)), log)
-    mb = mk.getbbox(handle)
-    # The watermark sits bottom-right, out of the text's way; bottom-right text pushes it left.
-    mx = W * LAYOUT["markInsetX"] - mb[0] if pos == "bottom-right" else W - W * LAYOUT["markInsetX"] - mb[2]
-    my = H - H * LAYOUT["markInsetBottom"] - mb[3]
-    mark = {"text": handle, "font": mk, "xy": (mx, my), "box": (mx + mb[0], my + mb[1], mx + mb[2], my + mb[3])}
 
     boxes = [p["box"] for p in out]
     block = (min(b[0] for b in boxes), min(b[1] for b in boxes), max(b[2] for b in boxes), max(b[3] for b in boxes))
@@ -411,11 +421,14 @@ def fit_to_size(img, width, height):
 
 # ---------------------------------------------------------------- side effects
 
-def ensure_fonts():
-    """Fetch the fallback font (Poppins) at startup so a card can always be stamped. Other
-    catalog fonts download on first use (worker/fonts.py), falling back to Poppins if offline."""
-    return {"semibold": fonts.font_file(fonts.FALLBACK, LAYOUT["titleWeight"]),
-            "regular": fonts.font_file(fonts.FALLBACK, LAYOUT["bodyWeight"])}
+def ensure_fonts(log=print):
+    """At startup: fetch the fallback font (Poppins, required: a card can always be stamped),
+    then prefetch the rest of the catalog best effort (short timeout, failures only logged;
+    a font still missing downloads on first use or falls back to Poppins)."""
+    files = {"semibold": fonts.font_file(fonts.FALLBACK, LAYOUT["titleWeight"]),
+             "regular": fonts.font_file(fonts.FALLBACK, LAYOUT["bodyWeight"])}
+    fonts.prefetch(timeout=15, log=log)
+    return files
 
 
 def http_json(url, body=None, timeout=30):

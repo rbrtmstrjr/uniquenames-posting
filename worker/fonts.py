@@ -4,6 +4,7 @@
 import functools
 import json
 import os
+import time
 import urllib.parse
 import urllib.request
 
@@ -37,10 +38,16 @@ def file_url(folder, filename):
     return RAW_BASE + folder + "/" + urllib.parse.quote(filename)
 
 
-def _download(url, dest):
+# Files whose download failed recently: not retried for every size the fitter probes
+# (a card would otherwise hammer GitHub dozens of times); retried after FAILED_RETRY_S.
+FAILED_RETRY_S = 600
+_failed = {}
+
+
+def _download(url, dest, timeout=60):
     tmp = dest + ".part"
     req = urllib.request.Request(url, headers={"User-Agent": "unique-names-worker"})
-    with urllib.request.urlopen(req, timeout=60) as r, open(tmp, "wb") as f:
+    with urllib.request.urlopen(req, timeout=timeout) as r, open(tmp, "wb") as f:
         f.write(r.read())
     if os.path.getsize(tmp) < 10000:
         os.remove(tmp)
@@ -63,9 +70,36 @@ def font_file(font_id, weight):
     name, _var = _pick_file(entry, weight)
     dest = os.path.join(FONTS_DIR, name)
     if not os.path.exists(dest):
+        since = _failed.get(name)
+        if since is not None and time.time() - since < FAILED_RETRY_S:
+            raise RuntimeError("font %s failed to download recently" % name)
         os.makedirs(FONTS_DIR, exist_ok=True)
-        _download(file_url(entry["dir"], name), dest)
+        try:
+            _download(file_url(entry["dir"], name), dest)
+        except Exception:
+            _failed[name] = time.time()
+            raise
+        _failed.pop(name, None)
     return dest
+
+
+def prefetch(timeout=15, log=print):
+    """Best effort at startup: fetch every catalog file that is not cached yet, so a card
+    never waits on a download. Failures are logged (and negative-cached), never raised."""
+    missing = 0
+    for entry in _CATALOG["fonts"]:
+        for name in ([entry["var"]] if entry.get("var") else list(entry["files"].values())):
+            dest = os.path.join(FONTS_DIR, name)
+            if os.path.exists(dest):
+                continue
+            try:
+                os.makedirs(FONTS_DIR, exist_ok=True)
+                _download(file_url(entry["dir"], name), dest, timeout=timeout)
+            except Exception as e:
+                _failed[name] = time.time()
+                missing += 1
+                log("font prefetch failed for %s: %s" % (name, e))
+    return missing
 
 
 @functools.lru_cache(maxsize=256)

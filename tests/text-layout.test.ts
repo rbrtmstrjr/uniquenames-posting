@@ -100,8 +100,8 @@ describe("layout mirror of worker/render.py", () => {
   });
 
   // The real cross-check: the worker's own Python functions, given the same monospace
-  // measure, must pick the same sizes and line breaks. Skipped where Python is missing.
-  const py = spawnSync("python", ["--version"]);
+  // measure, must pick the same sizes and line breaks. Skipped where Python + Pillow are missing.
+  const py = spawnSync("python", ["-c", "import PIL"]);
   it.skipIf(py.status !== 0)("matches the Python worker on the same inputs", () => {
     const cases = [
       ["peak strength", 37, 756], ["a gift of grace and light who brings joy, warmth and peace to every home she", 90, 756],
@@ -121,7 +121,7 @@ for text, px, mw in json.loads(sys.argv[1]):
     out.append({"px": f.size, "lines": lines, "title": render.fit_title("poppins", text.upper(), px * 2, mw).size})
 print(json.dumps(out))`;
     const r = spawnSync("python", ["-c", script, JSON.stringify(cases)], { cwd: new URL("..", import.meta.url), encoding: "utf8" });
-    expect(r.stderr).toBe("");
+    expect(r.status, r.stderr).toBe(0);
     const got = JSON.parse(r.stdout) as { px: number; lines: string[]; title: number }[];
     cases.forEach(([text, px, mw], i) => {
       expect(got[i]).toEqual({ ...fitMeaning(mono, text, px, mw), title: fitTitle(mono, text.toUpperCase(), px * 2, mw) });

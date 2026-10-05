@@ -1,5 +1,7 @@
 # The font catalog: every id loads (files cached under worker/fonts/, downloaded once if
 # missing), weights apply to variable fonts, unknown ids fall back to Poppins.
+import shutil
+import tempfile
 import unittest
 from unittest import mock
 
@@ -61,6 +63,55 @@ class Load(unittest.TestCase):
             f = fonts.load_safe("lora", 400, 40, log=logs.append)
         self.assertEqual(f.path, poppins)
         self.assertTrue(logs and "lora" in logs[0])
+
+
+class Downloads(unittest.TestCase):
+    """Against an empty temp fonts folder, with the network mocked."""
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+        patches = [mock.patch("fonts.FONTS_DIR", self.dir), mock.patch.dict(fonts._failed, clear=True)]
+        for p in patches:
+            p.start()
+            self.addCleanup(p.stop)
+        self.addCleanup(shutil.rmtree, self.dir, True)
+
+    def test_a_failed_download_is_not_retried_for_every_size(self):
+        with mock.patch("fonts._download", side_effect=OSError("offline")) as dl:
+            for _ in range(5):
+                with self.assertRaises(Exception):
+                    fonts.font_file("lora", 400)
+        self.assertEqual(dl.call_count, 1)
+
+    def test_retried_after_the_cooldown(self):
+        with mock.patch("fonts._download", side_effect=OSError("offline")) as dl:
+            with self.assertRaises(Exception):
+                fonts.font_file("lora", 400)
+            fonts._failed["Lora[wght].ttf"] -= fonts.FAILED_RETRY_S + 1
+            with self.assertRaises(Exception):
+                fonts.font_file("lora", 400)
+        self.assertEqual(dl.call_count, 2)
+
+    def test_prefetch_fetches_every_file_best_effort_with_a_short_timeout(self):
+        calls, logs = [], []
+
+        def fake(url, dest, timeout=60):
+            calls.append((url, timeout))
+            if "lora" in url:
+                raise OSError("offline")
+            with open(dest, "wb") as f:
+                f.write(b"x" * 20000)
+
+        with mock.patch("fonts._download", side_effect=fake):
+            missing = fonts.prefetch(timeout=15, log=logs.append)
+        self.assertEqual(len(calls), 16)  # 15 fonts, Poppins has two files
+        self.assertTrue(all(t == 15 for _u, t in calls))
+        self.assertEqual(missing, 1)
+        self.assertTrue(logs and "Lora" in logs[0])
+        self.assertIn("Lora[wght].ttf", fonts._failed)
+        with mock.patch("fonts._download") as dl:  # a second run only tries what is still missing
+            fonts.prefetch(log=lambda m: None)
+        self.assertEqual([c.args[0].rsplit("/", 1)[1] for c in dl.call_args_list], ["Lora%5Bwght%5D.ttf"])
 
 
 if __name__ == "__main__":

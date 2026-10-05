@@ -167,6 +167,17 @@ class Positions(unittest.TestCase):
                         self.check(W, H, style, "Arlo Zenith", "peak strength with calm", band)
                         self.check(W, H, style, LONG_NAME, LONG_MEANING, band)
 
+    def test_a_block_too_tall_for_a_short_card_shrinks_instead_of_overflowing(self):
+        for pos in POSITIONS:
+            for name, meaning in (("Luna Mae", LONG_MEANING), ("Luna", "peak")):
+                self.check(1080, 608, MAX._replace(position=pos), name, meaning)  # 16:9 at max sizes still fits
+                # 2048x512 (the widest allowed card): sizes scale with the width to a block
+                # taller than the 512 px card can hold, so title + meaning shrink to fit.
+                lay = self.check(2048, 512, MAX._replace(position=pos), name, meaning)
+                self.assertLess(lay["title"][0]["font"].size, w._px(180 * 2048 / 1080), pos)
+        normal = w.layout_text((1080, 1080), "Luna", "peak", "@u", MAX)
+        self.assertEqual(normal["title"][0]["font"].size, 180)  # a block that fits is never shrunk
+
     def test_every_font_fits_at_max_size(self):
         for fid in w.fonts.ids():
             for pos in ("top-left", "middle-center", "bottom-right", "bottom-center"):
