@@ -74,7 +74,9 @@ end $$;
 --   * during long sub-steps (Chatterbox chunks, ffmpeg passes) re-touch reels.claimed_at = now() as a heartbeat:
 --     requeue_stuck_reels() releases any claim older than 10 minutes.
 --   * on an image's 3rd failure set the reel needs_attention; after render set it ready.
-create or replace function public.claim_next_reel_step() returns jsonb language plpgsql as $$
+-- p_no_comfy: ComfyUI is closed on the PC, so only the steps that don't need it (timing, render) are handed out.
+drop function if exists public.claim_next_reel_step();  -- the first draft had no argument: keep one signature
+create or replace function public.claim_next_reel_step(p_no_comfy boolean default false) returns jsonb language plpgsql as $$
 declare v_reel public.reels%rowtype; v_scene jsonb; v_step text; v_open int; v_done int; v_id uuid;
 begin
   perform 1 from public.cards
@@ -91,14 +93,16 @@ begin
   loop
     v_step := null; v_scene := null; v_id := null;
     if v_reel.voice_path is null then
-      v_step := 'voice';
+      if not p_no_comfy then v_step := 'voice'; end if;
     elsif v_reel.words is null then
       v_step := 'timing';
     else
-      select id into v_id from public.reel_scenes
-        where reel_id = v_reel.id and (status = 'queued' or (status = 'failed' and attempts < 3))
-        order by position limit 1
-        for update skip locked;
+      if not p_no_comfy then
+        select id into v_id from public.reel_scenes
+          where reel_id = v_reel.id and (status = 'queued' or (status = 'failed' and attempts < 3))
+          order by position limit 1
+          for update skip locked;
+      end if;
       if v_id is not null then
         v_step := 'image';
       else
@@ -187,9 +191,9 @@ end $$;
 grant select, insert, update, delete on public.reels, public.reel_scenes to authenticated, service_role;
 revoke all on public.reels, public.reel_scenes from anon;
 
-revoke execute on function public.claim_next_reel_step() from public, anon, authenticated;
+revoke execute on function public.claim_next_reel_step(boolean) from public, anon, authenticated;
 revoke execute on function public.requeue_stuck_reels() from public, anon, authenticated;
-grant execute on function public.claim_next_reel_step() to service_role;
+grant execute on function public.claim_next_reel_step(boolean) to service_role;
 grant execute on function public.requeue_stuck_reels() to service_role;
 
 -- ---------------------------------------------------------------- storage (preview MP4s, voice WAVs, scene images)

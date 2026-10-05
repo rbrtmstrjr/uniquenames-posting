@@ -30,7 +30,9 @@ async function migratedDb() {
 
 type Json = Record<string, unknown>;
 type Step = { step: "voice" | "timing" | "image" | "render"; reel: Json & { id: string; status: string }; scene: (Json & { id: string; position: number; status: string; attempts: number }) | null } | null;
-const claimStep = async (db: PGlite) => (await one<{ r: Step }>(db, `select claim_next_reel_step() r`)).r;
+const claimStep = async (db: PGlite, noComfy?: boolean) =>
+  (await one<{ r: Step }>(db, noComfy === undefined ? `select claim_next_reel_step() r` : `select claim_next_reel_step($1) r`,
+    noComfy === undefined ? [] : [noComfy])).r;
 const release = (db: PGlite, reel: string) => db.query(`update reels set claimed_at=null where id=$1`, [reel]);
 
 async function addReel(db: PGlite, scenes = 3, extra: { status?: string; created?: string } = {}) {
@@ -94,6 +96,32 @@ describe("claim_next_reel_step", () => {
     expect(await claimStep(db)).toBeNull();
     await db.query(`update cards set status='generating', claimed_at=now() - interval '6 minutes' where id=$1`, [card]);
     expect((await claimStep(db))?.step).toBe("voice");
+  });
+
+  it("with ComfyUI closed (p_no_comfy) hands out only timing and render", async () => {
+    const db = await migratedDb();
+    const reel = await addReel(db, 2);
+    expect(await claimStep(db, true)).toBeNull(); // voice needs ComfyUI
+    await db.query(`update reels set voice_path='v.wav' where id=$1`, [reel]);
+    expect(await claimStep(db, true)).toMatchObject({ step: "timing" });
+    await db.query(`update reels set words='[]', claimed_at=null where id=$1`, [reel]);
+    expect(await claimStep(db, true)).toBeNull(); // images need ComfyUI
+    expect(await one(db, `select count(*)::int n from reel_scenes where reel_id=$1 and status='queued' and attempts=0`, [reel])).toEqual({ n: 2 });
+    await db.query(`update reel_scenes set status='done' where reel_id=$1`, [reel]);
+    await release(db, reel);
+    expect(await claimStep(db, true)).toMatchObject({ step: "render" });
+    await db.query(`update reels set preview_path=null, claimed_at=null where id=$1`, [reel]);
+    expect(await claimStep(db, false)).toMatchObject({ step: "render" });
+  });
+
+  it("has exactly one signature after running 005 twice (the zero-argument draft is dropped)", async () => {
+    const db = await liveDb();
+    await db.exec(`create function public.claim_next_reel_step() returns jsonb language sql as $$ select null::jsonb $$`);
+    await db.exec(m005);
+    await db.exec(m005);
+    const sigs = (await db.query<{ s: string }>(`select pg_get_function_identity_arguments(p.oid) s from pg_proc p
+      join pg_namespace n on n.oid = p.pronamespace where n.nspname='public' and p.proname='claim_next_reel_step'`)).rows;
+    expect(sigs).toEqual([{ s: "p_no_comfy boolean" }]);
   });
 
   it("done / failed cards do not block", async () => {
@@ -307,7 +335,7 @@ describe("005 Supabase-only block", () => {
     await db.exec(security(m005raw));
     const can = async (role: string, fn: string) =>
       (await one<{ ok: boolean }>(db, `select has_function_privilege($1, $2, 'execute') ok`, [role, fn])).ok;
-    for (const fn of ["public.claim_next_reel_step()", "public.requeue_stuck_reels()"]) {
+    for (const fn of ["public.claim_next_reel_step(boolean)", "public.requeue_stuck_reels()"]) {
       expect(await can("service_role", fn), fn).toBe(true);
       expect(await can("authenticated", fn), fn).toBe(false);
       expect(await can("anon", fn), fn).toBe(false);
@@ -329,7 +357,7 @@ describe("005 Supabase-only block", () => {
       expect(sql).toMatch(/create policy reels_delete on storage\.objects for delete to authenticated using \(bucket_id = 'reels'\);/);
       expect(sql).toMatch(/alter table public\.reels replica identity full;/);
       expect(sql).toMatch(/alter table public\.reel_scenes replica identity full;/);
-      expect(sql).toMatch(/grant execute on function public\.claim_next_reel_step\(\) to service_role;/);
+      expect(sql).toMatch(/grant execute on function public\.claim_next_reel_step\(boolean\) to service_role;/);
       expect(sql).toMatch(/grant execute on function public\.requeue_stuck_reels\(\) to service_role;/);
     }
     expect(m005raw).toMatch(/array\['reels', 'reel_scenes'\][\s\S]*supabase_realtime/);

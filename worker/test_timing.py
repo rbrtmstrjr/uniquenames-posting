@@ -90,6 +90,32 @@ class AssignLinesTest(unittest.TestCase):
             self.assertAlmostEqual(s, i * 10 * 0.25, places=1)
 
 
+class FfmpegAndImportsTest(unittest.TestCase):
+    def test_ffmpeg_timeout_is_a_clear_error(self):
+        import subprocess
+        with mock.patch.object(timing, "ffmpeg_exe", return_value="ffmpeg"), \
+                mock.patch.object(timing.subprocess, "run", side_effect=subprocess.TimeoutExpired("ffmpeg", 120)) as run:
+            with self.assertRaises(JobError) as cm:
+                voice.flac_to_pcm(b"x")
+        self.assertEqual(run.call_args[1]["timeout"], 120)
+        self.assertIn("took over 120 seconds", str(cm.exception))
+        with mock.patch.object(timing, "ffmpeg_exe", return_value="ffmpeg"), \
+                mock.patch.object(timing.subprocess, "run", side_effect=subprocess.TimeoutExpired("ffmpeg", 120)) as run:
+            with self.assertRaises(JobError):
+                timing.load_16k("v.wav")
+        self.assertEqual(run.call_args[1]["timeout"], 120)
+
+    def test_missing_packages_say_what_to_install(self):
+        with mock.patch.dict(sys.modules, {"faster_whisper": None}), mock.patch.object(timing, "_model", None):
+            with self.assertRaises(JobError) as cm:
+                timing._get_model()
+        self.assertEqual(str(cm.exception), "Run: pip install faster-whisper imageio-ffmpeg")
+        with mock.patch.dict(sys.modules, {"imageio_ffmpeg": None}):
+            with self.assertRaises(JobError) as cm:
+                timing.ffmpeg_exe()
+        self.assertEqual(str(cm.exception), "Run: pip install faster-whisper imageio-ffmpeg")
+
+
 class TranscribeTest(unittest.TestCase):
     def test_transcribe_uses_decoded_audio_and_returns_word_dicts(self):
         W = types.SimpleNamespace

@@ -45,6 +45,10 @@ def voice_seed(reel_id):
     return int(str(reel_id).replace("-", "")[:8], 16)
 
 
+class StaleReel(Exception):
+    """The reel moved on (edited, redone or deleted) while a long step ran: stop quietly."""
+
+
 def _match(row):
     return "id=eq.%s&version=eq.%d" % (row["id"], int(row["version"]))
 
@@ -60,16 +64,9 @@ class ReelRunner:
     def run_step(self, job):
         step, reel, scene = job.get("step"), job.get("reel") or {}, job.get("scene")
         try:
-            if step == "voice":
-                self._voice(reel)
-            elif step == "timing":
-                self._timing(reel)
-            elif step == "image":
-                self._image(reel, scene)
-            elif step == "render":
-                self._render(reel)
-            else:
-                raise JobError("Unknown reel step: %s" % step)
+            self._dispatch(step, reel, scene)
+        except StaleReel:
+            self.log(STALE)
         except Exception as e:
             if not isinstance(e, JobError):
                 self.log(traceback.format_exc())
@@ -80,6 +77,18 @@ class ReelRunner:
                     self._fail_reel(reel, e, getattr(e, "reel_patch", None))
             except Exception as e2:
                 self.log("could not save the reel failure: %s" % e2)
+
+    def _dispatch(self, step, reel, scene):
+        if step == "voice":
+            self._voice(reel)
+        elif step == "timing":
+            self._timing(reel)
+        elif step == "image":
+            self._image(reel, scene)
+        elif step == "render":
+            self._render(reel)
+        else:
+            raise JobError("Unknown reel step: %s" % step)
 
     # ------------------------------------------------------------ voice
     def _voice(self, reel):
@@ -151,18 +160,34 @@ class ReelRunner:
 
     # ------------------------------------------------------------ one image
     def _image(self, reel, scene):
-        if not self.renderer.health()["ok"]:
-            raise JobError(COMFY_CLOSED)
-        photo = self.renderer.generate_photo(scene["image_prompt"], int(scene["seed"]), IMAGE_W, IMAGE_H)
+        try:
+            if not self.renderer.health()["ok"]:
+                raise JobError(COMFY_CLOSED)
+            photo = self.renderer.generate_photo(scene["image_prompt"], int(scene["seed"]), IMAGE_W, IMAGE_H)
+        except JobError as e:
+            if str(e) != COMFY_CLOSED:
+                raise
+            self._requeue_scene(reel, scene)  # not the picture's fault: no attempt used
+            return
         data = to_jpeg(fit_to_size(photo, OUT_W, OUT_H), 92)
         path = "%s/scenes/%02d-v%d.jpg" % (reel["id"], int(scene["position"]), int(scene["version"]))
         self._net(lambda: self.supa.upload(BUCKET, path, data))
         body = {"status": "done", "photo_path": path, "error": None, "claimed_at": None}
-        rows = self._retry(lambda: self.supa.update("reel_scenes", _match(scene), body, returning=True))
+        try:
+            rows = self._retry(lambda: self.supa.update("reel_scenes", _match(scene), body, returning=True))
+        except Exception:
+            self._remove([path])  # not saved: don't leave an orphan in storage
+            raise
         if not rows:
             self._drop_stale([path])
         elif scene.get("photo_path") and scene["photo_path"] != path:
             self._remove([scene["photo_path"]])
+        self._release(reel)
+
+    def _requeue_scene(self, reel, scene):
+        self.log("ComfyUI is closed: image %s goes back in line" % scene.get("position"))
+        body = {"status": "queued", "attempts": max(0, int(scene.get("attempts") or 0) - 1), "error": None, "claimed_at": None}
+        self._retry(lambda: self.supa.update("reel_scenes", _match(scene), body))
         self._release(reel)
 
     def _image_failed(self, reel, scene, e):
@@ -199,10 +224,14 @@ class ReelRunner:
         self._retry(lambda: self.supa.update("reels", _match(reel), {"claimed_at": None}))
 
     def _heartbeat(self, reel):
+        """Re-touch the claim; raises StaleReel if the reel moved on (its change already cleared the claim)."""
         try:
-            self.supa.update("reels", _match(reel), {"claimed_at": now_iso()})
+            rows = self.supa.update("reels", _match(reel), {"claimed_at": now_iso()}, returning=True)
         except Exception as e:
             self.log("reel heartbeat failed: %s" % e)
+            return
+        if not rows:
+            raise StaleReel()
 
     def _fail_reel(self, reel, e, extra=None):
         if not reel.get("id"):

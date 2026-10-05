@@ -6,23 +6,44 @@ import subprocess
 import threading
 import wave
 
+from render import JobError
+
 WHISPER_MODEL = "small.en"
 _model = None
 _model_lock = threading.Lock()
+FFMPEG_TIMEOUT = 120
+PIP_HINT = "Run: pip install faster-whisper imageio-ffmpeg"
+
+
+def _need(module):
+    """Import a reel-only package, or tell the owner what to install."""
+    import importlib
+    try:
+        return importlib.import_module(module)
+    except ImportError:
+        raise JobError(PIP_HINT)
+
+
+def run_ffmpeg(args, what, data=None):
+    """ffmpeg (imageio-ffmpeg) -> stdout bytes; a hang or an error becomes a plain JobError."""
+    try:
+        return subprocess.run([ffmpeg_exe()] + args, input=data, check=True, capture_output=True,
+                              timeout=FFMPEG_TIMEOUT, creationflags=_NO_WINDOW).stdout
+    except subprocess.TimeoutExpired:
+        raise JobError("ffmpeg took over %d seconds reading %s." % (FFMPEG_TIMEOUT, what))
+    except subprocess.CalledProcessError as e:
+        raise JobError("ffmpeg couldn't read %s: %s" % (what, (e.stderr or b"").decode("utf-8", "replace")[-300:]))
 
 
 def ffmpeg_exe():
-    import imageio_ffmpeg
-    return imageio_ffmpeg.get_ffmpeg_exe()
+    return _need("imageio_ffmpeg").get_ffmpeg_exe()
 
 
 def load_16k(path):
     """Decode any audio file to 16 kHz mono float32 with the imageio-ffmpeg binary.
     (faster-whisper's own decoder breaks on PyAV 19, so it never gets a file path.)"""
-    import numpy as np
-    raw = subprocess.run([ffmpeg_exe(), "-nostdin", "-v", "error", "-i", path,
-                          "-f", "s16le", "-ac", "1", "-ar", "16000", "-"],
-                         check=True, capture_output=True, creationflags=_NO_WINDOW).stdout
+    np = _need("numpy")
+    raw = run_ffmpeg(["-nostdin", "-v", "error", "-i", path, "-f", "s16le", "-ac", "1", "-ar", "16000", "-"], "the voice")
     return np.frombuffer(raw, np.int16).astype(np.float32) / 32768.0
 
 
@@ -33,8 +54,7 @@ def _get_model():
     global _model
     with _model_lock:
         if _model is None:
-            from faster_whisper import WhisperModel
-            _model = WhisperModel(WHISPER_MODEL, device="cpu", compute_type="int8")
+            _model = _need("faster_whisper").WhisperModel(WHISPER_MODEL, device="cpu", compute_type="int8")
         return _model
 
 

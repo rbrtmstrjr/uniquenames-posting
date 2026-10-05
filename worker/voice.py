@@ -3,7 +3,6 @@
 # joined with a short natural pause. ComfyUI saves FLAC only; ffmpeg (imageio-ffmpeg) turns it into PCM.
 import io
 import json
-import subprocess
 import time
 import urllib.error
 import urllib.parse
@@ -20,7 +19,6 @@ CHUNK_SECONDS = 25.0         # well under Chatterbox's ~40 s cap
 PAUSE_SECONDS = 0.35         # between chunks, like a breath between sentences
 NEEDS_RESTART = "Restart ComfyUI so it loads the Chatterbox voice node."
 COMFY_CLOSED = "ComfyUI is closed. Open ComfyUI Desktop on your PC, then press Retry."
-_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 
 def chatterbox_graph(text, seed, voice_ref=None):
@@ -86,13 +84,9 @@ def upload_input(comfy_url, filename, data):
 
 def flac_to_pcm(data):
     """Any audio bytes -> 16-bit 24 kHz mono PCM bytes."""
-    from timing import ffmpeg_exe
-    try:
-        return subprocess.run([ffmpeg_exe(), "-nostdin", "-v", "error", "-i", "pipe:0",
-                               "-f", "s16le", "-acodec", "pcm_s16le", "-ac", "1", "-ar", str(RATE), "pipe:1"],
-                              input=data, check=True, capture_output=True, creationflags=_NO_WINDOW).stdout
-    except subprocess.CalledProcessError as e:
-        raise JobError("Couldn't read the voice from ComfyUI: %s" % e.stderr.decode("utf-8", "replace")[-300:])
+    from timing import run_ffmpeg
+    return run_ffmpeg(["-nostdin", "-v", "error", "-i", "pipe:0", "-f", "s16le", "-acodec", "pcm_s16le",
+                       "-ac", "1", "-ar", str(RATE), "pipe:1"], "the voice from ComfyUI", data)
 
 
 def pcm_to_wav(pcm):

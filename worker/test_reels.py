@@ -48,11 +48,15 @@ class FakeSupa:
         self.settings = [{"id": 1, "reel_voice_path": None}]
         self.updates, self.uploads, self.removed, self.selects, self.rpcs = [], {}, [], [], []
         self.stale = set()            # tables whose version-guarded updates match 0 rows
+        self.stale_key = None         # only updates carrying this key are stale (None = any)
         self.reel_steps = []
         self.rpc_error = None
+        self.rpc_args = []
+        self.scene_update_error = None
 
     def rpc(self, fn, args=None):
         self.rpcs.append(fn)
+        self.rpc_args.append(args)
         if fn == "claim_next_card":
             return None
         if self.rpc_error and fn in ("requeue_stuck_reels", "claim_next_reel_step"):
@@ -66,9 +70,12 @@ class FakeSupa:
         return self.settings if table == "settings" else [dict(s) for s in self.scenes]
 
     def update(self, table, match, values, returning=False):
+        if table == "reel_scenes" and self.scene_update_error:
+            raise self.scene_update_error
         self.updates.append((table, match, values))
         if returning:
-            return [] if (table in self.stale and "version=eq." in match) else [{"id": "x"}]
+            stale = table in self.stale and "version=eq." in match and (self.stale_key is None or self.stale_key in values)
+            return [] if stale else [{"id": "x"}]
 
     def upload(self, bucket, path, data, content_type="image/jpeg"):
         self.uploads[path] = (bucket, data, content_type)
@@ -149,9 +156,18 @@ class ReelRunnerTest(unittest.TestCase):
 
     def test_voice_stale_result_is_dropped(self):
         self.supa.stale.add("reels")
+        self.supa.stale_key = "voice_path"
         self.run_voice()
         self.assertEqual(self.supa.removed, ["%s/voice-v3.wav" % RID])
         self.assertIn(reels.STALE, self.logs)
+
+    def test_heartbeat_on_a_changed_reel_stops_voicing_quietly(self):
+        self.supa.stale.add("reels")
+        synth = self.run_voice(chunks=lambda lines: ["chunk one", "chunk two"])
+        self.assertEqual(synth.call_count, 0)
+        self.assertEqual(self.supa.uploads, {})
+        self.assertIn(reels.STALE, self.logs)
+        self.assertFalse([u for u in self.supa.of("reels") if "status" in u[2]])   # not marked failed
 
     def test_voice_missing_node_fails_the_reel_with_a_clear_message(self):
         with mock.patch.object(reels.voice, "http_json", return_value={}):
@@ -245,11 +261,26 @@ class ReelRunnerTest(unittest.TestCase):
         self.rr.run_step({"step": "image", "reel": make_reel(), "scene": make_scene(2, attempts=3)})
         self.assertEqual(self.supa.of("reels")[-1][2], {"claimed_at": None})
 
-    def test_image_with_comfy_closed(self):
+    def test_image_with_comfy_closed_goes_back_in_line(self):
         self.r.ok = False
-        self.rr.run_step({"step": "image", "reel": make_reel(), "scene": make_scene(1)})
+        self.rr.run_step({"step": "image", "reel": make_reel(), "scene": make_scene(1, attempts=2)})
         self.assertEqual(self.r.calls, [])
-        self.assertEqual(self.supa.of("reel_scenes")[-1][2]["error"], reels.COMFY_CLOSED)
+        _t, match, v = self.supa.of("reel_scenes")[-1]
+        self.assertEqual(match, "id=eq.s1&version=eq.2")
+        self.assertEqual(v, {"status": "queued", "attempts": 1, "error": None, "claimed_at": None})
+        self.assertEqual(self.supa.of("reels")[-1][2], {"claimed_at": None})
+
+    def test_comfy_closing_mid_picture_goes_back_in_line(self):
+        self.r.boom = JobError(reels.COMFY_CLOSED)
+        self.rr.run_step({"step": "image", "reel": make_reel(), "scene": make_scene(1, attempts=3)})
+        self.assertEqual(self.supa.of("reel_scenes")[-1][2]["status"], "queued")
+        self.assertEqual(self.supa.of("reel_scenes")[-1][2]["attempts"], 2)
+        self.assertFalse([u for u in self.supa.of("reels") if "status" in u[2]])   # no needs_attention
+
+    def test_upload_is_removed_when_the_scene_save_fails(self):
+        self.supa.scene_update_error = SupaError("PATCH x -> HTTP 400 bad")
+        self.rr.run_step({"step": "image", "reel": make_reel(), "scene": make_scene(1)})
+        self.assertIn("%s/scenes/01-v2.jpg" % RID, self.supa.removed)
 
     # ------------------------------------------------------------ render (Task 7)
     def test_render_not_built_yet(self):
@@ -288,10 +319,13 @@ class RunnerReelTickTest(unittest.TestCase):
         self.assertFalse(self.run_.tick())
         self.reels.run_step.assert_not_called()
 
-    def test_comfy_down_claims_no_reel_step(self):
+    def test_comfy_down_asks_only_for_steps_without_comfy(self):
         self.run_.renderer = FakeRenderer(ok=False)
         self.assertFalse(self.run_.tick())
-        self.assertNotIn("claim_next_reel_step", self.supa.rpcs)
+        self.assertEqual(self.supa.rpc_args[-1], {"p_no_comfy": True})
+        self.run_.renderer = FakeRenderer()
+        self.run_.tick()
+        self.assertEqual(self.supa.rpc_args[-1], {"p_no_comfy": False})
 
     def test_missing_rpc_is_skipped_quietly_and_rechecked_later(self):
         self.supa.rpc_error = SupaError('POST /rest/v1/rpc/requeue_stuck_reels -> HTTP 404 {"code":"PGRST202"}')

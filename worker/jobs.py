@@ -141,7 +141,8 @@ class Runner:
         job = self.supa.rpc("claim_next_card", None if comfy_ok else {"p_restamp_only": True})
         if not job:
             # Cards always go first: a reel step only when there is no card to make.
-            return self._reel_tick() if (self.reels and comfy_ok) else False
+            # With ComfyUI closed, only the steps that don't need it (timing, render) are handed out.
+            return self._reel_tick(comfy_ok) if self.reels else False
         card = job["card"]
         self.current = card["id"]
         self.log("%s: %s (%s)" % (job["job"], card["name"], card["id"]))
@@ -165,12 +166,12 @@ class Runner:
             self.current = None
         return True
 
-    def _reel_tick(self):
+    def _reel_tick(self, comfy_ok):
         if time.time() < self.reels_off_until:
             return False
         try:
             self.supa.rpc("requeue_stuck_reels")
-            step = self.supa.rpc("claim_next_reel_step")
+            step = self.supa.rpc("claim_next_reel_step", {"p_no_comfy": not comfy_ok})
         except SupaError as e:
             if not is_missing_function(e):
                 raise

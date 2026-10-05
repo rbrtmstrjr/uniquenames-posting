@@ -79,7 +79,7 @@ export interface ReelSceneRow {
   start_s: number | null; end_s: number | null; version: number; claimed_at: string | null;
   created_at: string; updated_at: string;
 }
-/** What claim_next_reel_step() returns to the PC (null = nothing to do). */
+/** What claim_next_reel_step(p_no_comfy) returns to the PC (null = nothing to do). */
 export interface ReelStepClaim {
   step: "voice" | "timing" | "image" | "render";
   reel: ReelRow;
