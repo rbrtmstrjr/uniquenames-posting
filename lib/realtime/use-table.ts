@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { createClient } from "@/lib/supabase/client";
+import type { RealtimeChannel } from "@supabase/supabase-js";
+import { createClient, realtimeAuthReady } from "@/lib/supabase/client";
 
 type Row = { id: string | number };
 
@@ -30,20 +31,32 @@ export function useRealtimeRows<T extends Row>(table: string, initial: T[], opts
       if (!refetchRef.current) return;
       try { const fresh = await refetchRef.current(); if (fresh) setRows(sortIt(fresh)); } catch { /* keep rows */ }
     };
-    // Unique topic per instance: realtime-js returns the existing channel for a repeated topic.
-    const channel = sb.channel(`${table}:${opts.key}:${crypto.randomUUID()}`)
-      .on("postgres_changes", { event: "*", schema: "public", table, ...(opts.filter ? { filter: opts.filter } : {}) }, (payload) => {
-        setRows((prev) => {
-          if (payload.eventType === "DELETE") return prev.filter((r) => r.id !== (payload.old as T).id);
-          const row = payload.new as T;
-          const exists = prev.some((r) => r.id === row.id);
-          return sortIt(exists ? prev.map((r) => (r.id === row.id ? row : r)) : [...prev, row]);
-        });
-      })
-      .subscribe((status) => { if (status === "SUBSCRIBED") void resync(); });
+    let channel: RealtimeChannel | null = null;
+    let gone = false;
+    // Join only once the signed-in token is on the socket (see realtimeAuthReady).
+    void realtimeAuthReady(sb).then(() => {
+      if (gone) return;
+      // Unique topic per instance: realtime-js returns the existing channel for a repeated topic.
+      channel = sb.channel(`${table}:${opts.key}:${crypto.randomUUID()}`)
+        .on("postgres_changes", { event: "*", schema: "public", table, ...(opts.filter ? { filter: opts.filter } : {}) }, (payload) => {
+          // An event the server couldn't authorize arrives with empty rows: never apply it, reload instead.
+          if ((payload as { errors?: unknown[] | null }).errors?.length) { void resync(); return; }
+          setRows((prev) => {
+            if (payload.eventType === "DELETE") return prev.filter((r) => r.id !== (payload.old as T).id);
+            const row = payload.new as T;
+            const exists = prev.some((r) => r.id === row.id);
+            return sortIt(exists ? prev.map((r) => (r.id === row.id ? row : r)) : [...prev, row]);
+          });
+        })
+        .subscribe((status) => { if (status === "SUBSCRIBED") void resync(); });
+    });
     const onVisible = () => { if (document.visibilityState === "visible") void resync(); };
     document.addEventListener("visibilitychange", onVisible);
-    return () => { document.removeEventListener("visibilitychange", onVisible); void sb.removeChannel(channel); };
+    return () => {
+      gone = true;
+      document.removeEventListener("visibilitychange", onVisible);
+      if (channel) void sb.removeChannel(channel);
+    };
   }, [table, opts.key, opts.filter]);
 
   return [rows, setRows] as const;

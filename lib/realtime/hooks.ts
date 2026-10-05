@@ -1,6 +1,7 @@
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { createClient } from "@/lib/supabase/client";
+import type { RealtimeChannel } from "@supabase/supabase-js";
+import { createClient, realtimeAuthReady } from "@/lib/supabase/client";
 import type { CardRow, PostRow, WorkerStatusRow } from "@/lib/db/types";
 import { lastSeenText, workerHealth } from "@/lib/status/worker-health";
 import { etaSeconds, formatEta } from "@/lib/status/eta";
@@ -85,11 +86,22 @@ export function useActivity(onFinish?: (postId: string) => void): Activity {
     const sb = createClient();
     let t: ReturnType<typeof setTimeout> | undefined;
     const kick = () => { clearTimeout(t); t = setTimeout(() => void load(), 400); };
-    const ch = sb.channel(`activity:${crypto.randomUUID()}`).on("postgres_changes", { event: "*", schema: "public", table: "cards" }, kick)
-      .on("postgres_changes", { event: "*", schema: "public", table: "posts" }, kick).subscribe();
+    let ch: RealtimeChannel | null = null;
+    let gone = false;
+    // Join only once the signed-in token is on the socket, or every event arrives as a 401.
+    void realtimeAuthReady(sb).then(() => {
+      if (gone) return;
+      ch = sb.channel(`activity:${crypto.randomUUID()}`).on("postgres_changes", { event: "*", schema: "public", table: "cards" }, kick)
+        .on("postgres_changes", { event: "*", schema: "public", table: "posts" }, kick).subscribe();
+    });
     const onVisible = () => { if (document.visibilityState === "visible") kick(); };
     document.addEventListener("visibilitychange", onVisible);
-    return () => { clearTimeout(t); document.removeEventListener("visibilitychange", onVisible); void sb.removeChannel(ch); };
+    return () => {
+      gone = true;
+      clearTimeout(t);
+      document.removeEventListener("visibilitychange", onVisible);
+      if (ch) void sb.removeChannel(ch);
+    };
   }, [load]);
 
   return state;
