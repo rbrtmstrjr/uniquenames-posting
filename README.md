@@ -12,7 +12,7 @@ ordered and saved to the phone with the caption.
 
 ## v2 (2026-10-05)
 - **shadcn/ui** controls everywhere, themed with the warm light/dark tokens.
-- **Faster**: Vercel functions pinned to `sin1` (next to Supabase), route and image skeletons, optimistic actions.
+- **Faster**: Vercel functions pinned to `syd1` (same city as the Supabase project, ap-southeast-2 Sydney), route and image skeletons, optimistic actions.
 - **Edit name + New picture** saves the text first, then regenerates; the dialog shows the live state.
 - **Generate lock**: disabled (with the reason) when the PC is offline or ComfyUI is closed. Text re-stamps still work with ComfyUI closed.
 - **AI captions** (Gemini 2.5 Flash, from theme + gender, falls back to the settings template on any error); **Rewrite caption** on the post page.

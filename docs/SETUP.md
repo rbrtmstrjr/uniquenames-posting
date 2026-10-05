@@ -3,7 +3,7 @@
 You only do this once. Follow the numbers in order.
 
 ## 1. Supabase (database, images, login)
-1. Go to https://supabase.com and click **New project**. Name: `unique-names`. Region: Southeast Asia (Singapore). Save the database password somewhere safe.
+1. Go to https://supabase.com and click **New project**. Name: `unique-names`. Region: Southeast Asia (Singapore). Save the database password somewhere safe. Then set `regions` in `vercel.json` to the Vercel region in the same city (Singapore = `sin1`, Sydney = `syd1`) so server pages sit next to the database.
 2. Left menu, **SQL Editor**, **New query**. Paste everything from `supabase/schema.sql` and click **Run**. It should say "Success".
    - It is safe to run this file again later (for example after an update).
 3. **Authentication > Sign In / Providers > Email**: keep Email on and turn **off** "Allow new users to sign up". Save.
