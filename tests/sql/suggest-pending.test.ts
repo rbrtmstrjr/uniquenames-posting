@@ -13,7 +13,7 @@ const insertName = (r: { name: string; meaning: string; gender: string; style: s
 
 describe("pending suggestions in the v2 schema", () => {
   it("stores filtered name suggestions as pending; the lower(name) index backs the filter", async () => {
-    const { fresh } = filterNameSuggestions([{ name: "  wren   SOLENE ", meaning: "Little Bird Of The Sun" }], [], "two-word");
+    const { fresh } = filterNameSuggestions([{ name: "  wren   solene ", meaning: "Little Bird Of The Sun" }], [], "two-word");
     await insertName({ ...fresh[0], gender: "girl", style: "two-word", status: "pending" });
     const row = await one<{ name: string; meaning: string; status: string }>(db, `select name, meaning, status from names`);
     expect(row).toEqual({ name: "Wren Solene", meaning: "little bird of the sun", status: "pending" });

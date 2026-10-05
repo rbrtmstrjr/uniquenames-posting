@@ -26,6 +26,12 @@ describe("newPictureAction (which action the dialog's New picture calls)", () =>
     expect(textChanged(card(), "Arlo Zenith", "STRONG and bright")).toBe(false);
     expect(textChanged(card(), "Arlo", "strong and bright")).toBe(true);
   });
+  it("an untouched legacy row (stored before normalizing) never looks edited", () => {
+    const legacy = card({ name: "arlo  zenith", meaning: "Strong and bright " });
+    expect(textChanged(legacy, legacy.name, legacy.meaning)).toBe(false);
+    expect(newPictureAction(legacy, legacy.name, legacy.meaning)).toEqual({ kind: "regenerate" });
+    expect(textChanged(legacy, "Arlo Zephyr", legacy.meaning)).toBe(true);
+  });
 });
 
 describe("dialogStatus (live header state)", () => {

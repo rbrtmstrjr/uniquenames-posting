@@ -113,9 +113,38 @@ describe("Names: suggest + approve", () => {
     fireEvent.click(within(dlg).getByRole("button", { name: /Suggest 10 names/ }));
     expect((await within(dlg).findByRole("alert")).textContent).toMatch(/Run the v2 database update first/);
   });
+
+  it("Approve all while one approve is in flight sends only the others, and a late failure restores just that one", async () => {
+    const first = deferred<unknown>();
+    m.approveNamesAction.mockReturnValueOnce(first.promise).mockResolvedValueOnce({ ok: true, count: 2 });
+    render(<NamesTable names={[nm("Zephyr", "pending"), nm("Orion", "pending"), nm("Atlas", "pending")]} />);
+    fireEvent.click(screen.getByRole("button", { name: "Review" }));
+    fireEvent.click(screen.getByRole("button", { name: "Approve Zephyr" }));
+    fireEvent.click(screen.getByRole("button", { name: "Approve all (2)" }));
+    await waitFor(() => expect(m.approveNamesAction).toHaveBeenCalledTimes(2));
+    expect(m.approveNamesAction.mock.calls[1][0]).toEqual(["Atlas", "Orion"]);
+    expect(screen.queryByText("Orion")).toBeNull();
+    await act(async () => { first.resolve({ ok: false, error: "nope" }); });
+    await waitFor(() => expect(screen.getByText("Zephyr")).toBeTruthy()); // only Zephyr rolls back
+    expect(screen.queryByText("Orion")).toBeNull();
+    expect(screen.queryByText("Atlas")).toBeNull();
+  });
 });
 
 describe("Themes: pending approval section", () => {
+  it("Approve all while one approve is in flight approves only the others, after it in Up next", async () => {
+    const first = deferred<unknown>();
+    m.approveThemesAction.mockReturnValueOnce(first.promise).mockResolvedValueOnce({ ok: true, count: 1 });
+    render(<ThemeList themes={[th("Forest Nook", "pending", 9), th("Forest Two", "pending", 10), th("Boho", "available", 1)]} previews={[]} />);
+    fireEvent.click(screen.getByRole("button", { name: "Approve Forest Nook" }));
+    fireEvent.click(screen.getByRole("button", { name: "Approve all" }));
+    await waitFor(() => expect(m.approveThemesAction).toHaveBeenCalledTimes(2));
+    expect(m.approveThemesAction.mock.calls[1][0]).toEqual(["Forest Two"]);
+    const upNext = screen.getByRole("heading", { name: /Up next · 3 left/ }).parentElement!;
+    expect(within(upNext).getAllByRole("listitem").map((li) => li.textContent?.includes("Forest Two"))).toEqual([false, false, true]);
+    await act(async () => { first.resolve({ ok: true, count: 1 }); });
+  });
+
   it("lists suggestions above Up next with Make preview, Approve, Edit, Reject", () => {
     render(<ThemeList themes={[th("Forest Nook", "pending", 9), th("Boho", "available", 1)]} previews={[]} />);
     const sec = screen.getByRole("region", { name: /Pending approval · 1/ });

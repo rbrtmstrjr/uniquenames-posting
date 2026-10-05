@@ -4,24 +4,24 @@ import { hashSeed } from "@/lib/planner/random";
 
 export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-/**
- * One word part ("arlo", "MARY", "McKenzie"): all-lower or all-upper becomes "Arlo"/"Mary";
- * deliberate mixed case (McKenzie, DeAndre) is kept, only its first letter is raised.
- */
-function capPart(p: string): string {
-  if (!p) return p;
-  const lower = p.toLocaleLowerCase();
-  const body = p === lower || (p.length > 1 && p === p.toLocaleUpperCase()) ? lower : p;
-  return body.charAt(0).toLocaleUpperCase() + body.slice(1);
-}
+/** Name particles that stay lowercase after the first word ("Maria de la Cruz"). */
+const PARTICLES = new Set(["de", "la", "da", "van", "von", "del", "di", "le", "du"]);
+
+/** Raise a lowercase first letter. Never lowercases anything: "AJ", "Mary-JANE", "McKenzie" stay as typed. */
+const capFirst = (p: string): string => p.charAt(0).toLocaleUpperCase() + p.slice(1);
 
 /**
  * The stored form of a name, used by EVERY insert/edit path (manual add, paste, card edit,
  * AI suggestions): straight apostrophes, single spaces, trimmed, and each word (and each
  * hyphenated part) starting with a capital, so "arlo   zenith" is saved as "Arlo Zenith".
+ * Only a lowercase FIRST letter is ever changed. Particles (de, la, da, van, von, del, di,
+ * le, du) after the first word are left as typed; the first word is always capitalised,
+ * so "de la cruz" -> "De la Cruz".
  */
 export const normalizeName = (name: string): string =>
-  normalizeQuotes(name).replace(/\s+/g, " ").trim().split(" ").map((w) => w.split("-").map(capPart).join("-")).join(" ");
+  normalizeQuotes(name).replace(/\s+/g, " ").trim().split(" ")
+    .map((w, i) => (i > 0 && PARTICLES.has(w) ? w : w.split("-").map(capFirst).join("-")))
+    .join(" ");
 /** Case- and whitespace-insensitive dedup key (names are stored normalized, matching the lower(name) unique index). */
 export const nameKey = (name: string): string => normalizeName(name).toLowerCase();
 export const styleOf = (name: string): NameStyle => (normalizeName(name).split(" ").length > 1 ? "two-word" : "single");

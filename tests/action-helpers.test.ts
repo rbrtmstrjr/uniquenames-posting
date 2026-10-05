@@ -20,14 +20,24 @@ describe("name helpers", () => {
     expect(styleOf("Arlo  Zenith")).toBe("two-word");
     expect(styleOf(" Arlo ")).toBe("single");
   });
-  it("gives every name consistent capitals, keeping deliberate mixed case", () => {
+  it("only raises a lowercase first letter per word — never lowercases anything", () => {
     expect(normalizeName("arlo   zenith")).toBe("Arlo Zenith");
-    expect(normalizeName("ARLO ZENITH")).toBe("Arlo Zenith");
+    expect(normalizeName("AJ")).toBe("AJ");
+    expect(normalizeName("TJ Rowan")).toBe("TJ Rowan");
+    expect(normalizeName("JJ")).toBe("JJ");
+    expect(normalizeName("ARLO ZENITH")).toBe("ARLO ZENITH");
+    expect(normalizeName("Mary-JANE")).toBe("Mary-JANE");
     expect(normalizeName("mary-jane")).toBe("Mary-Jane");
+    expect(normalizeName("McKenzie")).toBe("McKenzie");
     expect(normalizeName("McKenzie deAndre")).toBe("McKenzie DeAndre");
+    expect(normalizeName("D'Angelo")).toBe("D'Angelo");
     expect(normalizeName("d’angelo")).toBe("D'angelo");
-    expect(normalizeName("O'Brien")).toBe("O'Brien");
+    expect(normalizeName("Zoë")).toBe("Zoë");
     expect(normalizeName("élodie")).toBe("Élodie");
+    // particles stay lowercase after the first word; the first word is always capitalised
+    expect(normalizeName("de la cruz")).toBe("De la Cruz");
+    expect(normalizeName("Maria de la Cruz")).toBe("Maria de la Cruz");
+    expect(normalizeName("ava van wyk")).toBe("Ava van Wyk");
     expect(nameKey(" arlo  ZENITH ")).toBe(nameKey("Arlo Zenith"));
   });
   it("dedupes against existing and within the batch", () => {

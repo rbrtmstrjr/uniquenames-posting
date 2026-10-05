@@ -81,7 +81,8 @@ const UNSAFE: { re: RegExp; why: string }[] = [
   { re: /\b(no|not|without|avoid|never|free of|instead of)\b/i, why: "negative wording (no/without)" },
   { re: /\b(text|letters?|lettering|alphabet|words?|signs?|signage|banners?|logos?|labels?|titles?|names?|numbers?|writing|written|calligraphy|monogram|books?|storybooks?|newspapers?|maps?|tubes?|cans?|cartons?|packages?|packets?)\b/i, why: "text-like objects" },
   { re: /\b(cameras?|tripods?|stands?|softbox(es)?|reflectors?|lamps?|spotlights?|flash|lens(es)?|paper roll|studio lights?|light fixtures?)\b/i, why: "studio equipment" },
-  { re: /\b(hands?|mom|mother|dad|father|parents?|adults?|person|people)\b/i, why: "people in frame" },
+  // (?!-) keeps hand-knitted / hand-carved / mother-of-pearl: craft words, not people.
+  { re: /\b(hands?|mom|mother|dad|father|parents?|adults?|person|people)\b(?!-)/i, why: "people in frame" },
 ];
 const TALL = /\b(tall|towering|giant|huge|oversized|life-size|large)\b/i;
 

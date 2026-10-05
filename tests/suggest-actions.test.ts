@@ -6,7 +6,8 @@ import { fakeSupabase, op, type Query, type Respond } from "./helpers/fake-supab
 let respond: Respond = () => undefined;
 let fake = fakeSupabase((q) => respond(q));
 vi.mock("@/lib/supabase/server", () => ({ createClient: async () => fake.client, getOwner: async () => ({ id: "owner" }) }));
-vi.mock("next/cache", () => ({ revalidatePath: () => {} }));
+const { revalidatePath } = vi.hoisted(() => ({ revalidatePath: vi.fn() }));
+vi.mock("next/cache", () => ({ revalidatePath }));
 const { generateJson } = vi.hoisted(() => ({ generateJson: vi.fn() }));
 vi.mock("@/lib/ai/gemini", () => ({ generateJson }));
 const { suggestNamesAction, suggestThemesAction } = await import("@/lib/actions/suggest");
@@ -192,5 +193,57 @@ describe("approve / reject", () => {
     await moveThemeNextAction(ID(5));
     const q = fake.queries.find((x) => op(x, "update"))!;
     expect(q.ops).toContainEqual(["eq", "status", "available"]);
+  });
+});
+
+describe("bulk approve / reject at scale", () => {
+  const ids = (n: number) => Array.from({ length: n }, (_, i) => ID(i + 1));
+  const inIds = (q: Query) => (op(q, "in")?.[2] as string[] | undefined) ?? [];
+
+  beforeEach(() => { revalidatePath.mockReset(); });
+
+  it("names beyond 1000 go through in chunks of 100", async () => {
+    respond = (q) => (op(q, "update") ? { data: inIds(q).map((id) => ({ id })) } : { data: [] });
+    expect(await approveNamesAction(ids(1500))).toEqual({ ok: true, count: 1500 });
+    expect(fake.queries.filter((q) => op(q, "update"))).toHaveLength(15);
+  });
+
+  it("revalidates when an earlier name chunk succeeded before a later one failed", async () => {
+    let n = 0;
+    respond = (q) => (op(q, "delete") ? (n++ === 0 ? { data: inIds(q).map((id) => ({ id })) } : { error: { message: "boom" } }) : { data: [] });
+    const r = await rejectNamesAction(ids(150));
+    expect(r.ok).toBe(false);
+    expect(!r.ok && r.error).toMatch(/boom.*100 were rejected/);
+    expect(revalidatePath).toHaveBeenCalledWith("/names");
+  });
+
+  it("approves more than 100 themes in chunks, with one running sort_order", async () => {
+    respond = (q) => (op(q, "update") ? { data: [{ id: "x" }] } : q.table === "themes" ? { data: [{ sort_order: 7 }] } : { data: [] });
+    expect(await approveThemesAction(ids(120))).toEqual({ ok: true, count: 120 });
+    const orders = fake.queries.filter((q) => op(q, "update")).map((q) => (op(q, "update")![1] as { sort_order: number }).sort_order);
+    expect(orders).toEqual(Array.from({ length: 120 }, (_, i) => 8 + i));
+  });
+
+  it("rejecting themes removes their preview images from storage (only for themes really deleted)", async () => {
+    respond = (q) => {
+      if (q.table === "cards") return { data: [
+        { theme_id: ID(1), photo_path: "photos/a.png", card_path: "cards/a.jpg" },
+        { theme_id: ID(2), photo_path: null, card_path: "cards/b.jpg" },
+      ] };
+      if (op(q, "delete")) return { data: [{ id: ID(1) }] }; // ID(2) was no longer pending
+      return { data: [] };
+    };
+    expect(await rejectThemesAction([ID(1), ID(2)])).toEqual({ ok: true, count: 1 });
+    const read = fake.queries.find((q) => q.table === "cards")!;
+    expect(fake.queries.indexOf(read)).toBeLessThan(fake.queries.findIndex((q) => op(q, "delete")));
+    expect(read.ops).toContainEqual(["eq", "kind", "preview"]);
+    expect(fake.removed).toEqual([{ bucket: "cards", paths: ["photos/a.png", "cards/a.jpg"] }]);
+  });
+
+  it("rejects 120 themes in chunks", async () => {
+    respond = (q) => (op(q, "delete") ? { data: inIds(q).map((id) => ({ id })) } : { data: [] });
+    expect(await rejectThemesAction(ids(120))).toEqual({ ok: true, count: 120 });
+    expect(fake.queries.filter((q) => op(q, "delete"))).toHaveLength(3);
+    expect(fake.removed).toEqual([]);
   });
 });

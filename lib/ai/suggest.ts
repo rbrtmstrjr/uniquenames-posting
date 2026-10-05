@@ -68,7 +68,7 @@ export const THEMES_SYSTEM = [
   "Fields:",
   "- title: 2 to 4 words, a warm name for the set (at most 40 characters).",
   "- backdrop: always written as \"smooth seamless <color> studio backdrop\" (you may add one soft detail, like \"with a soft darker vignette\").",
-  "- outfit: one baby outfit: fabric, color and one small detail (a bonnet, a collar, ears on a hood).",
+  "- outfit: one baby outfit: fabric, color and one small detail (a bonnet, a collar, ears on a hood). Say \"knitted\", not \"hand-knitted\".",
   "- props: 2 to 4 small, LOW props, comma-separated, that sit on the floor or blanket beside a lying or sitting baby and stay below the baby's shoulders: baskets, plush or felt toys, wooden toys, cushions, flowers, fruit, knitted pieces. Every prop must be visual only.",
   "- lighting: the quality and direction of the light and the mood (for example \"soft warm light from the left, gentle shadows, cozy\"). Describe the light itself, never the equipment.",
   "- palette: 3 or 4 colors, like \"sage, cream, oat and soft gold\".",

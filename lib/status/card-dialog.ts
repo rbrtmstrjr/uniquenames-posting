@@ -5,9 +5,12 @@ import type { WorkerHealth } from "./worker-health";
 
 type Text = Pick<CardRow, "name" | "meaning">;
 
-/** Same normalizing the server applies: collapsed name spaces/quotes, lower-case trimmed meaning. */
+/**
+ * Same normalizing the server applies, on BOTH sides, so a legacy row stored before
+ * normalizeName (e.g. "arlo  zenith") never looks edited when the owner did not touch it.
+ */
 export function textChanged(card: Text, name: string, meaning: string): boolean {
-  return normalizeName(name) !== card.name || meaning.trim().toLowerCase() !== card.meaning;
+  return normalizeName(name) !== normalizeName(card.name) || meaning.trim().toLowerCase() !== card.meaning.trim().toLowerCase();
 }
 
 export type NewPicture = { kind: "regenerate" } | { kind: "edit-regenerate"; name: string; meaning: string };

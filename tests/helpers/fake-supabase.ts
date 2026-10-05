@@ -26,7 +26,10 @@ export function fakeSupabase(respond: Respond) {
     const r = respond({ table: `rpc:${fn}`, ops: [["rpc", args]] }) ?? {};
     return Promise.resolve({ data: r.data ?? null, error: r.error ?? null });
   };
-  return { client: { from, rpc }, queries, rpcs };
+  // Storage: records removed paths per bucket; always succeeds.
+  const removed: { bucket: string; paths: string[] }[] = [];
+  const storage = { from: (bucket: string) => ({ remove: (paths: string[]) => { removed.push({ bucket, paths }); return Promise.resolve({ data: [], error: null }); } }) };
+  return { client: { from, rpc, storage }, queries, rpcs, removed };
 }
 
 export const op = (q: Query, m: string) => q.ops.find((o) => o[0] === m);

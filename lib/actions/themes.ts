@@ -5,7 +5,7 @@ import { BABY_SHOTS, PREVIEW_MEANING, PREVIEW_NAME, buildPrompt, hashSeed } from
 import type { ThemeRow } from "@/lib/db/types";
 import { validateTheme, type ThemeInput } from "./validate";
 import { generateLockReason } from "./generate-guard";
-import { badIds } from "./helpers";
+import { badIds, chunks } from "./helpers";
 import { fail, requireOwner, type ActionResult } from "./result";
 
 export async function saveThemeAction(input: ThemeInput & { id?: string }): Promise<ActionResult<{ id: string }>> {
@@ -72,7 +72,9 @@ export async function moveThemeNextAction(id: string): Promise<ActionResult> {
   return { ok: true };
 }
 
-const MAX_THEMES = 100;
+/** A sanity cap only: "Approve all"/"Reject all" send every pending theme, in chunks. */
+const MAX_THEMES = 2000;
+const THEME_CHUNK = 50;
 
 /**
  * Approve AI-suggested themes: pending -> available, placed at the END of Up next in the
@@ -86,27 +88,53 @@ export async function approveThemesAction(ids: string[]): Promise<ActionResult<{
   const { data: last, error: le } = await sb.from("themes").select("sort_order").neq("status", "pending").order("sort_order", { ascending: false }).limit(1);
   if (le) return fail(le.message);
   const base = ((last?.[0]?.sort_order as number) ?? 0) + 1;
-  const rs = await Promise.all(ids.map((id, i) =>
-    sb.from("themes").update({ status: "available", sort_order: base + i }).eq("id", id).eq("status", "pending").select("id")));
-  const err = rs.find((r) => r.error)?.error;
-  const count = rs.reduce((n, r) => n + (r.data?.length ?? 0), 0);
+  let count = 0;
+  let err: string | null = null;
+  // Each theme gets its own sort_order, so one update per id; at most THEME_CHUNK at a time.
+  for (const [c, part] of chunks(ids, THEME_CHUNK).entries()) {
+    const rs = await Promise.all(part.map((id, i) =>
+      sb.from("themes").update({ status: "available", sort_order: base + c * THEME_CHUNK + i }).eq("id", id).eq("status", "pending").select("id")));
+    count += rs.reduce((n, r) => n + (r.data?.length ?? 0), 0);
+    const e = rs.find((r) => r.error)?.error;
+    if (e) { err = e.message; break; }
+  }
   if (count) { revalidatePath("/", "layout"); revalidatePath("/themes"); }
-  if (err) return fail(err.message);
+  if (err) return fail(err);
   if (!count) return fail("These suggestions were already handled. Reload the page.");
   return { ok: true, count };
 }
 
-/** Reject AI-suggested themes: deletes them (and any preview made of them). Only pending themes. */
+/**
+ * Reject AI-suggested themes: deletes them (their preview card rows cascade). Only pending
+ * themes. The preview images are removed from storage afterwards, best effort.
+ */
 export async function rejectThemesAction(ids: string[]): Promise<ActionResult<{ count: number }>> {
   await requireOwner();
   const bad = badIds(ids, MAX_THEMES);
   if (bad) return fail(bad);
   const sb = await createClient();
-  const { data, error } = await sb.from("themes").delete().in("id", ids).eq("status", "pending").select("id");
-  if (error) return fail(error.message);
-  revalidatePath("/themes");
-  if (!data?.length) return fail("These suggestions were already handled. Reload the page.");
-  return { ok: true, count: data.length };
+  let deleted: string[] = [];
+  let err: string | null = null;
+  const files = new Map<string, string[]>();
+  for (const part of chunks(ids, THEME_CHUNK)) {
+    // Read the preview files first: the card rows disappear with the theme.
+    const { data: cards } = await sb.from("cards").select("theme_id, photo_path, card_path").in("theme_id", part).eq("kind", "preview");
+    for (const c of (cards ?? []) as { theme_id: string; photo_path: string | null; card_path: string | null }[]) {
+      files.set(c.theme_id, [...(files.get(c.theme_id) ?? []), ...[c.photo_path, c.card_path].filter((p): p is string => !!p)]);
+    }
+    const { data, error } = await sb.from("themes").delete().in("id", part).eq("status", "pending").select("id");
+    if (error) { err = error.message; break; }
+    deleted = deleted.concat(((data ?? []) as { id: string }[]).map((d) => d.id));
+  }
+  const paths = deleted.flatMap((id) => files.get(id) ?? []);
+  if (paths.length) {
+    const { error: re } = await sb.storage.from("cards").remove(paths);
+    if (re) console.error("rejectThemesAction: storage cleanup failed", re.message);
+  }
+  if (deleted.length) revalidatePath("/themes");
+  if (err) return fail(err);
+  if (!deleted.length) return fail("These suggestions were already handled. Reload the page.");
+  return { ok: true, count: deleted.length };
 }
 
 export async function makePreviewAction(themeId: string): Promise<ActionResult<{ cardId: string }>> {

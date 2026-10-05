@@ -30,8 +30,18 @@ describe("filterNameSuggestions", () => {
   });
 
   it("normalizes the stored form: capitals, single spaces, lowercase meaning", () => {
-    const r = filterNameSuggestions([{ name: "  wren   ASHER ", meaning: "  Little Songbird Blessed " }], [], "two-word");
+    const r = filterNameSuggestions([{ name: "  wren   asher ", meaning: "  Little Songbird Blessed " }], [], "two-word");
     expect(r.fresh).toEqual([{ name: "Wren Asher", meaning: "little songbird blessed" }]);
+  });
+
+  it("people check: hand-made words and mother-of-pearl are fine, hands and parents are not", () => {
+    const base = { title: "A", backdrop: "smooth seamless sage studio backdrop", lighting: "soft light", palette: "sage, cream" };
+    for (const ok of ["hand-knitted cream romper", "hand-stitched linen set", "romper with mother-of-pearl buttons"]) {
+      expect(unsafeThemeWording({ ...base, outfit: ok, props: "felt fox toy" })).toBeNull();
+    }
+    expect(unsafeThemeWording({ ...base, outfit: "knit romper", props: "hand-carved wooden rattle" })).toBeNull();
+    expect(unsafeThemeWording({ ...base, outfit: "knit romper", props: "felt fox toy held in a hand" })).toBeTruthy();
+    expect(unsafeThemeWording({ ...base, outfit: "knit romper", props: "felt fox toy, mother's quilt" })).toBeTruthy();
   });
 
   it("drops names that break the style, the name rules or the meaning rules", () => {

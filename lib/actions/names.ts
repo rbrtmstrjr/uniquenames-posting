@@ -68,39 +68,39 @@ export async function deleteNameAction(id: string): Promise<ActionResult> {
   return { ok: true };
 }
 
-const MAX_BULK = 1000;
+/** A sanity cap only: any realistic "Approve all" fits; ids travel in chunks of 100. */
+const MAX_BULK = 10000;
 
-/** Approve AI suggestions: pending -> available (now usable in posts). Only pending rows change. */
-export async function approveNamesAction(ids: string[]): Promise<ActionResult<{ count: number }>> {
-  await requireOwner();
+/**
+ * Run one pending-only statement per chunk of ids. A later chunk failing does not hide the
+ * earlier chunks' changes: the page is revalidated whenever anything changed.
+ */
+async function bulkPending(ids: string[], approve: boolean): Promise<ActionResult<{ count: number }>> {
   const bad = badIds(ids, MAX_BULK);
   if (bad) return fail(bad);
   const sb = await createClient();
   let count = 0;
+  let err: string | null = null;
   for (const part of chunks(ids, 100)) {
-    const { data, error } = await sb.from("names").update({ status: "available" }).in("id", part).eq("status", "pending").select("id");
-    if (error) return fail(error.message);
+    const q = approve ? sb.from("names").update({ status: "available" }) : sb.from("names").delete();
+    const { data, error } = await q.in("id", part).eq("status", "pending").select("id");
+    if (error) { err = error.message; break; }
     count += data?.length ?? 0;
   }
-  revalidatePath("/names");
-  revalidatePath("/");
+  if (count) { revalidatePath("/names"); if (approve) revalidatePath("/"); }
+  if (err) return fail(count ? `${err} (${count} were ${approve ? "approved" : "rejected"} before this.)` : err);
   if (!count) return fail("These suggestions were already handled. Reload the page.");
   return { ok: true, count };
+}
+
+/** Approve AI suggestions: pending -> available (now usable in posts). Only pending rows change. */
+export async function approveNamesAction(ids: string[]): Promise<ActionResult<{ count: number }>> {
+  await requireOwner();
+  return bulkPending(ids, true);
 }
 
 /** Reject AI suggestions: deletes them. Only pending rows can be removed this way. */
 export async function rejectNamesAction(ids: string[]): Promise<ActionResult<{ count: number }>> {
   await requireOwner();
-  const bad = badIds(ids, MAX_BULK);
-  if (bad) return fail(bad);
-  const sb = await createClient();
-  let count = 0;
-  for (const part of chunks(ids, 100)) {
-    const { data, error } = await sb.from("names").delete().in("id", part).eq("status", "pending").select("id");
-    if (error) return fail(error.message);
-    count += data?.length ?? 0;
-  }
-  revalidatePath("/names");
-  if (!count) return fail("These suggestions were already handled. Reload the page.");
-  return { ok: true, count };
+  return bulkPending(ids, false);
 }
