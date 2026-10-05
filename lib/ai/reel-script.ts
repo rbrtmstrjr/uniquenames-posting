@@ -4,17 +4,21 @@ import { generateJson, type GeminiSchema } from "./gemini";
 
 /** Same model as the n8n Knitted Doll storyboard. */
 export const REEL_SCRIPT_MODEL = "gemini-3.1-pro-preview";
-/** The calling page runs with maxDuration 60 (Vercel Hobby), so the whole call must end before that. */
-export const REEL_SCRIPT_TIMEOUT_MS = 50000;
+/** Default budget (3.1 Pro took ~40 s in the smoke test); callers pass what is left of their own budget. */
+export const REEL_SCRIPT_TIMEOUT_MS = 120_000;
 /** Newest titles carried in the "already made" block. */
 export const ALREADY_MADE_CAP = 150;
 /** Longest spoken line (Chatterbox ~4 words/s, one image per line). */
 export const LINE_MAX_WORDS = 14;
 export const TITLE_MAX = 80;
 
+export const REEL_STAGES = ["newborn", "baby", "toddler", "preschooler"] as const;
+export type ReelStage = (typeof REEL_STAGES)[number];
 export interface ReelScriptScene { beat: string; narration: string; idea: string }
-export interface ReelScript { title: string; cast: ReelCast; scenes: ReelScriptScene[] }
-export interface ReelScriptInput { topic?: string; maxScenes: number; alreadyMade: string[] }
+export interface ReelScript { title: string; stage: ReelStage; cast: ReelCast; scenes: ReelScriptScene[] }
+/** An earlier reel, newest first, for the "already made" block. */
+export interface MadeReel { title: string; stage?: string | null }
+export interface ReelScriptInput { topic?: string; maxScenes: number; alreadyMade: MadeReel[]; timeoutMs?: number }
 export type ReelScriptResult = { ok: true; script: ReelScript } | { ok: false; error: string };
 
 const BEATS = ["hook", "build", "turn", "close"];
@@ -51,17 +55,20 @@ function wordBudget(maxScenes: number) {
 /** The ported storyboard prompt; `alreadyMade` is newest first. */
 export function reelScriptPrompt({ topic, maxScenes, alreadyMade }: ReelScriptInput): { system: string; prompt: string } {
   const t = oneLine(topic ?? "");
-  const made = alreadyMade.map(oneLine).filter(Boolean).slice(0, ALREADY_MADE_CAP);
+  const made = alreadyMade
+    .map((m) => ({ title: oneLine(m.title ?? ""), stage: oneLine(m.stage ?? "") }))
+    .filter((m) => m.title)
+    .slice(0, ALREADY_MADE_CAP);
   const b = wordBudget(maxScenes);
   const prompt = [
     t ? `Topic: ${t}` : AUTO_TOPIC,
     "",
     "ALREADY MADE — DO NOT REPEAT: below are titles you have ALREADY produced. Do NOT repeat any of these titles, themes, or the same stage/angle. Deliberately choose a CLEARLY DIFFERENT topic and (when possible) a different early-childhood stage from the recent ones:",
-    made.length ? made.map((m) => `- ${m}`).join("\n") : "(none yet — this is the first one)",
+    made.length ? made.map((m) => `- ${m.title}${m.stage ? ` (${m.stage})` : ""}`).join("\n") : "(none yet — this is the first one)",
     "",
     "Write a COHESIVE vertical Reel told with STATIC images (one still image per scene), featuring the SAME recurring parent-and-child characters, that builds ONE continuous emotional wave. Structure (built for SHARES & saves): HOOK — an emotional gut-punch that opens a tender loop ('One day you'll carry them for the last time — and you won't even know it's the last'); then gently BUILD with small, specific, aching-sweet details of this fleeting stage (the tiny socks, the 3am feeds, the way they reach for you); then TURN to a soft, wise truth that reframes the exhaustion as a gift; then a warm emotional CLOSE giving permission to slow down and hold on + a heartfelt signature tagline. FEEL like a warm hug and flow as ONE story — never a tip list.",
     "",
-    "RETENTION & UNSKIPPABILITY (bake these in): (1) The FIRST image must be visually dramatic — the opening scene's idea is a striking, high-emotion moment, NEVER a calm establishing view. (2) Open a CURIOSITY LOOP in the first lines and only pay it off near the END (tease 'the one thing most parents miss', 'wait for the last one', 'number 3 changed everything'). (3) If you list things, PROMISE the number up front ('here are 3...') and count them out loud so viewers stay for all of them. (4) NO dead weight — every single line must make them need the next one; cut anything skippable. (5) END with a satisfying payoff, then a short, casual call to action to follow the page for more (never salesy). (6) The very first line is a short, punchy hook.",
+    "RETENTION & UNSKIPPABILITY (bake these in): (1) The FIRST image must be visually dramatic — the opening scene's idea is a striking, high-emotion moment, NEVER a calm establishing view. (2) Open a CURIOSITY LOOP in the first lines and only pay it off near the END (tease 'the one thing most parents miss', 'wait for the last one', 'number 3 changed everything'). (3) If you list things, PROMISE the number up front ('here are 3...') and count them out loud so viewers stay for all of them. (4) NO dead weight — every single line must make them need the next one; cut anything skippable. (5) END with a satisfying payoff, then a short, casual call to action to follow the page for more (never salesy). (6) The very first line is a short, punchy hook. Only the first 1-2 lines are the 'hook' beat; then build, turn and close.",
     "",
     `PACING & COUNT (CRITICAL): Write the COMPLETE narration for a ${b.secLo}-${b.secHi} second video. The voice speaks briskly (about 3.5-4 words per second), so the narration must be ${b.lo}-${b.hi} words in total. Break it into short spoken lines of 8-12 words each (the hook line may be shorter) — ONE image per line, so cuts stay fast with zero dead space. Never more than ${LINE_MAX_WORDS} words in a line. The NUMBER of scenes is DETERMINED BY THE SCRIPT: produce as many lines as the narration needs (roughly ${b.minScenes}-${maxScenes}). Do NOT pad. Hard limit: never more than ${maxScenes} scenes.`,
     "",
@@ -78,6 +85,7 @@ export function reelScriptPrompt({ topic, maxScenes, alreadyMade }: ReelScriptIn
     "Return ONLY JSON in EXACTLY this shape:",
     "{",
     '  "title": "<short internal title, at most 60 characters, different from every already-made title>",',
+    '  "stage": "<the single early-childhood stage this video targets: exactly one of newborn|baby|toddler|preschooler>",',
     '  "cast": { "adult": "<the parent doll, exact fixed description>", "child": "<the child doll, exact fixed description>" },',
     '  "scenes": [ { "beat": "<hook|build|turn|close>", "narration": "<the short spoken line for this scene — natural, second person>", "idea": "<plain visual description of this scene\'s picture>" } ]',
     "}",
@@ -90,6 +98,7 @@ const SCHEMA: GeminiSchema = {
   type: "OBJECT",
   properties: {
     title: { type: "STRING", description: "short internal title, at most 60 characters" },
+    stage: { type: "STRING", enum: [...REEL_STAGES] },
     cast: {
       type: "OBJECT",
       properties: { adult: { type: "STRING" }, child: { type: "STRING" } },
@@ -108,13 +117,13 @@ const SCHEMA: GeminiSchema = {
       },
     },
   },
-  required: ["title", "cast", "scenes"],
+  required: ["title", "stage", "cast", "scenes"],
 };
 
 const str = (v: unknown) => (typeof v === "string" ? oneLine(v) : "");
 const words = (s: string) => s.split(" ").filter(Boolean).length;
-// "camera" in an image prompt summons one; the idea is cleaned so scenePrompt stays camera-free.
-const cleanIdea = (s: string) => s.replace(/\b(the |a )?cameras?\b/gi, "the viewer");
+// "camera" in an image prompt summons one: the usual "looks at the camera" becomes "toward the viewer".
+const lightClean = (s: string) => s.replace(/\b(?:at|into|towards?) (?:the |a )?camera\b/gi, "toward the viewer");
 
 /** Check and normalise Gemini's JSON into a script, or say what is wrong. */
 export function validateReelScript(raw: unknown, maxScenes: number): ReelScriptResult {
@@ -122,8 +131,10 @@ export function validateReelScript(raw: unknown, maxScenes: number): ReelScriptR
   const title = str(d.title);
   if (!title) return { ok: false, error: "The script has no title." };
   if (title.length > TITLE_MAX) return { ok: false, error: `The title is longer than ${TITLE_MAX} characters.` };
+  const stage = REEL_STAGES.find((x) => x === str(d.stage).toLowerCase());
+  if (!stage) return { ok: false, error: "The script has no early-childhood stage." };
   const c = (d.cast && typeof d.cast === "object" ? d.cast : {}) as Record<string, unknown>;
-  const cast = { adult: str(c.adult), child: str(c.child) };
+  const cast = { adult: lightClean(str(c.adult)), child: lightClean(str(c.child)) };
   if (!cast.adult || !cast.child) return { ok: false, error: "The script is missing the parent or child doll." };
   const list = Array.isArray(d.scenes) ? d.scenes.slice(0, maxScenes) : [];
   if (list.length < 2) return { ok: false, error: "The script needs at least 2 scenes." };
@@ -133,12 +144,12 @@ export function validateReelScript(raw: unknown, maxScenes: number): ReelScriptR
     const narration = str(o.narration);
     if (!narration) return { ok: false, error: `Line ${i + 1} has no words.` };
     if (words(narration) > LINE_MAX_WORDS) return { ok: false, error: `Line ${i + 1} is longer than ${LINE_MAX_WORDS} words.` };
-    const idea = cleanIdea(str(o.idea));
+    const idea = lightClean(str(o.idea));
     if (!idea) return { ok: false, error: `Line ${i + 1} has no image idea.` };
     const beat = BEATS.includes(str(o.beat)) ? str(o.beat) : "build";
     scenes.push({ beat, narration, idea });
   }
-  return { ok: true, script: { title, cast, scenes } };
+  return { ok: true, script: { title, stage, cast, scenes } };
 }
 
 /** Write a reel script with Gemini. Never throws. */
@@ -147,7 +158,7 @@ export async function writeReelScript(input: ReelScriptInput): Promise<ReelScrip
     const { system, prompt } = reelScriptPrompt(input);
     const r = await generateJson<Record<string, unknown>>({
       system, prompt, schema: SCHEMA, model: REEL_SCRIPT_MODEL, thinkingLevel: "low", temperature: 1,
-      timeoutMs: REEL_SCRIPT_TIMEOUT_MS,
+      timeoutMs: input.timeoutMs ?? REEL_SCRIPT_TIMEOUT_MS,
       parse: (x) => (x && typeof x === "object" && !Array.isArray(x) ? (x as Record<string, unknown>) : null),
     });
     if (!r.ok) return { ok: false, error: r.error };

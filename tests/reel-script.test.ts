@@ -4,7 +4,7 @@ import { NO_TEXT } from "@/lib/planner/prompt";
 
 const { generateJson } = vi.hoisted(() => ({ generateJson: vi.fn() }));
 vi.mock("@/lib/ai/gemini", () => ({ generateJson }));
-const { reelScriptPrompt, writeReelScript, REEL_SCRIPT_MODEL, ALREADY_MADE_CAP } = await import("@/lib/ai/reel-script");
+const { reelScriptPrompt, writeReelScript, REEL_SCRIPT_MODEL, REEL_SCRIPT_TIMEOUT_MS, ALREADY_MADE_CAP } = await import("@/lib/ai/reel-script");
 
 beforeEach(() => generateJson.mockReset());
 
@@ -15,7 +15,7 @@ const cast = {
 const scene = (n: number, narration = `Line number ${n} is a short spoken phrase for mama.`) =>
   ({ beat: n === 0 ? "hook" : "build", narration, idea: `The mom doll rocks the baby doll by a window, moment ${n}.` });
 const script = (count: number, over: Record<string, unknown> = {}) =>
-  ({ title: "The Last Time You Carry Them", cast, scenes: Array.from({ length: count }, (_, i) => scene(i)), ...over });
+  ({ title: "The Last Time You Carry Them", stage: "baby", cast, scenes: Array.from({ length: count }, (_, i) => scene(i)), ...over });
 const NEGATIVE = /\b(avoid|not a|no (blur|watermark|people))\b/i;
 
 describe("reelScriptPrompt", () => {
@@ -33,15 +33,17 @@ describe("reelScriptPrompt", () => {
     expect(prompt).toMatch(/NEWBORN/);
   });
 
-  it("lists every already-made title, or says none yet", () => {
-    const made = ["The Last Time You Carry Them", "Tiny Socks, Big Love"];
+  it("lists every already-made title with its stage, or says none yet", () => {
+    const made = [{ title: "The Last Time You Carry Them", stage: "baby" }, { title: "Tiny Socks, Big Love" }];
     const { prompt } = reelScriptPrompt({ maxScenes: 40, alreadyMade: made });
-    for (const t of made) expect(prompt).toContain(`- ${t}`);
+    expect(prompt).toContain("- The Last Time You Carry Them (baby)\n");
+    expect(prompt).toContain("- Tiny Socks, Big Love\n");
+    expect(prompt).toMatch(/newborn\|baby\|toddler\|preschooler/);
     expect(reelScriptPrompt({ maxScenes: 40, alreadyMade: [] }).prompt).toContain("(none yet");
   });
 
   it("caps the already-made list at the newest titles", () => {
-    const made = Array.from({ length: ALREADY_MADE_CAP + 5 }, (_, i) => `Reel title ${i}`);
+    const made = Array.from({ length: ALREADY_MADE_CAP + 5 }, (_, i) => ({ title: `Reel title ${i}` }));
     const { prompt } = reelScriptPrompt({ maxScenes: 40, alreadyMade: made });
     expect(prompt).toContain(`- Reel title ${ALREADY_MADE_CAP - 1}\n`);
     expect(prompt).not.toContain(`- Reel title ${ALREADY_MADE_CAP}\n`);
@@ -53,6 +55,7 @@ describe("reelScriptPrompt", () => {
     expect(prompt).toMatch(/8-12 words/);
     expect(prompt).toMatch(/14 words/);
     expect(prompt).toMatch(/ACTION and SETTING/);
+    expect(prompt).toMatch(/Only the first 1-2 lines are the 'hook' beat/);
     expect(prompt).not.toMatch(/\bcamera\b/i);
   });
 
@@ -63,7 +66,7 @@ describe("reelScriptPrompt", () => {
 });
 
 describe("scenePrompt", () => {
-  const p = scenePrompt(cast, "The mom doll lifts the baby doll high in a sunny felt garden.", "build");
+  const p = scenePrompt(cast, "The mom doll lifts the baby doll high in a sunny felt garden.", "build", 3);
   it("carries the idea, the cast, the style and the no-text line", () => {
     expect(p).toContain("lifts the baby doll high");
     expect(p).toContain(cast.adult);
@@ -71,10 +74,18 @@ describe("scenePrompt", () => {
     expect(p).toContain(KNIT_STYLE);
     expect(p).toContain(NO_TEXT);
     expect(p).toMatch(/9:16/);
+    expect(p).toMatch(/every setting is built from felt and linen/);
+    expect(p).toMatch(/upper third is calm and uncluttered/);
+    expect(p).not.toMatch(/caption/i);
+  });
+  it("gives the hook treatment only to the opening picture", () => {
+    expect(scenePrompt(cast, "The mom doll gasps.", "hook", 0)).toMatch(/high-emotion moment/);
+    expect(scenePrompt(cast, "The mom doll gasps.", "hook", 1)).not.toMatch(/high-emotion/);
+    expect(scenePrompt(cast, "The mom doll gasps.", "hook", 1)).toMatch(/one tender moment/);
   });
   it("is positive-only (apart from NO_TEXT) and never says camera", () => {
     for (const beat of ["hook", "build", "turn", "close", "other"]) {
-      const q = scenePrompt(cast, "The dad doll reads to the toddler doll on a felt sofa.", beat);
+      const q = scenePrompt(cast, "The dad doll reads to the toddler doll on a felt sofa.", beat, beat === "hook" ? 0 : 2);
       expect(q).not.toMatch(/\bcamera\b/i);
       expect(q.replace(NO_TEXT, "")).not.toMatch(NEGATIVE);
     }
@@ -91,6 +102,7 @@ describe("writeReelScript", () => {
     expect(r.ok).toBe(true);
     if (r.ok) {
       expect(r.script.title).toBe("The Last Time You Carry Them");
+      expect(r.script.stage).toBe("baby");
       expect(r.script.cast).toEqual(cast);
       expect(r.script.scenes).toHaveLength(30);
       expect(r.script.scenes[0]).toEqual(scene(0));
@@ -98,7 +110,21 @@ describe("writeReelScript", () => {
     const arg = generateJson.mock.calls[0][0];
     expect(arg.model).toBe(REEL_SCRIPT_MODEL);
     expect(arg.prompt).toContain("40");
-    expect(arg.timeoutMs).toBeLessThanOrEqual(55000);
+    expect(arg.timeoutMs).toBe(REEL_SCRIPT_TIMEOUT_MS);
+    expect(REEL_SCRIPT_TIMEOUT_MS).toBe(120_000);
+  });
+
+  it("uses the caller's remaining time budget when given", async () => {
+    generateJson.mockResolvedValueOnce({ ok: true, data: script(10) });
+    await writeReelScript({ ...input, timeoutMs: 70_000 });
+    expect(generateJson.mock.calls[0][0].timeoutMs).toBe(70_000);
+  });
+
+  it("rejects a missing or unknown stage", async () => {
+    generateJson.mockResolvedValueOnce({ ok: true, data: script(10, { stage: "teen" }) });
+    expect(await writeReelScript(input)).toMatchObject({ ok: false });
+    generateJson.mockResolvedValueOnce({ ok: true, data: script(10, { stage: undefined }) });
+    expect(await writeReelScript(input)).toMatchObject({ ok: false });
   });
 
   it("trims scenes beyond the max", async () => {
@@ -144,11 +170,17 @@ describe("writeReelScript", () => {
     expect(await writeReelScript(input)).toMatchObject({ ok: false });
   });
 
-  it("cleans the word camera out of image ideas", async () => {
-    const s = script(5);
+  it("turns 'at/into/toward the camera' into 'toward the viewer' in ideas and cast", async () => {
+    const s = script(5, { cast: { adult: `${cast.adult}, smiling into the camera`, child: cast.child } });
     s.scenes[1] = { beat: "build", narration: "You hold them close.", idea: "The mom doll smiles at the camera." };
+    s.scenes[2] = { beat: "build", narration: "You hold them close.", idea: "The baby doll crawls toward a camera." };
     generateJson.mockResolvedValueOnce({ ok: true, data: s });
     const r = await writeReelScript(input);
-    expect(r.ok && r.script.scenes[1].idea).not.toMatch(/camera/i);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.script.scenes[1].idea).toBe("The mom doll smiles toward the viewer.");
+      expect(r.script.scenes[2].idea).toBe("The baby doll crawls toward the viewer.");
+      expect(r.script.cast.adult).toMatch(/smiling toward the viewer$/);
+    }
   });
 });
