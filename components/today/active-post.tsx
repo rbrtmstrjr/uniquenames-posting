@@ -55,7 +55,7 @@ export function ActivePost({ post, initialCards }: { post: PostRow; initialCards
         <div className="h-full rounded-full bg-accent transition-[width] duration-700" style={{ width: `${pct}%` }} />
       </div>
       {/* Phones/tablets: full width. Desktop: the narrow right column next to New post. */}
-      <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-6">
+      <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
         {cards.map((c) => (
           <CardTile key={c.id} card={c} url={urlFor(c.card_path)} health={health} queuePos={queuePosition(c, cards)}
             onOpen={() => setOpenId(c.id)}

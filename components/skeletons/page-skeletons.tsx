@@ -68,7 +68,7 @@ export function TodaySkeleton() {
         <div className="min-w-0 space-y-4 lg:order-1">
         <PanelSkeleton>
           <Skeleton className="mb-4 h-2.5 w-full rounded-full" />
-          <TileGrid count={9} className="grid-cols-3 gap-2 sm:grid-cols-4 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-6" />
+          <TileGrid count={9} className="grid-cols-3 gap-2 sm:grid-cols-4 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5" />
         </PanelSkeleton>
         <PanelSkeleton>
           <div className="@container">
