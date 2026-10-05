@@ -197,14 +197,16 @@ export async function addCardAction(postId: string): Promise<ActionResult<{ card
   const [{ data: theme }, { data: names }, { data: cards }] = await Promise.all([
     sb.from("themes").select("*").eq("id", p.theme_id).single(),
     sb.from("names").select("*").eq("gender", p.gender).eq("style", p.style).eq("status", "available"),
-    sb.from("cards").select("name_id, position").eq("post_id", postId),
+    sb.from("cards").select("name_id, position, shot").eq("post_id", postId),
   ]);
   const used = (cards ?? []).map((c) => c.name_id).filter(Boolean) as string[];
   const next = Math.max(0, ...(cards ?? []).map((c) => c.position as number)) + 1;
   // The post's child age (004): Random = a new child of a random age, a fixed age = the post's
   // child. A post made before ages existed (or before 004 runs: no column) keeps its one baby.
   const plan = planExtraCard({ theme: theme as ThemeRow, gender: p.gender, style: p.style, names: (names ?? []) as NameRow[], usedNameIds: used, nextPosition: next,
-    salt: `${postId}|${Date.now()}`, subjectKey: subjectKey(p.post_date, p.gender, p.style), age: storedAge(p.subject_age) });
+    salt: `${postId}|${Date.now()}`, subjectKey: subjectKey(p.post_date, p.gender, p.style), age: storedAge(p.subject_age),
+    // Every shot already in the post, so the new card is a new frame and not a near-copy.
+    usedShots: (cards ?? []).map((c) => c.shot as string | null).filter((s): s is string => !!s) });
   if (!plan.ok) return fail(plan.reason);
   const { data, error } = await sb.rpc("add_card", { p_post: postId, c: plan.card });
   if (error) return fail(error.message);
