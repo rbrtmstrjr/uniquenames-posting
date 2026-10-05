@@ -94,10 +94,22 @@ describe("createPostAction fonts", () => {
     expect(settingsWrites()).toEqual([]);
   });
 
-  it("does not save last-used fonts when the post was not created", async () => {
-    respond = ((inner) => (q: Query) => (q.table === "rpc:create_post" ? { data: { status: "error", reason: "nope" } } : inner(q)))(respond);
-    expect((await createPostAction({ ...input, fonts: FONTS })).ok).toBe(false);
-    expect(settingsWrites()).toEqual([]);
+  it("saves the last-used fonts BEFORE create_post (pre-003 the PC must never stamp card 1 with the old fonts)", async () => {
+    const order: string[] = [];
+    respond = ((inner) => (q: Query) => {
+      if (q.table === "rpc:create_post" || (q.table === "settings" && isUpdate(q))) order.push(q.table === "settings" ? "settings-update" : "create_post");
+      return inner(q);
+    })(respond);
+    await createPostAction({ ...input, fonts: FONTS });
+    expect(order).toEqual(["settings-update", "create_post"]);
+  });
+
+  it("a conflict retry saves the fonts only once", async () => {
+    let n = 0;
+    respond = ((inner) => (q: Query) => (q.table === "rpc:create_post" ? { data: n++ === 0 ? { status: "conflict" } : { status: "ok", post_id: POST_ID } } : inner(q)))(respond);
+    expect((await createPostAction({ ...input, fonts: FONTS })).ok).toBe(true);
+    expect(fake.rpcs.filter((r) => r.fn === "create_post")).toHaveLength(2);
+    expect(settingsWrites()).toEqual([FONTS]);
   });
 });
 
@@ -121,6 +133,18 @@ describe("restampPostAction fonts", () => {
     expect(op(postWrites()[0], "update")![1]).toEqual(FONTS);
     expect(postWrites()[0].ops).toContainEqual(["eq", "id", POST_ID]);
     expect(cardWrites()).toHaveLength(1);
+  });
+
+  it("fonts saved but the re-stamp fails: the message says the fonts were saved", async () => {
+    respond = ((inner) => (q: Query) => (q.table === "cards" && isUpdate(q) ? { error: { message: "network down" } } : inner(q)))(respond);
+    expect(await restampPostAction(POST_ID, FONTS)).toEqual({ ok: false, error: "The fonts were saved for this post, but nothing was re-stamped: network down" });
+    respond = ((inner) => (q: Query) => (q.table === "cards" && !isUpdate(q) ? { data: [] } : inner(q)))(respond);
+    expect(await restampPostAction(POST_ID, FONTS)).toMatchObject({ ok: false, error: expect.stringMatching(/^The fonts were saved for this post.*No finished cards/) });
+  });
+
+  it("without fonts a failure keeps the plain message", async () => {
+    respond = ((inner) => (q: Query) => (q.table === "cards" && isUpdate(q) ? { error: { message: "network down" } } : inner(q)))(respond);
+    expect(await restampPostAction(POST_ID)).toEqual({ ok: false, error: "network down" });
   });
 
   it("without fonts it only re-stamps (works before 003)", async () => {

@@ -38,6 +38,7 @@ export async function createPostAction(input: {
     }
     return lines.get(theme.id)!;
   };
+  let fontsSaved = false;
   for (let attempt = 0; attempt < 2; attempt++) {
     // The Generate lock is read in parallel with the first round of reads (no extra round trip).
     const [{ data: settings }, { data: names }, { data: themes }, lock] = await Promise.all([
@@ -58,6 +59,14 @@ export async function createPostAction(input: {
     const theme = themeRows.find((t) => t.id === plan.theme_id);
     const line = theme && captionAiOn(s) ? await lineFor(theme) : null;
     const caption = composeCaption(line, input.gender, s).caption;
+    // Remember the fonts as the "last used" ones (Today's defaults, theme previews) BEFORE the
+    // cards exist: without migration 003 the PC stamps with the settings fonts, so card 1 must
+    // never be claimed with the previous fonts. Best effort: a failed save never blocks the post.
+    if (fonts && !fontsSaved && !sameFonts(fonts, fontsOf(s))) {
+      const { error: saveErr } = await sb.from("settings").update(fonts).eq("id", 1);
+      if (saveErr) console.error("createPostAction: could not save the last-used fonts", saveErr.message);
+    }
+    fontsSaved = true;
     const { data, error } = await sb.rpc("create_post", { p: {
       request_id: input.requestId, post_date: input.postDate, gender: input.gender, style: input.style,
       theme_id: plan.theme_id, caption, cards: plan.cards, ...fonts,
@@ -65,11 +74,6 @@ export async function createPostAction(input: {
     if (error) return fail(`Could not create the post: ${error.message}`);
     const r = data as { status: string; post_id?: string; reason?: string };
     if (r.status === "ok" && r.post_id) {
-      // Remember the fonts as the "last used" ones (Today's defaults, theme previews). Best effort.
-      if (fonts && !sameFonts(fonts, fontsOf(s))) {
-        const { error: saveErr } = await sb.from("settings").update(fonts).eq("id", 1);
-        if (saveErr) console.error("createPostAction: could not save the last-used fonts", saveErr.message);
-      }
       revalidatePath("/", "layout");
       return { ok: true, postId: r.post_id };
     }
@@ -162,10 +166,12 @@ export async function restampPostAction(postId: string, fonts?: PostFonts): Prom
     if (fontErr) return fail(missingColumn(fontErr) ? NEEDS_003 : fontErr.message);
     if (!saved?.length) return fail("Post not found.");
   }
+  // Once the fonts are saved, a failure below must say so (they stay saved on the post).
+  const failAfterFonts = (msg: string) => fail(fonts ? `The fonts were saved for this post, but nothing was re-stamped: ${msg}` : msg);
   const { data, error } = await sb.from("cards").select("id, status, photo_path, version").eq("post_id", postId);
-  if (error) return fail(error.message);
+  if (error) return failAfterFonts(error.message);
   const { restamp, noPhoto } = restampSelection((data ?? []) as Pick<CardRow, "id" | "status" | "photo_path" | "version">[]);
-  if (!restamp.length) return fail(noPhoto ? "These cards have no clean photo to re-stamp. Use New picture on a card instead." : "No finished cards to re-stamp yet.");
+  if (!restamp.length) return failAfterFonts(noPhoto ? "These cards have no clean photo to re-stamp. Use New picture on a card instead." : "No finished cards to re-stamp yet.");
   const now = new Date().toISOString();
   const results = await Promise.all(restamp.map((c) =>
     sb.from("cards").update({ status: "restamp", claimed_at: null, error: null, version: c.version + 1, queued_at: now })
@@ -174,7 +180,7 @@ export async function restampPostAction(postId: string, fonts?: PostFonts): Prom
   // The ids really queued: the client drops its optimistic "updating text" look on the rest.
   const ids = results.flatMap((r) => (r.error ? [] : ((r.data ?? []) as { id: string }[]).map((d) => d.id)));
   const restamped = ids.length;
-  if (failed && !restamped) return fail(failed.message);
+  if (failed && !restamped) return failAfterFonts(failed.message);
   return { ok: true, restamped, noPhoto, skipped: restamp.length - restamped, ids };
 }
 

@@ -198,10 +198,15 @@ describe("saveSettingsAction caption_ai", () => {
     for (const k of ["title_font", "meaning_font", "mark_font"]) expect(settingsUpdates()[0]).not.toHaveProperty(k);
   });
 
-  it("rejects a bad text setting before writing", async () => {
-    expect(await saveSettingsAction({ ...input, title_font: "comic" })).toMatchObject({ ok: false, error: expect.stringMatching(/font/) });
+  it("rejects a bad text size before writing", async () => {
     expect(await saveSettingsAction({ ...input, mark_size: 99 })).toMatchObject({ ok: false, error: expect.stringMatching(/Watermark size/) });
     expect(settingsUpdates()).toHaveLength(0);
+  });
+
+  it("a stale/unknown font id never blocks Save (fonts are not edited in Settings) and is not written", async () => {
+    expect(await saveSettingsAction({ ...input, title_font: "comic", mark_font: "" })).toEqual({ ok: true });
+    expect(settingsUpdates()).toHaveLength(1);
+    expect(settingsUpdates()[0]).not.toHaveProperty("title_font");
   });
 
   it("before migration 002: changed text settings are saved without, with a clear message; defaults are fine", async () => {

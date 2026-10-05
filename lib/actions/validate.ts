@@ -2,6 +2,7 @@ import { TEXT_POSITIONS, type Gender, type SettingsRow } from "@/lib/db/types";
 import { NAME_RE, normalizeQuotes } from "@/lib/names/bulk-paste";
 import { isFontId } from "@/lib/fonts/catalog";
 import { SIZE_RANGES } from "@/lib/text/layout";
+import { fontsOf } from "@/lib/fonts/post-fonts";
 
 export interface ThemeInput { title: string; gender: Gender; backdrop: string; outfit: string; props: string; lighting: string; palette: string }
 /** The card text settings (columns added by migration 002). */
@@ -51,5 +52,7 @@ export function validateSettings(s: SettingsInput): string | null {
   if (s.handle.length > 40) return "The handle can be at most 40 characters.";
   if (!Number.isInteger(s.min_images) || !Number.isInteger(s.max_images) || s.min_images < 1 || s.max_images > 30) return "Card counts must be 1 to 30.";
   if (s.min_images > s.max_images) return "The min card count cannot be above the max.";
-  return validateTextSettings(s);
+  // Fonts are not edited in Settings any more (picked per post on Today, never written by a
+  // Settings save), so a stale/unknown font id must not block Save: normalise, don't reject.
+  return validateTextSettings({ ...s, ...fontsOf(s) });
 }
