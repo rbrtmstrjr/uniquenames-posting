@@ -358,7 +358,8 @@ describe("redoReelSceneAction", () => {
     expect(s.ops).toContainEqual(["eq", "version", 2]);
     expect(s.ops).toContainEqual(["in", "status", ["done", "failed", "skipped"]]);
     const [r] = qs("reels", "update");
-    expect(patchOf(r)).toMatchObject({ status: "queued", preview_path: null, pc_path: null, error: null, claimed_at: null, finished_at: null, version: 5 });
+    expect(patchOf(r)).toMatchObject({ status: "queued", preview_path: null, error: null, claimed_at: null, finished_at: null, version: 5 });
+    expect(patchOf(r)).not.toHaveProperty("pc_path");   // the worker replaces the old PC file
     expect(r.ops).toContainEqual(["eq", "version", 4]);
   });
 

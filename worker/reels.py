@@ -237,7 +237,7 @@ class ReelRunner:
     def _fail_reel(self, reel, e, extra=None):
         if not reel.get("id"):
             return
-        body = {"status": "failed", "error": self._message(e)[:300], "claimed_at": None, "finished_at": now_iso()}
+        body = {"status": "failed", "error": self._message(e)[:600], "claimed_at": None, "finished_at": now_iso()}
         body.update(extra or {})
         rows = self._retry(lambda: self.supa.update("reels", _match(reel), body, returning=True))
         if rows and "voice_path" in body and body["voice_path"] is None and reel.get("voice_path"):

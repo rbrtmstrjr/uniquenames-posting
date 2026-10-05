@@ -18,7 +18,8 @@ import timing
 
 FPS = 30
 WIDTH, HEIGHT = 1080, 1920
-ZOOM = 0.08                    # 1.00 -> 1.08 over a scene
+ZOOM_PER_S = 0.02              # Ken Burns: 2% per second ...
+ZOOM_MAX = 0.08                # ... and at most 1.00 -> 1.08 over a scene (short scenes zoom less, not faster)
 MIN_SCENE_S = 0.8              # a picture is never on screen for less than this
 RENDER_TIMEOUT = 900
 PREVIEW_TIMEOUT = 300
@@ -30,6 +31,11 @@ PREVIEW_MAX_K = 2500           # a short reel doesn't need more than this at 720
 UPLOAD_TIMEOUT = 600
 YELLOW = "&H0000E6FF&"         # ASS colours are &HAABBGGRR: this is a warm yellow
 CAPTION_FONT = "Poppins-Bold.ttf"
+# Captions: bottom-centre, a third of the way up (clear of the platform buttons), white with a black
+# outline + soft shadow; the spoken word turns YELLOW.
+CAPTION_STYLE = {"size": 0.046, "align": 2, "margin_v": 0.34, "margin_lr": 0.07, "outline": 6, "shadow": 3,
+                 "back": "&H80000000"}
+ERR_TAIL = 240                 # stderr chars kept in the message (reels.error holds 600)
 NO_NET = "Couldn't reach the internet to save this reel. Press Retry."
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
@@ -69,15 +75,17 @@ def group_words(words, max_words=3, max_chars=20):
 def ass_captions(words, width=WIDTH, height=HEIGHT, linger=0.6):
     """An ASS file: one event per spoken word showing its whole group, that word in yellow.
     A group stays up until the next group starts (if that is within `linger` s), so it doesn't flicker."""
-    size = int(round(height * 0.046))
+    c = CAPTION_STYLE
+    size = int(round(height * c["size"]))
+    lr = int(width * c["margin_lr"])
     head = (
         "[Script Info]\nScriptType: v4.00+\nPlayResX: %d\nPlayResY: %d\nWrapStyle: 0\nScaledBorderAndShadow: yes\n\n"
         "[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, "
         "Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, "
         "Alignment, MarginL, MarginR, MarginV, Encoding\n"
-        "Style: Cap,Poppins,%d,&H00FFFFFF,&H00FFFFFF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,6,2,8,%d,%d,%d,1\n\n"
+        "Style: Cap,Poppins,%d,&H00FFFFFF,&H00FFFFFF,&H00000000,%s,-1,0,0,0,100,100,0,0,1,%d,%d,%d,%d,%d,%d,1\n\n"
         "[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
-    ) % (width, height, size, int(width * 0.07), int(width * 0.07), int(round(height * 0.22)))
+    ) % (width, height, size, c["back"], c["outline"], c["shadow"], c["align"], lr, lr, int(round(height * c["margin_v"])))
     groups = group_words(words or [])
     out = []
     for gi, g in enumerate(groups):
@@ -167,7 +175,8 @@ def ffmpeg_args(ffmpeg, scenes, voice_wav, ass_path, out_path, width=WIDTH, heig
     parts = []
     for i, n in enumerate(frames):
         last = max(1, n - 1)
-        z = ("1+%.3f*on/%d" % (ZOOM, last)) if i % 2 == 0 else ("%.3f-%.3f*on/%d" % (1 + ZOOM, ZOOM, last))
+        amt = min(ZOOM_MAX, ZOOM_PER_S * n / float(fps))
+        z = ("1+%.4f*on/%d" % (amt, last)) if i % 2 == 0 else ("%.4f-%.4f*on/%d" % (1 + amt, amt, last))
         # 2x up first: zoompan crops in whole pixels, so a bigger source keeps the slow zoom smooth
         parts.append(
             "[%d:v]scale=%d:%d:force_original_aspect_ratio=increase:flags=lanczos,crop=%d:%d,setsar=1,"
@@ -200,29 +209,34 @@ def preview_args(ffmpeg, src, out, target_mb=PREVIEW_MB, duration=60.0):
 
 
 def use_filter_script(args, script_path):
-    """Move a long -filter_complex into a file (Windows caps a command line at 32k characters)."""
+    """Move a long -filter_complex into a file (Windows caps a command line at 32k characters).
+    `-/option file` reads an option's value from a file (ffmpeg 7+; the bundled 7.1 has it, and
+    -filter_complex_script is deprecated)."""
     i = args.index("-filter_complex")
     with open(script_path, "w", encoding="utf-8") as fh:
         fh.write(args[i + 1])
-    return args[:i] + ["-filter_complex_script", os.path.basename(script_path)] + args[i + 2:]
+    return args[:i] + ["-/filter_complex", os.path.basename(script_path)] + args[i + 2:]
 
 
 def probe_duration(ffmpeg, path):
     """Seconds, read from `ffmpeg -i` (imageio-ffmpeg has no ffprobe)."""
-    r = subprocess.run([ffmpeg, "-hide_banner", "-nostdin", "-i", path], capture_output=True, timeout=60,
-                       creationflags=_NO_WINDOW)
+    try:
+        r = subprocess.run([ffmpeg, "-hide_banner", "-nostdin", "-i", path], capture_output=True, timeout=60,
+                           creationflags=_NO_WINDOW)
+    except subprocess.TimeoutExpired:
+        raise JobError("ffmpeg took over 60 seconds reading the finished video.")
     m = re.search(r"Duration: (\d+):(\d+):(\d+(?:\.\d+)?)", r.stderr.decode("utf-8", "replace"))
     if not m:
         raise JobError("Couldn't read the length of the finished video.")
     return int(m.group(1)) * 3600 + int(m.group(2)) * 60 + float(m.group(3))
 
 
-def run_ffmpeg(args, cwd, timeout, what, beat=None, beat_every=HEARTBEAT_S):
+def run_ffmpeg(args, cwd, timeout, what, beat=None, beat_every=HEARTBEAT_S, log=None):
     """Run ffmpeg in `cwd`, calling beat() every `beat_every` s (it may raise to stop). stderr goes to a
     file, not a pipe, so a chatty run can never block. A hang or a failure becomes a plain JobError."""
     log_path = os.path.join(cwd, "ffmpeg-%s.log" % re.sub(r"\W+", "-", what))
-    with open(log_path, "wb") as log:
-        p = subprocess.Popen(args, cwd=cwd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=log,
+    with open(log_path, "wb") as errf:
+        p = subprocess.Popen(args, cwd=cwd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=errf,
                              creationflags=_NO_WINDOW)
         t0 = last = time.time()
         try:
@@ -245,7 +259,9 @@ def run_ffmpeg(args, cwd, timeout, what, beat=None, beat_every=HEARTBEAT_S):
     if p.returncode != 0:
         with open(log_path, "rb") as fh:
             err = fh.read().decode("utf-8", "replace").strip()
-        raise JobError("ffmpeg couldn't make the %s: %s" % (what, err[-400:] or "exit code %d" % p.returncode))
+        if log:
+            log("ffmpeg (%s) failed, exit %d:\n%s" % (what, p.returncode, err[-4000:]))
+        raise JobError("ffmpeg couldn't make the %s: %s" % (what, err[-ERR_TAIL:] or "exit code %d" % p.returncode))
 
 
 # ---------------------------------------------------------------- PC file
@@ -263,12 +279,26 @@ def safe_title(title, limit=80):
     return s
 
 
-def pc_path(folder, title, day=None):
-    """<folder>\\<YYYY-MM-DD> <title>.mp4, with " (2)", " (3)" ... if that name is taken."""
+def _same(a, b):
+    return bool(a and b) and os.path.normcase(os.path.abspath(a)) == os.path.normcase(os.path.abspath(b))
+
+
+def inside(path, folder):
+    """True if `path` is a file somewhere under `folder`."""
+    try:
+        p, f = os.path.normcase(os.path.abspath(path)), os.path.normcase(os.path.abspath(folder))
+        return os.path.commonpath([p, f]) == f and p != f
+    except ValueError:  # another drive
+        return False
+
+
+def pc_path(folder, title, day=None, reuse=None):
+    """<folder>\\<YYYY-MM-DD> <title>.mp4, with " (2)", " (3)" ... if that name is taken. `reuse` = this
+    reel's previous video: a name it already holds is used again (the new video replaces it)."""
     day = day or datetime.date.today()
     base = "%s %s" % (day.isoformat(), safe_title(title))
     path, n = os.path.join(folder, base + ".mp4"), 2
-    while os.path.exists(path):
+    while os.path.exists(path) and not _same(path, reuse):
         path, n = os.path.join(folder, "%s (%d).mp4" % (base, n)), n + 1
     return path
 
@@ -351,19 +381,23 @@ def render_reel(runner, reel, scenes):
         runner.log("reel render: %d pictures, %.1f s of voice" % (len(items), total))
         args = ffmpeg_args(ffmpeg, items, "voice.wav", "captions.ass", "full.mp4", fontsdir=fontsdir)
         args = use_filter_script(args, os.path.join(work, "graph.txt"))
-        run_ffmpeg(args, work, RENDER_TIMEOUT, "video", beat)
+        run_ffmpeg(args, work, RENDER_TIMEOUT, "video", beat, log=runner.log)
         full = os.path.join(work, "full.mp4")
         duration = probe_duration(ffmpeg, full)
 
         preview = os.path.join(work, "preview.mp4")
-        run_ffmpeg(preview_args(ffmpeg, full, preview, PREVIEW_MB, duration), work, PREVIEW_TIMEOUT, "preview", beat)
+        run_ffmpeg(preview_args(ffmpeg, full, preview, PREVIEW_MB, duration), work, PREVIEW_TIMEOUT, "preview", beat,
+                   log=runner.log)
         if os.path.getsize(preview) > PREVIEW_CAP_MB * 1024 * 1024:
-            run_ffmpeg(preview_args(ffmpeg, full, preview, PREVIEW_RETRY_MB, duration), work, PREVIEW_TIMEOUT, "preview", beat)
+            run_ffmpeg(preview_args(ffmpeg, full, preview, PREVIEW_RETRY_MB, duration), work, PREVIEW_TIMEOUT, "preview", beat,
+                       log=runner.log)
             if os.path.getsize(preview) > PREVIEW_CAP_MB * 1024 * 1024:
                 raise JobError("The preview came out over %d MB. Press Retry." % PREVIEW_CAP_MB)
         beat()
 
-        dest = pc_path(os.path.join(getattr(runner, "output_root", None) or default_output_root(), "Reels"), reel.get("title"))
+        reels_dir = os.path.join(getattr(runner, "output_root", None) or default_output_root(), "Reels")
+        old_pc = reel.get("pc_path")
+        dest = pc_path(reels_dir, reel.get("title"), reuse=old_pc)
         try:
             copy_to_pc(full, dest)
         except OSError as e:
@@ -371,21 +405,28 @@ def render_reel(runner, reel, scenes):
         with open(preview, "rb") as fh:
             data = fh.read()
         path = "%s/preview-v%d.mp4" % (reel["id"], version)
+        def upload():
+            beat()  # before every try: slow retries must not let the claim go stale
+            return runner.supa.upload(BUCKET, path, data, "video/mp4", timeout=UPLOAD_TIMEOUT)
         try:
-            runner._net(lambda: _upload(runner.supa, BUCKET, path, data))
+            runner._net(upload)
         except Exception:
-            _remove_file(dest)
+            if not _same(dest, old_pc):
+                _remove_file(dest)
             raise
         saved = runner._save_reel(reel, {
             "status": "ready", "preview_path": path, "pc_path": dest, "duration_s": round(duration, 2),
             "error": None, "claimed_at": None, "finished_at": _now_iso()})
         if not saved:
-            _remove_file(dest)  # the reel was redone meanwhile: this video is not the one wanted
+            if not _same(dest, old_pc):
+                _remove_file(dest)  # the reel was redone meanwhile: this video is not the one wanted
             runner._drop_stale([path])
             return
         runner.log("reel ready in %.0f s: %s (%.1f s, preview %.1f MB)" % (
             time.time() - t0, dest, duration, len(data) / 1048576.0))
         remove_old_previews(runner, reel["id"], keep=path)
+        if old_pc and not _same(old_pc, dest) and inside(old_pc, reels_dir):
+            _remove_file(old_pc)  # this reel's superseded video (only ever inside the Reels folder)
     finally:
         shutil.rmtree(work, ignore_errors=True)
 
@@ -402,13 +443,6 @@ def remove_old_previews(runner, reel_id, keep):
             runner._remove(old)
     except Exception as e:
         runner.log("could not tidy old previews: %s" % e)
-
-
-def _upload(supa, bucket, path, data):
-    try:
-        return supa.upload(bucket, path, data, "video/mp4", timeout=UPLOAD_TIMEOUT)
-    except TypeError:  # a worker started before supa.upload took a timeout (it loads this file lazily)
-        return supa.upload(bucket, path, data, "video/mp4")
 
 
 def _remove_file(path):

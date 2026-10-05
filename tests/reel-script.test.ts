@@ -78,7 +78,8 @@ describe("scenePrompt", () => {
     expect(p).toContain(NO_TEXT);
     expect(p).toMatch(/9:16/);
     expect(p).toMatch(/every setting is built from felt and linen/);
-    expect(p).toMatch(/upper third is calm and uncluttered/);
+    expect(p).toMatch(/band just below the middle is calm and uncluttered/);
+    expect(p).not.toMatch(/upper third/);
     expect(p).not.toMatch(/caption/i);
   });
   it("gives the hook treatment only to the opening picture", () => {

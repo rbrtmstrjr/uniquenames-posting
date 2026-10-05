@@ -4,7 +4,7 @@ import socket
 import sys
 import time
 
-from jobs import VERSION, Runner, prune_cache, rotate_log, sweep_parts
+from jobs import VERSION, Runner, prune_cache, prune_render_temps, rotate_log, sweep_parts
 from reels import ReelRunner
 from render import HERE, ComfyRenderer, default_output_root, ensure_fonts_in_background, load_env
 from supa import Supa
@@ -32,6 +32,7 @@ def main():
     cache_dir = os.path.join(HERE, "cache")
     prune_cache(cache_dir)
     sweep_parts(output_root)
+    prune_render_temps()
     supa = Supa(cfg["SUPABASE_URL"], cfg["SUPABASE_SERVICE_ROLE_KEY"])
     log = lambda m: print(time.strftime("%Y-%m-%d %H:%M:%S"), m, flush=True)  # noqa: E731
     runner = Runner(supa, renderer, output_root, cache_dir,

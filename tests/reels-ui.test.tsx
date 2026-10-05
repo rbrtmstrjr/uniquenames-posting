@@ -245,7 +245,7 @@ describe("ReelProgress", () => {
       scenes={[scene(1, { status: "done", photo_path: "a.jpg" })]} onPatchReel={onPatchReel} onPatchScene={onPatchScene} />);
     fireEvent.click(screen.getByRole("button", { name: /Open image 1/ }));
     fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: /New picture/ }));
-    await waitFor(() => expect(onPatchReel).toHaveBeenCalledWith({ status: "queued", preview_path: null, pc_path: null }));
+    await waitFor(() => expect(onPatchReel).toHaveBeenCalledWith({ status: "queued", preview_path: null }));
     expect(onPatchScene).toHaveBeenCalledWith(sid(1), expect.objectContaining({ status: "queued" }));
   });
 

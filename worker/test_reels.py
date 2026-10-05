@@ -295,6 +295,13 @@ class ReelRunnerTest(unittest.TestCase):
         v = self.supa.of("reels")[-1][2]
         self.assertEqual((v["status"], v["error"]), ("failed", reels.NO_RENDER))
 
+    def test_reel_errors_keep_up_to_600_chars(self):
+        fake = mock.Mock()
+        fake.render_reel.side_effect = JobError("e" * 1000)
+        with mock.patch.dict("sys.modules", {"reel_render": fake}):
+            self.rr.run_step({"step": "render", "reel": make_reel(), "scene": None})
+        self.assertEqual(len(self.supa.of("reels")[-1][2]["error"]), 600)
+
     def test_render_delegates_when_present(self):
         fake = mock.Mock()
         with mock.patch.dict("sys.modules", {"reel_render": fake}):
@@ -372,6 +379,16 @@ class RunnerReelTickTest(unittest.TestCase):
         self.run_.next_preview_sweep = 0
         self.assertEqual(self.run_.sweep_old_previews(), 0)                   # cards-only worker: no sweep
         self.assertEqual(self.supa.list.call_count, 1)
+
+    def test_old_render_folders_are_pruned_at_start(self):
+        old, new, other = (os.path.join(self.root, n) for n in ("reel-render-a", "reel-render-b", "keep-me"))
+        for d in (old, new, other):
+            os.makedirs(d)
+        now = os.path.getmtime(new)
+        os.utime(old, (now - 2 * 86400, now - 2 * 86400))
+        os.utime(other, (now - 2 * 86400, now - 2 * 86400))
+        jobs.prune_render_temps(self.root, now=now)
+        self.assertEqual((os.path.exists(old), os.path.exists(new), os.path.exists(other)), (False, True, True))
 
     def test_without_a_reel_runner_cards_behave_as_before(self):
         self.run_.reels = None

@@ -271,7 +271,8 @@ const MAKING: ReelStatus[] = ["queued", "voicing", "imaging"];
 const WORKING: ReelStatus[] = [...MAKING, "rendering"];
 /** Scenes that can be made again: finished, failed, or skipped earlier (a skipped image can come back). */
 const REDOABLE: ReelSceneStatus[] = ["done", "failed", "skipped"];
-const REQUEUE_REEL = { status: "queued", preview_path: null, pc_path: null, error: null, claimed_at: null, finished_at: null };
+// pc_path stays: the worker replaces that file when the new video is made (no stray copies on the PC).
+const REQUEUE_REEL = { status: "queued", preview_path: null, error: null, claimed_at: null, finished_at: null };
 
 /**
  * Tap an image → "New picture" (also Retry after needs_attention): the scene goes back in line with

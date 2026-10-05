@@ -87,7 +87,7 @@ export function ReelProgress({ reel, scenes, onPatchScene, onPatchReel }: {
     () => {
       onPatchScene?.(s.id, { status: "queued", error: null, attempts: 0 });
       // A reel that was ready / stopped goes back in line without its video (the server did the same).
-      if (!MAKING.includes(reel.status)) onPatchReel?.({ status: "queued", preview_path: null, pc_path: null });
+      if (!MAKING.includes(reel.status)) onPatchReel?.({ status: "queued", preview_path: null });
     });
   const skip = (s: ReelSceneRow) => run(`skip-${s.id}`, () => skipReelSceneAction(s.id), `Image ${s.position} skipped`,
     () => onPatchScene?.(s.id, { status: "skipped", error: null }));

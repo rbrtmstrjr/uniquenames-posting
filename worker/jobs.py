@@ -99,6 +99,25 @@ def sweep_parts(root, hours=1, now=None):
                 pass
 
 
+def prune_render_temps(tmp_dir=None, hours=24, now=None):
+    """Leftover reel render folders (%TEMP%/reel-render-*, from a crash or a power cut) older than `hours`."""
+    import shutil
+    import tempfile
+    tmp_dir = tmp_dir or tempfile.gettempdir()
+    now = now or time.time()
+    try:
+        names = os.listdir(tmp_dir)
+    except OSError:
+        return
+    for n in names:
+        d = os.path.join(tmp_dir, n)
+        try:
+            if n.startswith("reel-render-") and os.path.isdir(d) and now - os.path.getmtime(d) > hours * 3600:
+                shutil.rmtree(d, ignore_errors=True)
+        except OSError:
+            pass
+
+
 FONT_KEYS = ("title_font", "meaning_font", "mark_font")
 
 

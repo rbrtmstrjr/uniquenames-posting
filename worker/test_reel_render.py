@@ -51,8 +51,9 @@ class CaptionTest(unittest.TestCase):
         self.assertIn("PlayResX: 1080\nPlayResY: 1920", ass)
         style = [l for l in ass.splitlines() if l.startswith("Style: Cap,")][0].split(",")
         self.assertEqual(style[1], "Poppins")
-        self.assertEqual((style[7], style[16], style[18]), ("-1", "6", "8"))      # bold, outline 6, top-middle
-        self.assertEqual(int(style[21]), round(1920 * 0.22))                       # MarginV = 22% of the height
+        self.assertEqual(style[6], "&H80000000")                                    # soft shadow colour
+        self.assertEqual((style[7], style[16], style[17], style[18]), ("-1", "6", "3", "2"))  # bold, outline, shadow, bottom-centre
+        self.assertEqual(int(style[21]), round(1920 * 0.34))                       # MarginV = 34% of the height
         events = [l for l in ass.splitlines() if l.startswith("Dialogue:")]
         self.assertEqual(len(events), 5)                                           # one per spoken word
         # "close," ends the first group (comma); the gap to "every" (0.2 s) is bridged
@@ -108,18 +109,20 @@ class TimelineTest(unittest.TestCase):
 
 class ArgsTest(unittest.TestCase):
     def test_ffmpeg_args(self):
-        args = rr.ffmpeg_args("ffmpeg", [{"image": "a.jpg", "duration": 2.0}, {"image": "b.jpg", "duration": 1.5}],
+        args = rr.ffmpeg_args("ffmpeg", [{"image": "a.jpg", "duration": 2.0}, {"image": "b.jpg", "duration": 1.5},
+                                         {"image": "c.jpg", "duration": 6.0}],
                               "voice.wav", "C:\\tmp\\captions.ass", "out.mp4", fontsdir="fonts")
         graph = args[args.index("-filter_complex") + 1]
         self.assertIn("scale=2160:3840", graph)
-        self.assertIn("z='1+0.080*on/59'", graph)                 # scene 1 zooms in over 60 frames
-        self.assertIn("z='1.080-0.080*on/44'", graph)             # scene 2 zooms out over 45 frames
+        self.assertIn("z='1+0.0400*on/59'", graph)                # 2 s: zooms in 4% (2% a second)
+        self.assertIn("z='1.0300-0.0300*on/44'", graph)           # 1.5 s: zooms out 3%
+        self.assertIn("z='1+0.0800*on/179'", graph)               # 6 s: capped at 8%
         self.assertIn(":d=60:s=1080x1920:fps=30", graph)
         self.assertIn(":d=45:s=1080x1920:fps=30", graph)
-        self.assertIn("concat=n=2:v=1:a=0", graph)
+        self.assertIn("concat=n=3:v=1:a=0", graph)
         self.assertIn("subtitles=filename='C\\:/tmp/captions.ass':fontsdir='fonts'", graph)
         tail = " ".join(args[args.index("-map"):])
-        for want in ("-map 2:a", "-c:v libx264 -preset veryfast -crf 20", "-pix_fmt yuv420p", "-c:a aac -b:a 160k",
+        for want in ("-map 3:a", "-c:v libx264 -preset veryfast -crf 20", "-pix_fmt yuv420p", "-c:a aac -b:a 160k",
                      "-movflags +faststart", "-shortest"):
             self.assertIn(want, tail)
         self.assertEqual(args[-1], "out.mp4")
@@ -128,7 +131,7 @@ class ArgsTest(unittest.TestCase):
         d = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, d, True)
         args = rr.use_filter_script(["ff", "-filter_complex", "GRAPH", "-map", "[v]"], os.path.join(d, "g.txt"))
-        self.assertEqual(args, ["ff", "-filter_complex_script", "g.txt", "-map", "[v]"])
+        self.assertEqual(args, ["ff", "-/filter_complex", "g.txt", "-map", "[v]"])
         with open(os.path.join(d, "g.txt")) as fh:
             self.assertEqual(fh.read(), "GRAPH")
 
@@ -152,6 +155,10 @@ class ArgsTest(unittest.TestCase):
         self.assertEqual(first, os.path.join(d, "2026-10-05 Calm baby.mp4"))
         open(first, "wb").close()
         self.assertEqual(rr.pc_path(d, "Calm baby", day), os.path.join(d, "2026-10-05 Calm baby (2).mp4"))
+        self.assertEqual(rr.pc_path(d, "Calm baby", day, reuse=first), first)    # this reel's own old video
+        self.assertTrue(rr.inside(first, d))
+        self.assertFalse(rr.inside(os.path.join(d, "..", "x.mp4"), d))
+        self.assertFalse(rr.inside(d, d))
 
 
 class FakeSupa:
@@ -249,7 +256,9 @@ class RealRenderTest(unittest.TestCase):
         v = self.supa.updates[-1][2]
         self.assertEqual(v["status"], "failed")
         self.assertIn("ffmpeg couldn't make the video", v["error"])
+        self.assertLessEqual(len(v["error"]), len("ffmpeg couldn't make the video: ") + rr.ERR_TAIL)
         self.assertIsNone(v["claimed_at"])
+        self.assertTrue(any(m.startswith("ffmpeg (video) failed") for m in self.logs))   # the full stderr
 
     def test_missing_picture_and_missing_voice(self):
         del self.store[RID + "/scenes/02-v1.jpg"]
@@ -268,6 +277,48 @@ class RealRenderTest(unittest.TestCase):
             rr.run_ffmpeg(args, self.root, 2.5, "video", lambda: beats.append(1), beat_every=0.5)
         self.assertIn("took over 2 seconds", str(cm.exception))
         self.assertGreaterEqual(len(beats), 2)
+
+    def test_superseded_pc_video_is_replaced_or_removed(self):
+        reels_dir = os.path.join(self.root, "Reels")
+        os.makedirs(reels_dir)
+        same = os.path.join(reels_dir, "%s Calm baby.mp4" % datetime.date.today().isoformat())
+        with open(same, "wb") as fh:
+            fh.write(b"old video")
+        self.reel["pc_path"] = same                       # same day + title: overwritten in place
+        self.render()
+        self.assertEqual(sorted(os.listdir(reels_dir)), [os.path.basename(same)])
+        self.assertGreater(os.path.getsize(same), 1000)
+        older = os.path.join(reels_dir, "2026-01-01 Calm baby.mp4")
+        os.rename(same, older)
+        self.reel["pc_path"] = older                      # another day: the new one is written, the old removed
+        self.render()
+        self.assertEqual(sorted(os.listdir(reels_dir)), [os.path.basename(same)])
+        outside = os.path.join(self.root, "elsewhere.mp4")
+        open(outside, "wb").close()
+        self.reel["pc_path"] = outside                    # never deleted outside the Reels folder
+        self.render()
+        self.assertTrue(os.path.exists(outside))
+
+    def test_upload_retries_keep_the_claim_alive(self):
+        calls = []
+        real = self.supa.upload
+
+        def flaky(*a, **kw):
+            calls.append(1)
+            if len(calls) < 3:
+                raise SupaError("POST x -> network error: reset")
+            return real(*a, **kw)
+        self.supa.upload = flaky
+        n0 = len(self.supa.updates)
+        self.render()
+        beats = [u for u in self.supa.updates[n0:] if set(u[2]) == {"claimed_at"} and u[2]["claimed_at"]]
+        self.assertEqual(len(calls), 3)
+        self.assertGreaterEqual(len(beats), 5)            # 2 around the render + one before each upload try
+
+    def test_probe_timeout_is_a_job_error(self):
+        with mock.patch.object(rr.subprocess, "run", side_effect=subprocess.TimeoutExpired("ff", 60)):
+            with self.assertRaises(JobError):
+                rr.probe_duration("ff", "x.mp4")
 
     def test_render_does_not_touch_comfyui(self):
         self.runner.renderer = mock.Mock(side_effect=AssertionError("ComfyUI used"))

@@ -38,7 +38,7 @@ export function scenePrompt(cast: ReelCast, idea: string, beat: string, index: n
   return [
     `A single full-bleed vertical 9:16 picture of ${moment}. Moment: ${clean(idea)}. Lens: ${lens}.`,
     `${KNIT_STYLE} Characters (the same two dolls in every picture): ${clean(cast.adult)}; ${clean(cast.child)}.`,
-    "Composition: the handmade set fills the whole frame edge to edge; the upper third is calm and uncluttered — a soft, simple, evenly lit stretch of the scene's own background.",
+    "Composition: the handmade set fills the whole frame edge to edge; the dolls and their action sit in the upper and middle part of the frame, and the band just below the middle is calm and uncluttered — a soft, simple, evenly lit stretch of the scene's own floor, blanket or background.",
     NO_TEXT,
   ].join("\n");
 }
