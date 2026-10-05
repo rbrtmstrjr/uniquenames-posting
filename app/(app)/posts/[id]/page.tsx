@@ -11,5 +11,5 @@ export default async function PostPage({ params }: { params: Promise<{ id: strin
   const data = await getPost(id);
   if (!data) notFound();
   // PostDetail reads ?card= (open that card), which needs a Suspense boundary.
-  return <Suspense><PostDetail key={id} post={data.post} theme={data.theme} initialCards={data.cards} /></Suspense>;
+  return <Suspense><PostDetail key={id} post={data.post} theme={data.theme} initialCards={data.cards} settingsFonts={data.settingsFonts} /></Suspense>;
 }

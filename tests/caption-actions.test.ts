@@ -191,10 +191,11 @@ describe("saveSettingsAction caption_ai", () => {
     expect(settingsUpdates()).toHaveLength(2);
   });
 
-  it("saves the card text settings with the rest", async () => {
-    const text = { title_font: "playfair", meaning_font: "lora", mark_font: "greatvibes", title_size: 120, meaning_size: 40, mark_size: 24, text_position: "bottom-right" as const };
-    expect(await saveSettingsAction({ ...input, ...text })).toEqual({ ok: true });
+  it("saves the card text sizes and position with the rest, never the fonts (they are the last-used fonts from Today)", async () => {
+    const text = { title_size: 120, meaning_size: 40, mark_size: 24, text_position: "bottom-right" as const };
+    expect(await saveSettingsAction({ ...input, ...text, title_font: "playfair", meaning_font: "lora", mark_font: "greatvibes" })).toEqual({ ok: true });
     expect(settingsUpdates()[0]).toMatchObject(text);
+    for (const k of ["title_font", "meaning_font", "mark_font"]) expect(settingsUpdates()[0]).not.toHaveProperty(k);
   });
 
   it("rejects a bad text setting before writing", async () => {

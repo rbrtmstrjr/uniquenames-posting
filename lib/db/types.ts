@@ -28,6 +28,8 @@ export interface ThemeRow {
 export interface PostRow {
   id: string; request_id: string | null; post_date: string; gender: Gender; style: NameStyle; theme_id: string; caption: string;
   status: PostStatus; posted_at: string | null; created_at: string; updated_at: string;
+  /** The post's fonts (migration 003; absent before it runs). null = the fonts in settings. */
+  title_font?: string | null; meaning_font?: string | null; mark_font?: string | null;
 }
 export interface CardRow {
   id: string; post_id: string | null; theme_id: string; kind: CardKind; position: number; name_id: string | null;

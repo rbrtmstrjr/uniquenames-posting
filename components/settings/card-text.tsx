@@ -2,9 +2,9 @@
 import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { TEXT_POSITIONS, type TextPosition } from "@/lib/db/types";
 import type { TextSettings } from "@/lib/actions/validate";
-import { FONTS, cssFamily, fontById, fontWeight, googleFontsHref } from "@/lib/fonts/catalog";
+import { cssFamily, fontById, fontWeight } from "@/lib/fonts/catalog";
 import { LAYOUT, SIZE_RANGES, fitMeaning, fitTitle, markSide, maxWidthFor, pxAt, spot, titleText, type Measure, type SizeKey } from "@/lib/text/layout";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/shadcn/select";
+import { CatalogFontsLink } from "@/components/fonts/font-select";
 import { Slider } from "@/components/ui/shadcn/slider";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/shadcn/toggle-group";
 import { cn } from "@/lib/utils/cn";
@@ -24,21 +24,16 @@ const SIZE_FIELDS = [
 ] as const satisfies readonly { key: SizeKey; field: keyof TextSettings; label: string }[];
 const POSITION_LABEL = (p: TextPosition) => (p === "auto" ? "Auto (calmest part of each photo)" : p.replace("-", " ").replace(/^./, (c) => c.toUpperCase()));
 
-/** Fonts, sizes, position and a live preview of the card text. */
+/** Sizes, position and a live preview of the card text (fonts are picked per post on Today). */
 export function CardTextSettings({ value, onChange, sample, aspect, handle }: {
   value: TextSettings; onChange: (v: TextSettings) => void; sample: PreviewSample; aspect: number; handle: string;
 }) {
   const set = <K extends keyof TextSettings>(k: K, v: TextSettings[K]) => onChange({ ...value, [k]: v });
   return (
     <div className="grid gap-5 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-      {/* Google Fonts for the previews, on this page only (React hoists it into <head>). */}
-      <link rel="stylesheet" href={googleFontsHref()} precedence="default" />
+      {/* Google Fonts for the preview (React hoists it into <head>). */}
+      <CatalogFontsLink />
       <div className="space-y-4">
-        <div className="grid gap-3 sm:grid-cols-3 md:grid-cols-1">
-          {FONT_FIELDS.map((f) => (
-            <FontSelect key={f.key} id={`font-${f.key}`} label={f.label} weight={f.weight} value={value[f.key]} onChange={(v) => set(f.key, v)} />
-          ))}
-        </div>
         <div className="grid gap-4 sm:grid-cols-3 md:grid-cols-1">
           {SIZE_FIELDS.map((s) => (
             <SizeSlider key={s.key} label={s.label} range={SIZE_RANGES[s.key]} value={value[s.field]} onChange={(v) => set(s.field, v)} />
@@ -48,27 +43,9 @@ export function CardTextSettings({ value, onChange, sample, aspect, handle }: {
       </div>
       <div className="order-first md:order-none">
         <TextPreview t={value} sample={sample} aspect={aspect} handle={handle} />
-        <p className="mt-2 text-xs text-muted">Applies to new cards. To update a post you already made, open it and use <strong className="font-semibold text-ink">Re-stamp with current text settings</strong>.</p>
+        <p className="mt-2 text-xs text-muted"><strong className="font-semibold text-ink">Fonts are chosen per post on Today</strong>; the preview uses the fonts of your last post ({FONT_FIELDS.map((f) => fontById(value[f.key]).label).join(" · ")}).</p>
+        <p className="mt-1 text-xs text-muted">Sizes and position apply to new cards. To update a post you already made, open it and use <strong className="font-semibold text-ink">Re-stamp with current text settings</strong>.</p>
       </div>
-    </div>
-  );
-}
-
-function FontSelect({ id, label, weight, value, onChange }: { id: string; label: string; weight: number; value: string; onChange: (v: string) => void }) {
-  const current = fontById(value);
-  return (
-    <div>
-      <span id={`${id}-label`} className="mb-1 block text-xs font-semibold text-muted">{label}</span>
-      <Select value={current.id} onValueChange={onChange}>
-        <SelectTrigger aria-labelledby={`${id}-label`} className="w-full text-base" style={{ fontFamily: cssFamily(current), fontWeight: fontWeight(current, weight) }}>
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent position="popper" collisionPadding={{ top: 8, bottom: 80 }} className="max-h-[min(22rem,var(--radix-select-content-available-height))]">
-          {FONTS.map((f) => (
-            <SelectItem key={f.id} value={f.id} className="text-base" style={{ fontFamily: cssFamily(f), fontWeight: fontWeight(f, weight) }}>{f.label}</SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
     </div>
   );
 }

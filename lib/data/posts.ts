@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
-import type { CardRow, PostRow, ThemeRow } from "@/lib/db/types";
+import type { CardRow, PostRow, SettingsRow, ThemeRow } from "@/lib/db/types";
+import { fontsOf } from "@/lib/fonts/post-fonts";
 
 export type PostListItem = PostRow & { theme_title: string; cards: Pick<CardRow, "id" | "status" | "card_path" | "position">[] };
 
@@ -17,9 +18,11 @@ export async function getPost(id: string) {
   const sb = await createClient();
   const { data: post } = await sb.from("posts").select("*").eq("id", id).maybeSingle();
   if (!post) return null;
-  const [{ data: theme }, { data: cards }] = await Promise.all([
+  const [{ data: theme }, { data: cards }, { data: settings }] = await Promise.all([
     sb.from("themes").select("*").eq("id", (post as PostRow).theme_id).single(),
     sb.from("cards").select("*").eq("post_id", id).order("position"),
+    // select * (never naming the font columns): works before and after every migration.
+    sb.from("settings").select("*").eq("id", 1).maybeSingle(),
   ]);
-  return { post: post as PostRow, theme: theme as ThemeRow, cards: (cards ?? []) as CardRow[] };
+  return { post: post as PostRow, theme: theme as ThemeRow, cards: (cards ?? []) as CardRow[], settingsFonts: fontsOf(settings as Partial<SettingsRow> | null) };
 }

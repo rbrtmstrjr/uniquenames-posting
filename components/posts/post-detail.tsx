@@ -30,6 +30,8 @@ import { regenerateCardAction, reorderCardsAction, selectAllAction, setSelectedA
 import { callAction, optimistic } from "@/lib/actions/call";
 import type { ActionResult } from "@/lib/actions/result";
 import { useUndoableDelete } from "@/components/cards/use-undoable-delete";
+import type { PostFonts } from "@/lib/fonts/post-fonts";
+import { RestampDialog } from "./restamp-dialog";
 
 const byOrder = (a: CardRow, b: CardRow) => a.order_index - b.order_index || a.position - b.position;
 
@@ -52,7 +54,7 @@ function Sortable({ id, name, children }: { id: string; name: string; children: 
   );
 }
 
-export function PostDetail({ post: initialPost, theme, initialCards }: { post: PostRow; theme: ThemeRow; initialCards: CardRow[] }) {
+export function PostDetail({ post: initialPost, theme, initialCards, settingsFonts }: { post: PostRow; theme: ThemeRow; initialCards: CardRow[]; settingsFonts: PostFonts }) {
   const router = useRouter();
   const params = useSearchParams();
   const { health } = useWorkerContext();
@@ -139,19 +141,21 @@ export function PostDetail({ post: initialPost, theme, initialCards }: { post: P
     return r.ok;
   };
 
-  // Re-stamp the whole post with the current text settings: finished cards flip to
-  // "updating text" at once; a failed request puts them back.
-  const restampAll = async () => {
+  // Re-stamp the whole post with the chosen fonts + current text settings: finished cards
+  // flip to "updating text" at once; a failed request puts them back.
+  const restampAll = async (fonts?: PostFonts) => {
     const ids = new Set(restampSelection(visible).restamp.map((c) => c.id));
     const before = new Map(cards.filter((c) => ids.has(c.id)).map((c) => [c.id, c.status]));
     setBusy("restamp");
     const r = await optimistic(
       () => setCards((prev) => prev.map((c) => (ids.has(c.id) ? { ...c, status: "restamp" } : c))),
       () => setCards((prev) => prev.map((c) => (before.has(c.id) && c.status === "restamp" ? { ...c, status: before.get(c.id)! } : c))),
-      () => restampPostAction(post.id));
+      () => restampPostAction(post.id, fonts));
     setBusy(null);
     setConfirmRestamp(false);
     if (!r.ok) { toast.error(r.error); return; }
+    // The post's fonts were saved: reopening the dialog shows them even before realtime catches up.
+    if (fonts) setPosts((prev) => prev.map((p) => (p.id === post.id ? { ...p, ...fonts } : p)));
     // Cards the server skipped ("changed meanwhile") drop the optimistic look; realtime brings their real state.
     const queued = new Set(r.ids);
     setCards((prev) => prev.map((c) => (before.has(c.id) && !queued.has(c.id) && c.status === "restamp" ? { ...c, status: before.get(c.id)! } : c)));
@@ -237,18 +241,9 @@ export function PostDetail({ post: initialPost, theme, initialCards }: { post: P
         onClose={() => setOpenId(null)} onDelete={deleteCard}
         onPatch={(id, p) => setCards((prev) => prev.map((x) => (x.id === id ? { ...x, ...p } : x)))} />
 
-      <Dialog open={confirmRestamp} onOpenChange={setConfirmRestamp} title="Re-stamp this post?"
-        description="The name, meaning and watermark are stamped again with your current text settings (fonts, sizes, position). The photos stay the same.">
-        <ul className="mb-4 space-y-1 text-sm text-muted">
-          <li>{restampable.restamp.length} card{restampable.restamp.length === 1 ? "" : "s"} will be re-stamped, about a second each once your PC picks {restampable.restamp.length === 1 ? "it" : "them"} up.</li>
-          {restampable.noPhoto > 0 && <li>{restampable.noPhoto} older card{restampable.noPhoto === 1 ? " has" : "s have"} no clean photo and will stay as {restampable.noPhoto === 1 ? "it is" : "they are"}.</li>}
-          {health === "offline" && <li className="font-semibold text-ink">Your PC is offline: the cards wait until it is on.</li>}
-        </ul>
-        <div className="flex justify-end gap-2">
-          <Button variant="ghost" onClick={() => setConfirmRestamp(false)}>Keep as is</Button>
-          <Button loading={busy === "restamp"} onClick={() => void restampAll()}>Re-stamp</Button>
-        </div>
-      </Dialog>
+      <RestampDialog open={confirmRestamp} onOpenChange={setConfirmRestamp} post={post} settingsFonts={settingsFonts}
+        counts={{ restamp: restampable.restamp.length, noPhoto: restampable.noPhoto }} health={health} busy={busy === "restamp"}
+        onConfirm={(fonts) => void restampAll(fonts)} />
 
       <Dialog open={confirmDelete} onOpenChange={setConfirmDelete} title="Delete this post?"
         description="Its cards are deleted from the website and its names and theme go back on the list. The copies on your PC stay.">

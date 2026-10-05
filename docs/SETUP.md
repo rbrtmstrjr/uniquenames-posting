@@ -52,6 +52,7 @@ Do these in order:
 2. Vercel > Settings > Environment Variables: add `GEMINI_API_KEY` (Sensitive, Production and Preview).
 3. Push to GitHub so Vercel redeploys (or press Redeploy, so the new variable is picked up).
 4. Restart the worker: Task Scheduler, end then run **Unique Names card worker** (or reboot the PC). It loads the new text settings and downloads the fonts into `worker/fonts/` (git-ignored).
+5. Fonts per post: in the SQL Editor run `supabase/migrations/003_post_fonts.sql` (safe to run again), then restart the worker once more. Until then posts use the last-used fonts from settings, and changing a post's fonts in Re-stamp asks you to run it.
 
 ## When something is wrong
 - Header dot red, "PC offline": turn on the PC. The worker starts at login. **Generate** is disabled (the button says why) until the PC is back.

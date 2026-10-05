@@ -77,6 +77,21 @@ def sweep_parts(root, hours=1, now=None):
                 pass
 
 
+FONT_KEYS = ("title_font", "meaning_font", "mark_font")
+
+
+def with_post_fonts(settings, fonts):
+    """The settings with the post's own fonts (migration 003: claim_next_card returns them
+    under "fonts") over the settings fonts. A null/empty font, a null "fonts" (preview cards,
+    posts made before 003) or no "fonts" key at all (DB without 003) keeps the settings font."""
+    picked = {k: fonts[k] for k in FONT_KEYS if isinstance(fonts, dict) and fonts.get(k)}
+    if not picked:
+        return settings
+    s = dict(settings, **picked)
+    s["style"] = text_style(s)
+    return s
+
+
 class Runner:
     def __init__(self, supa, renderer, output_root, cache_dir, poll_seconds=3.0, heartbeat_seconds=15.0, log=print):
         self.supa = supa
@@ -118,7 +133,7 @@ class Runner:
         self.current = card["id"]
         self.log("%s: %s (%s)" % (job["job"], card["name"], card["id"]))
         try:
-            settings = self._settings()
+            settings = with_post_fonts(self._settings(), job.get("fonts"))
             if job["job"] == "restamp" and card.get("photo_path"):
                 try:
                     self._restamp(job, settings)

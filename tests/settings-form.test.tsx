@@ -50,18 +50,12 @@ describe("SettingsForm (shadcn controls)", () => {
     expect(callAction).toHaveBeenCalledTimes(1);
   });
 
-  it("card text: three font Selects, each family shown in its own font", () => {
-    render(<SettingsForm initial={{ ...initial, title_font: "playfair" }} />);
-    const name = screen.getByRole("combobox", { name: "Name font" });
-    expect(name.textContent).toContain("Playfair Display");
-    expect(name.getAttribute("style")).toMatch(/font-family: "Playfair Display"/);
-    expect(screen.getByRole("combobox", { name: "Meaning font" }).textContent).toContain("Poppins");
-    expect(screen.getByRole("combobox", { name: "Watermark font" })).toBeTruthy();
-    fireEvent.click(name);
-    const option = screen.getByRole("option", { name: "Great Vibes" });
-    expect(option.getAttribute("style")).toMatch(/font-family: "Great Vibes", cursive/);
-    expect(option.getAttribute("style")).toMatch(/font-weight: 400/); // single-weight font: no faux bold
-    expect(screen.getAllByRole("option")).toHaveLength(15);
+  it("card text: no font Selects (fonts are picked per post on Today); the preview uses the last-used fonts", () => {
+    render(<SettingsForm initial={{ ...initial, title_font: "playfair", meaning_font: "lora" }} />);
+    expect(screen.queryAllByRole("combobox")).toHaveLength(0);
+    expect(screen.getByText(/Fonts are chosen per post on Today/)).toBeTruthy();
+    expect(screen.getByText(/Playfair Display · Lora · Poppins/)).toBeTruthy();
+    expect(document.querySelector("link[href*='fonts.googleapis.com']")).toBeTruthy();
   });
 
   it("card text: size sliders with px labels and the spec ranges", () => {
@@ -92,7 +86,7 @@ describe("SettingsForm (shadcn controls)", () => {
   it("card text: before migration 002 (no text columns) the defaults show", () => {
     const legacy = Object.fromEntries(Object.entries(initial).filter(([k]) => !/_font$|_size$|text_position/.test(k))) as unknown as SettingsRow;
     render(<SettingsForm initial={legacy} />);
-    expect(screen.getByRole("combobox", { name: "Name font" }).textContent).toContain("Poppins");
+    expect(screen.getByText(/Poppins · Poppins · Poppins/)).toBeTruthy();
     expect(screen.getByRole("slider", { name: "Meaning size" }).getAttribute("aria-valuenow")).toBe("37");
     expect(screen.getByRole("radio", { name: /Auto/ }).getAttribute("aria-checked")).toBe("true");
   });

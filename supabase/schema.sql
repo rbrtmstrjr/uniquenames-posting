@@ -1,5 +1,5 @@
 -- Unique Names posting: database. Paste the whole file into the Supabase SQL editor and run it once.
--- A project created before v2 runs supabase/migrations/002_v2.sql instead (this file already includes it).
+-- A project created before v2 runs supabase/migrations/002_v2.sql then 003_post_fonts.sql instead (this file already includes both).
 -- Status 'pending' = an AI-suggested name/theme waiting for approval; nothing here ever plans it (only 'available').
 
 -- ---------------------------------------------------------------- tables
@@ -65,7 +65,11 @@ create table if not exists public.posts (
   status text not null default 'generating' check (status in ('generating', 'ready', 'posted')),
   posted_at timestamptz,
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+  -- fonts chosen for this post on Today (003); null = use the fonts in settings
+  title_font text,
+  meaning_font text,
+  mark_font text
 );
 
 create table if not exists public.names (
@@ -185,8 +189,9 @@ begin
     return jsonb_build_object('status', 'conflict', 'reason', 'names');
   end if;
 
-  insert into public.posts (request_id, post_date, gender, style, theme_id, caption)
-  values ((p->>'request_id')::uuid, (p->>'post_date')::date, p->>'gender', p->>'style', v_theme_id, coalesce(p->>'caption', ''))
+  insert into public.posts (request_id, post_date, gender, style, theme_id, caption, title_font, meaning_font, mark_font)
+  values ((p->>'request_id')::uuid, (p->>'post_date')::date, p->>'gender', p->>'style', v_theme_id, coalesce(p->>'caption', ''),
+          nullif(btrim(p->>'title_font'), ''), nullif(btrim(p->>'meaning_font'), ''), nullif(btrim(p->>'mark_font'), ''))
   returning id into v_post;
 
   insert into public.cards (post_id, theme_id, kind, position, name_id, name, meaning, shot, prompt, seed, order_index)
@@ -253,7 +258,7 @@ end $$;
 -- ---------------------------------------------------------------- worker: claim + stuck recovery
 drop function if exists public.claim_next_card();
 create or replace function public.claim_next_card(p_restamp_only boolean default false) returns jsonb language plpgsql as $$
-declare v_card public.cards%rowtype; v_job text; v_date date; v_gender text; v_style text;
+declare v_card public.cards%rowtype; v_job text; v_post public.posts%rowtype;
 begin
   select * into v_card from public.cards
   where claimed_at is null and status in ('restamp', 'queued')
@@ -270,11 +275,13 @@ begin
   where id = v_card.id
   returning * into v_card;
 
-  select post_date, gender, style into v_date, v_gender, v_style from public.posts where id = v_card.post_id;
+  select * into v_post from public.posts where id = v_card.post_id;
   return jsonb_build_object(
-    'job', v_job, 'card', to_jsonb(v_card), 'post_date', v_date,
-    'gender_label', case v_gender when 'boy' then 'Boy' when 'girl' then 'Girl' else null end,
-    'style_label', case v_style when 'two-word' then 'Two-word' when 'single' then 'Single' else null end);
+    'job', v_job, 'card', to_jsonb(v_card), 'post_date', v_post.post_date,
+    'gender_label', case v_post.gender when 'boy' then 'Boy' when 'girl' then 'Girl' else null end,
+    'style_label', case v_post.style when 'two-word' then 'Two-word' when 'single' then 'Single' else null end,
+    'fonts', case when v_post.title_font is null and v_post.meaning_font is null and v_post.mark_font is null then null
+      else jsonb_build_object('title_font', v_post.title_font, 'meaning_font', v_post.meaning_font, 'mark_font', v_post.mark_font) end);
 end $$;
 
 create or replace function public.requeue_stuck_cards() returns int language plpgsql as $$

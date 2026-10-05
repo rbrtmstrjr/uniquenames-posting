@@ -7,14 +7,21 @@ import { restampSelection, UUID_RE, validateCreatePost } from "./helpers";
 import { generateLockReason } from "./generate-guard";
 import { aiCaptionLine, CAPTION_TIMEOUT_MS, captionAiOn, composeCaption, REWRITE_TIMEOUT_MS, withHashtags } from "@/lib/ai/caption";
 import { fail, requireOwner, type ActionResult } from "./result";
+import { fontsOf, sameFonts, validateFonts, type PostFonts } from "@/lib/fonts/post-fonts";
+
+const NEEDS_003 = "Changing a post's fonts needs a database update first: run supabase/migrations/003_post_fonts.sql in Supabase. Nothing was re-stamped.";
+const missingColumn = (e: { message: string; code?: string }) => e.code === "PGRST204" || /schema cache/i.test(e.message);
 
 export async function createPostAction(input: {
   gender: Gender; style: NameStyle; count: number | null; postDate: string; themeId?: string; requestId: string;
+  /** Chosen on Today; stored on the post (migration 003; an older create_post ignores them). */
+  fonts?: PostFonts;
 }): Promise<ActionResult<{ postId: string }>> {
   await requireOwner();
-  const badInput = validateCreatePost(input);
+  const badInput = validateCreatePost(input) ?? (input.fonts !== undefined ? validateFonts(input.fonts) : null);
   if (badInput) return fail(badInput);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(input.postDate)) return fail("Pick a valid date.");
+  const fonts = input.fonts ? fontsOf(input.fonts) : null;
   const sb = await createClient();
   // The AI caption needs the theme the planner picks, so it runs right after the (parallel)
   // reads and before create_post. It never throws, and ONE deadline (CAPTION_TIMEOUT_MS) covers
@@ -53,11 +60,19 @@ export async function createPostAction(input: {
     const caption = composeCaption(line, input.gender, s).caption;
     const { data, error } = await sb.rpc("create_post", { p: {
       request_id: input.requestId, post_date: input.postDate, gender: input.gender, style: input.style,
-      theme_id: plan.theme_id, caption, cards: plan.cards,
+      theme_id: plan.theme_id, caption, cards: plan.cards, ...fonts,
     } });
     if (error) return fail(`Could not create the post: ${error.message}`);
     const r = data as { status: string; post_id?: string; reason?: string };
-    if (r.status === "ok" && r.post_id) { revalidatePath("/", "layout"); return { ok: true, postId: r.post_id }; }
+    if (r.status === "ok" && r.post_id) {
+      // Remember the fonts as the "last used" ones (Today's defaults, theme previews). Best effort.
+      if (fonts && !sameFonts(fonts, fontsOf(s))) {
+        const { error: saveErr } = await sb.from("settings").update(fonts).eq("id", 1);
+        if (saveErr) console.error("createPostAction: could not save the last-used fonts", saveErr.message);
+      }
+      revalidatePath("/", "layout");
+      return { ok: true, postId: r.post_id };
+    }
     if (r.status !== "conflict") return fail(r.reason ?? "Could not create the post.");
   }
   return fail("Those names or that theme were just used by another post. Try again.");
@@ -133,10 +148,20 @@ export async function deletePostAction(postId: string): Promise<ActionResult> {
  * wait in line while the PC is off). Each card update is version-guarded and only takes a
  * card that is still done/failed, so a card that changed meanwhile is simply skipped.
  */
-export async function restampPostAction(postId: string): Promise<ActionResult<{ restamped: number; noPhoto: number; skipped: number; ids: string[] }>> {
+export async function restampPostAction(postId: string, fonts?: PostFonts): Promise<ActionResult<{ restamped: number; noPhoto: number; skipped: number; ids: string[] }>> {
   await requireOwner();
   if (!UUID_RE.test(postId ?? "")) return fail("Post not found.");
+  if (fonts !== undefined) {
+    const bad = validateFonts(fonts);
+    if (bad) return fail(bad);
+  }
   const sb = await createClient();
+  if (fonts) {
+    // The post's own fonts first, so the PC stamps with them (claim_next_card returns them).
+    const { data: saved, error: fontErr } = await sb.from("posts").update(fontsOf(fonts)).eq("id", postId).select("id");
+    if (fontErr) return fail(missingColumn(fontErr) ? NEEDS_003 : fontErr.message);
+    if (!saved?.length) return fail("Post not found.");
+  }
   const { data, error } = await sb.from("cards").select("id, status, photo_path, version").eq("post_id", postId);
   if (error) return fail(error.message);
   const { restamp, noPhoto } = restampSelection((data ?? []) as Pick<CardRow, "id" | "status" | "photo_path" | "version">[]);

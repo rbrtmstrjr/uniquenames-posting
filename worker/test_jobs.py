@@ -173,6 +173,38 @@ class JobsTest(unittest.TestCase):
         want = render.TextStyle("playfair", "lora", "poppins", 120, 40, 24, "bottom-right")
         self.assertEqual(self.r.styles, [want, want])
 
+    def test_post_fonts_from_the_job_win_over_the_settings_fonts(self):
+        # Migration 003: claim_next_card returns the post's fonts; null keys keep the settings font.
+        self.supa.settings = [{"handle": "@unique_names", "width": 1080, "height": 1080, "title_font": "playfair",
+                               "meaning_font": "lora", "mark_font": "montserrat", "title_size": 120, "meaning_size": 40,
+                               "mark_size": 24, "text_position": "top-left"}]
+        b = io.BytesIO()
+        Image.new("RGB", (1080, 1080), (10, 10, 10)).save(b, "JPEG")
+        self.supa.uploads["photos/c1/v1.jpg"] = b.getvalue()
+        fonts = {"title_font": "quicksand", "meaning_font": None, "mark_font": "poppins"}
+        self.supa.jobs.append(dict(job(), fonts=fonts))
+        self.supa.jobs.append(dict(job("restamp", version=2, photo_path="photos/c1/v1.jpg", card_path="cards/c1/v1.jpg"), fonts=fonts))
+        self.run_.tick()
+        self.run_.tick()
+        want = render.TextStyle("quicksand", "lora", "poppins", 120, 40, 24, "top-left")
+        self.assertEqual(self.r.styles, [want, want])
+
+    def test_null_or_missing_job_fonts_use_the_settings_fonts(self):
+        self.supa.settings = [{"handle": "@unique_names", "width": 1080, "height": 1080, "title_font": "playfair",
+                               "meaning_font": "lora", "mark_font": "montserrat"}]
+        self.supa.jobs.append(dict(job(), fonts=None))  # a preview card / post made before 003
+        self.supa.jobs.append(dict(job(), fonts={"title_font": None, "meaning_font": "", "mark_font": None}))
+        self.supa.jobs.append(job())  # DB without 003: no "fonts" key at all
+        for _ in range(3):
+            self.run_.tick()
+        want = render.TextStyle("playfair", "lora", "montserrat", 95, 37, 21, "auto")
+        self.assertEqual(self.r.styles, [want, want, want])
+
+    def test_unknown_job_font_falls_back_to_poppins(self):
+        self.supa.jobs.append(dict(job(), fonts={"title_font": "nope"}))
+        self.run_.tick()
+        self.assertEqual(self.r.styles[0].title_font, "poppins")
+
     def test_restamp_without_photo_falls_back_to_generate(self):
         self.supa.jobs.append(job("restamp", version=2, card_path="cards/c1/v1.jpg"))
         self.run_.tick()

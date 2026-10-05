@@ -82,6 +82,43 @@ describe("NewPostPanel (shadcn controls)", () => {
     expect(note.closest("[title]")).toBeNull(); // shown, not a tooltip
   });
 
+  it("Fonts row: closed, shows the last-used fonts each in its own face; opens three Selects", () => {
+    render(<NewPostPanel settings={{ ...settings, title_font: "quicksand", meaning_font: "comfortaa", mark_font: "nope" }} themes={[theme("a", "Autumn Harvest")]} stock={stock(50)} busy={false} />);
+    const trigger = screen.getByRole("button", { name: /Fonts/ });
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    expect(trigger.textContent).toContain("Quicksand · Comfortaa · Poppins"); // unknown id → Poppins
+    expect(within(trigger).getByText("Quicksand").getAttribute("style")).toMatch(/font-family: "Quicksand"/);
+    expect(screen.queryByRole("combobox", { name: "Name font" })).toBeNull();
+    fireEvent.click(trigger);
+    const name = screen.getByRole("combobox", { name: "Name font" });
+    expect(name.textContent).toContain("Quicksand");
+    expect(screen.getByRole("combobox", { name: "Meaning font" }).textContent).toContain("Comfortaa");
+    expect(screen.getByRole("combobox", { name: "Watermark font" }).textContent).toContain("Poppins");
+    expect(screen.getByLabelText("Font sample").textContent).toContain("ARLO ZENITH");
+    fireEvent.keyDown(name, { key: "ArrowDown" });
+    const options = within(screen.getByRole("listbox")).getAllByRole("option");
+    expect(options).toHaveLength(15);
+    const vibes = options.find((o) => o.textContent === "Great Vibes")!;
+    expect(vibes.getAttribute("style")).toMatch(/font-family: "Great Vibes", cursive/);
+    expect(vibes.getAttribute("style")).toMatch(/font-weight: 400/); // single-weight: no faux bold
+    expect(document.querySelector("link[href*='fonts.googleapis.com/css2']")?.getAttribute("href")).toMatch(/display=swap/);
+  });
+
+  it("picking a font updates the row and the sample, and Generate sends the fonts", async () => {
+    const { callAction } = await import("@/lib/actions/call");
+    const { createPostAction } = await import("@/lib/actions/posts");
+    vi.mocked(callAction).mockImplementationOnce(async (fn) => { await fn(); return { ok: true }; });
+    render(<NewPostPanel settings={settings} themes={[theme("a", "Autumn Harvest")]} stock={stock(50)} busy={false} />);
+    fireEvent.click(screen.getByRole("button", { name: /Fonts/ }));
+    fireEvent.keyDown(screen.getByRole("combobox", { name: "Name font" }), { key: "ArrowDown" });
+    fireEvent.keyDown(within(screen.getByRole("listbox")).getByRole("option", { name: "Great Vibes" }), { key: "Enter" });
+    expect(screen.getByRole("button", { name: /Fonts/ }).textContent).toContain("Great Vibes · Poppins · Poppins");
+    expect(screen.getByLabelText("Font sample").textContent).toContain("Arlo Zenith"); // script font: Title Case
+    fireEvent.click(generateButton());
+    await vi.waitFor(() => expect(vi.mocked(createPostAction)).toHaveBeenCalled());
+    expect(vi.mocked(createPostAction).mock.calls.at(-1)![0]).toMatchObject({ fonts: { title_font: "greatvibes", meaning_font: "poppins", mark_font: "poppins" } });
+  });
+
   it("the G hotkey does not generate while locked", async () => {
     const { callAction } = await import("@/lib/actions/call");
     vi.mocked(callAction).mockClear();
