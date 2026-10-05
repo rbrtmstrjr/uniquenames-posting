@@ -23,6 +23,14 @@ NO_NET_SETTINGS = "Couldn't reach the internet to load your settings. Press Retr
 STALE = "stale result dropped (card changed while it was being made)"
 
 
+REELS_RECHECK_SECONDS = 600
+
+
+def is_missing_function(e):
+    """PostgREST's answer when an RPC does not exist (yet): HTTP 404 / PGRST202."""
+    return "PGRST202" in str(e) or re.search(r"HTTP 404", str(e)) is not None
+
+
 class PhotoMissing(Exception):
     """The clean photo is not in storage any more."""
 
@@ -93,7 +101,8 @@ def with_post_fonts(settings, fonts):
 
 
 class Runner:
-    def __init__(self, supa, renderer, output_root, cache_dir, poll_seconds=3.0, heartbeat_seconds=15.0, log=print):
+    def __init__(self, supa, renderer, output_root, cache_dir, poll_seconds=3.0, heartbeat_seconds=15.0, log=print,
+                 reels=None):
         self.supa = supa
         self.renderer = renderer
         self.output_root = output_root
@@ -103,6 +112,9 @@ class Runner:
         self.log = log
         self.current = None
         self.stop_event = threading.Event()
+        self.reels = reels             # reels.ReelRunner, or None (cards only)
+        self.reels_off_until = 0.0     # the reel functions are missing (migration 005 not run): re-check later
+        self.reels_missing_logged = False
 
     # ------------------------------------------------------------ heartbeat
     def heartbeat_once(self):
@@ -128,7 +140,8 @@ class Runner:
         comfy_ok = bool(self.renderer.health()["ok"])
         job = self.supa.rpc("claim_next_card", None if comfy_ok else {"p_restamp_only": True})
         if not job:
-            return False
+            # Cards always go first: a reel step only when there is no card to make.
+            return self._reel_tick() if (self.reels and comfy_ok) else False
         card = job["card"]
         self.current = card["id"]
         self.log("%s: %s (%s)" % (job["job"], card["name"], card["id"]))
@@ -150,6 +163,29 @@ class Runner:
             self._fail(card, e)
         finally:
             self.current = None
+        return True
+
+    def _reel_tick(self):
+        if time.time() < self.reels_off_until:
+            return False
+        try:
+            self.supa.rpc("requeue_stuck_reels")
+            step = self.supa.rpc("claim_next_reel_step")
+        except SupaError as e:
+            if not is_missing_function(e):
+                raise
+            if not self.reels_missing_logged:
+                self.log("reels are off until supabase/migrations/005_reels.sql is run (%s)" % str(e)[:120])
+                self.reels_missing_logged = True
+            self.reels_off_until = time.time() + REELS_RECHECK_SECONDS
+            return False
+        if not step:
+            return False
+        reel = step.get("reel") or {}
+        scene = step.get("scene") or {}
+        self.log("reel %s: %s%s (%s)" % (step.get("step"), reel.get("title"),
+                                         " image %s" % scene.get("position") if scene else "", reel.get("id")))
+        self.reels.run_step(step)
         return True
 
     def _settings(self):
