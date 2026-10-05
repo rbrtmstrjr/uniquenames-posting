@@ -1,3 +1,5 @@
+import Link from "next/link";
+import { ChevronRight, Palette } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import type { SettingsRow } from "@/lib/db/types";
 import { SettingsForm } from "@/components/settings/settings-form";
@@ -25,6 +27,14 @@ export default async function SettingsPage() {
   return (
     <>
       <PageHeader title="Settings" />
+      {/* Phones: Themes isn't on the bottom bar, so "More" (this page) leads to it. */}
+      <nav aria-label="More pages" className="mb-4 md:hidden">
+        <Link href="/themes" className="flex min-h-12 items-center gap-3 rounded-2xl border border-line bg-surface px-4 font-semibold text-ink shadow-soft transition active:scale-[.99]">
+          <span className="grid size-8 place-items-center rounded-lg bg-accent-soft text-accent"><Palette className="size-4" aria-hidden /></span>
+          Themes
+          <ChevronRight className="ml-auto size-4 text-muted" aria-hidden />
+        </Link>
+      </nav>
       <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
         <SettingsForm initial={data as SettingsRow} sample={sample} />
         <div className="lg:sticky lg:top-20 lg:self-start"><WorkerCard /></div>

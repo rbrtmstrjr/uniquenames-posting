@@ -8,7 +8,7 @@ vi.mock("next/link", () => ({
   default: ({ href, children, onClick, ...rest }: { href: string; children: React.ReactNode; onClick?: (e: React.MouseEvent) => void }) =>
     <a href={href} onClick={(e) => { e.preventDefault(); onClick?.(e); }} {...rest}>{children}</a>,
 }));
-const { SideNav } = await import("@/components/shell/nav");
+const { BottomTabs, SideNav } = await import("@/components/shell/nav");
 
 afterEach(() => { cleanup(); pathname = "/posts"; });
 
@@ -29,5 +29,15 @@ describe("nav instant feedback", () => {
     render(<SideNav />);
     fireEvent.click(screen.getByRole("link", { name: /Themes/ }), { ctrlKey: true });
     expect(current()).toEqual(["Posts"]);
+  });
+
+  it("sidebar lists every page incl. Reels; the phone bar keeps 5 tabs with Reels, Themes under More", () => {
+    render(<SideNav />);
+    expect(screen.getAllByRole("link").map((a) => a.textContent?.trim())).toEqual(["Today", "Posts", "Reels", "Names", "Themes", "Settings"]);
+    cleanup();
+    pathname = "/themes";
+    render(<BottomTabs />);
+    expect(screen.getAllByRole("link").map((a) => a.textContent?.trim())).toEqual(["Today", "Posts", "Reels", "Names", "More"]);
+    expect(current()).toEqual(["More"]);
   });
 });
