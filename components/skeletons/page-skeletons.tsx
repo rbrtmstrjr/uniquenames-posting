@@ -72,14 +72,15 @@ export function TodaySkeleton() {
         </PanelSkeleton>
         <PanelSkeleton>
           <div className="@container">
-            <div className="grid gap-3 @lg:grid-cols-[3fr_2fr] @lg:gap-5">
-              <div className="grid grid-cols-[4.75rem_1fr_1fr] gap-1">
-                <span /><Skeleton className="mx-2 h-3 w-8 rounded-md" /><Skeleton className="mx-2 h-3 w-8 rounded-md" />
-                {range(2).map((r) => [<Skeleton key={`l${r}`} className="my-auto h-4 w-16 rounded-md" />, <Skeleton key={`a${r}`} className="h-11" />, <Skeleton key={`b${r}`} className="h-11" />])}
+            {/* Stock: four name tiles, then two theme tiles (one row when wide). */}
+            <div className="grid gap-4 @3xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)] @3xl:gap-6">
+              <div className="space-y-2">
+                <Skeleton className="h-3 w-12 rounded-md" />
+                <div className="grid grid-cols-2 gap-2 @xl:grid-cols-4">{range(4).map((i) => <Skeleton key={i} className="h-[5.25rem]" />)}</div>
               </div>
-              <div className="space-y-1">
-                <Skeleton className="h-3 w-20 rounded-md" />
-                <div className="grid grid-cols-2 gap-1 @lg:grid-cols-1"><Skeleton className="h-11" /><Skeleton className="h-11" /></div>
+              <div className="space-y-2">
+                <Skeleton className="h-3 w-14 rounded-md" />
+                <div className="grid grid-cols-2 gap-2">{range(2).map((i) => <Skeleton key={i} className="h-[5.25rem]" />)}</div>
               </div>
             </div>
           </div>
