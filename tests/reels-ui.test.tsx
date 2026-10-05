@@ -133,6 +133,12 @@ describe("ScriptReview", () => {
     expect(screen.getAllByText(/Line 1 is longer than 14 words/).length).toBeGreaterThan(0);
   });
 
+  it("a script with no lines: Approve is disabled and says to tap New script", () => {
+    render(<ScriptReview reel={reel()} scenes={[]} />);
+    expect(btn(/Approve and make reel/).disabled).toBe(true);
+    expect(screen.getByText("This script has no lines. Tap New script.")).toBeTruthy();
+  });
+
   it("shows the totals: words and estimated duration", () => {
     render(<ScriptReview reel={reel()} scenes={scenes(2)} />); // 7 words each
     expect(screen.getByTestId("script-totals").textContent).toMatch(/14\s*words/);

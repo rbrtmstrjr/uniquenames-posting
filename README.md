@@ -23,6 +23,14 @@ ordered and saved to the phone with the caption.
 - **Deeper lens look**: portrait 85mm f/1.8 for baby frames, macro 100mm f/2.8, shallow depth of field on wide shots.
 - New server-only secret `GEMINI_API_KEY` (see `docs/SETUP.md`). Existing install: follow "Upgrading to v2" there.
 
+## Reels (2026-10-05)
+- **Reels** page: Gemini 3.1 Pro writes a 90–120 s knitted-doll reel script (title, cast, one narration line + picture idea per image); the owner edits and approves it.
+- The PC then makes it for free, one step at a time between cards (cards always go first): **voice** (Chatterbox in ComfyUI) → **word timing** (faster-whisper) → **images** (Z-Image, 1080×1920) → **video** (ffmpeg: gentle zoom, voice, word-by-word captions at the bottom).
+- Live progress; tap an image for **New picture**, **Skip image** after 3 failures, **Try again**, **Make video again**.
+- Full video → `OneDrive\Pictures\Unique Names\Reels\<date> <title>.mp4` on the PC; a 720p preview in the private `reels` bucket (removed after 14 days).
+- **Settings > Reels > Images per reel** (10–40, default 40).
+- Needs migration `005_reels.sql` and the PC steps in `docs/SETUP.md` ("Adding Reels").
+
 Setup: `docs/SETUP.md`. Design: `docs/superpowers/specs/2026-10-04-uniquenames-posting-design.md`, v2 changes: `docs/superpowers/specs/2026-10-05-v2-feedback-design.md`.
 
 ## Commands

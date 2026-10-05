@@ -2,7 +2,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { TEXT_SETTINGS_DEFAULTS } from "@/lib/db/types";
-import { TEXT_SETTING_KEYS, validateSettings, type SettingsInput } from "./validate";
+import { REEL_IMAGES_DEFAULT, TEXT_SETTING_KEYS, validateSettings, type SettingsInput } from "./validate";
 import { fail, requireOwner, type ActionResult } from "./result";
 import { FONT_KEYS } from "@/lib/fonts/post-fonts";
 
@@ -24,22 +24,30 @@ export async function saveSettingsAction(s: SettingsInput): Promise<ActionResult
   // Fonts are chosen per post on Today, which saves them here as the "last used" fonts: a
   // Settings save never writes them (a stale Settings tab would undo Today's choice).
   const text = Object.fromEntries(SAVED_TEXT_KEYS.map((k) => [k, s[k]]));
-  const { error } = await sb.from("settings").update({ ...base, ...text, caption_ai: s.caption_ai !== false }).eq("id", 1);
-  if (error) {
-    // Before migration 002 these columns do not exist: save everything else so the owner's
-    // other changes are not lost, and say what did not stick (the defaults stay in use).
-    const named = V2_COLUMNS.some((c) => error.message.includes(c));
-    const missingColumn = named && (error.code === "PGRST204" || /schema cache/i.test(error.message));
-    if (!missingColumn) return fail(error.message);
-    const { error: again } = await sb.from("settings").update(base).eq("id", 1);
-    if (again) return fail(again.message);
-    revalidatePath("/", "layout");
+  const v2: Record<string, unknown> = { ...text, caption_ai: s.caption_ai !== false };
+  // Images per reel (migration 005) is only sent when the form has it.
+  const reel: Record<string, unknown> = s.reel_max_images === undefined ? {} : { reel_max_images: s.reel_max_images };
+  let v2Missing = false, reelMissing = false;
+  for (;;) {
+    const { error } = await sb.from("settings").update({ ...base, ...(v2Missing ? {} : v2), ...(reelMissing ? {} : reel) }).eq("id", 1);
+    if (!error) break;
+    // A database without the 002 / 005 columns refuses an update naming them: drop that group
+    // and save everything else so the owner's other changes are not lost, then say what did not stick.
+    const missing = error.code === "PGRST204" || /schema cache/i.test(error.message);
+    if (missing && !reelMissing && "reel_max_images" in reel && error.message.includes("reel_max_images")) { reelMissing = true; continue; }
+    if (missing && !v2Missing && V2_COLUMNS.some((c) => error.message.includes(c))) { v2Missing = true; continue; }
+    return fail(error.message);
+  }
+  revalidatePath("/", "layout");
+  const notes: string[] = [];
+  if (v2Missing) {
     const lost = [
       s.caption_ai === false && "\"Write captions with AI\"",
       SAVED_TEXT_KEYS.some((k) => s[k] !== TEXT_SETTINGS_DEFAULTS[k]) && "the card text settings",
     ].filter(Boolean);
-    return lost.length ? fail(NEEDS_MIGRATION(lost.join(" and "))) : { ok: true };
+    if (lost.length) notes.push(NEEDS_MIGRATION(lost.join(" and ")));
   }
-  revalidatePath("/", "layout");
-  return { ok: true };
+  if (reelMissing && s.reel_max_images !== REEL_IMAGES_DEFAULT)
+    notes.push(`Saved, except images per reel: the database needs the Reels update first (run supabase/migrations/005_reels.sql). ${REEL_IMAGES_DEFAULT} stays in use until then.`);
+  return notes.length ? fail(notes.join(" ")) : { ok: true };
 }

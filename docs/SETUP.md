@@ -55,6 +55,17 @@ Do these in order:
 5. Fonts per post: in the SQL Editor run `supabase/migrations/003_post_fonts.sql` (safe to run again), then restart the worker once more. Until then posts use the last-used fonts from settings, and changing a post's fonts in Re-stamp asks you to run it.
 6. Child age per post: in the SQL Editor run `supabase/migrations/004_subject_age.sql` (safe to run again; no worker restart needed). Until then Today's age choice still shapes the photos (it is baked into each card's prompt), but it is not saved on the post, so **Add a card** on such a post shows the original one-baby look instead of following the post's age.
 
+## Adding Reels (existing install)
+Do these in order (this order never leaves a reel failed):
+1. Supabase **SQL Editor**: paste and run `supabase/migrations/005_reels.sql` (safe to run again).
+2. In the worker's Python: `python -m pip install faster-whisper imageio-ffmpeg` (already done on this PC). The Whisper model (~460 MB) downloads on the first reel.
+3. Install the Chatterbox voice node in ComfyUI Desktop as in `docs/reference/reel-pc-spike.md` (section 2: clone `ComfyUI_Fill-ChatterBox` into `custom_nodes`, pip-install its requirements with ComfyUI's own Python), then **restart ComfyUI Desktop** so it loads the node.
+4. Restart the worker: Task Scheduler, **End** then **Run** "Unique Names card worker". `worker/worker.log` must not say "reels are off".
+5. Push to GitHub so Vercel redeploys the website with the Reels page.
+
+Optional: **Settings > Reels > Images per reel** (10–40, default 40); fewer images make a reel faster.
+Full videos land in `OneDrive\Pictures\Unique Names\Reels\`.
+
 ## When something is wrong
 - Header dot red, "PC offline": turn on the PC. The worker starts at login. **Generate** is disabled (the button says why) until the PC is back.
 - Amber dot, "ComfyUI closed": open ComfyUI Desktop. **Generate** stays disabled until then; text edits and Re-stamp still work.

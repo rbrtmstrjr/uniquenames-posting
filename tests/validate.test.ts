@@ -20,6 +20,11 @@ describe("validate", () => {
     expect(validateSettings({ ...s, min_images: 14 })).toMatch(/min/i);
     expect(validateSettings({ ...s, handle: "" })).toMatch(/handle/i);
     expect(validateSettings({ ...s, title_size: 500 })).toMatch(/Name size/);
+    expect(validateSettings({ ...s, reel_max_images: 10 })).toBeNull();
+    expect(validateSettings({ ...s, reel_max_images: 40 })).toBeNull();
+    expect(validateSettings({ ...s, reel_max_images: 9 })).toBe("Images per reel must be 10 to 40.");
+    expect(validateSettings({ ...s, reel_max_images: 41 })).toMatch(/Images per reel/);
+    expect(validateSettings({ ...s, reel_max_images: 12.5 })).toMatch(/Images per reel/);
   });
   it("card text settings", () => {
     const t = { ...TEXT_SETTINGS_DEFAULTS, title_font: "playfair", meaning_font: "lora", mark_font: "greatvibes", text_position: "bottom-right" as const };

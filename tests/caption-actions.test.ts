@@ -231,4 +231,47 @@ describe("saveSettingsAction caption_ai", () => {
     expect(await saveSettingsAction(input)).toMatchObject({ ok: false, error: expect.stringMatching(/not-null/) });
     expect(settingsUpdates()).toHaveLength(1);
   });
+
+  it("saves images per reel with the rest", async () => {
+    expect(await saveSettingsAction({ ...input, reel_max_images: 12 })).toEqual({ ok: true });
+    expect(settingsUpdates()).toHaveLength(1);
+    expect(settingsUpdates()[0]).toMatchObject({ reel_max_images: 12, caption_ai: false });
+  });
+
+  it("rejects images per reel out of 10..40 before writing", async () => {
+    expect(await saveSettingsAction({ ...input, reel_max_images: 50 })).toMatchObject({ ok: false, error: expect.stringMatching(/Images per reel/) });
+    expect(settingsUpdates()).toHaveLength(0);
+  });
+
+  it("before migration 005: saves the rest (incl. v2 fields) without reel_max_images and says to run 005 when changed", async () => {
+    const inner = respond;
+    respond = (q) => {
+      if (q.table === "settings" && isUpdate(q) && "reel_max_images" in (op(q, "update")![1] as object))
+        return { error: { message: "Could not find the 'reel_max_images' column of 'settings' in the schema cache", code: "PGRST204" } };
+      return inner(q);
+    };
+    const r = await saveSettingsAction({ ...input, reel_max_images: 20 });
+    expect(r).toMatchObject({ ok: false, error: expect.stringMatching(/images per reel.*005_reels\.sql/) });
+    expect(settingsUpdates()).toHaveLength(2);
+    expect(settingsUpdates()[1]).not.toHaveProperty("reel_max_images");
+    expect(settingsUpdates()[1]).toMatchObject({ caption_ai: false, title_size: input.title_size });
+    // Untouched (default 40): a quiet success.
+    expect(await saveSettingsAction({ ...input, reel_max_images: 40 })).toEqual({ ok: true });
+  });
+
+  it("before 002 and 005: drops both groups one at a time and still saves the base fields", async () => {
+    const inner = respond;
+    respond = (q) => {
+      if (q.table === "settings" && isUpdate(q)) {
+        const body = op(q, "update")![1] as Record<string, unknown>;
+        if ("reel_max_images" in body) return { error: { message: "Could not find the 'reel_max_images' column of 'settings' in the schema cache", code: "PGRST204" } };
+        if ("caption_ai" in body) return { error: { message: "Could not find the 'caption_ai' column of 'settings' in the schema cache", code: "PGRST204" } };
+      }
+      return inner(q);
+    };
+    const r = await saveSettingsAction({ ...input, reel_max_images: 20 });
+    expect(r).toMatchObject({ ok: false, error: expect.stringMatching(/002_v2\.sql.*005_reels\.sql/s) });
+    expect(settingsUpdates()).toHaveLength(3);
+    expect(Object.keys(settingsUpdates()[2]).sort()).toEqual(["caption_template", "handle", "hashtags", "max_images", "min_images", "sound_on"]);
+  });
 });

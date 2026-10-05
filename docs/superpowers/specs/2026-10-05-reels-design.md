@@ -51,10 +51,10 @@ Ports the n8n workflow **Reel · Heart-Tug (Knitted Doll)** (`5RCvIIU6RKC0H8lW`)
 
 One job loop shared with cards. Reel steps, in order, each resumable:
 
-1. **voice**: Chatterbox via the ComfyUI API (custom node installed in ComfyUI Desktop) reads the full narration → WAV → uploaded to `reels/<id>/voice.wav`.
+1. **voice**: Chatterbox via the ComfyUI API (custom node installed in ComfyUI Desktop) reads the full narration → WAV → uploaded to `reels/<id>/voice-v<reel version>.wav`.
 2. **timing**: faster-whisper (`small.en`, CPU int8) on the WAV → word list with times → `reels.words`; map words back to each line → `reel_scenes.start_s/end_s`.
-3. **images**: each scene: Z-Image (existing `comfy_graph`, 1088×1920) → fit to 1080×1920 → `reels/<id>/scenes/<pos>.jpg`; up to 3 attempts, then `needs_attention`.
-4. **render**: ffmpeg (from `imageio-ffmpeg`) — per-scene zoompan for its `end_s - start_s`, concat, voice track, ASS captions (word-by-word yellow active word, white + black outline, upper-middle safe area), H.264 1080×1920 → PC folder; then a 720p preview (CRF tuned to stay ≤ 15 MB) → `reels/<id>/preview.mp4`; `ready`.
+3. **images**: each scene: Z-Image (existing `comfy_graph`, 1088×1920) → fit to 1080×1920 → `reels/<id>/scenes/<pos>-v<scene version>.jpg`; up to 3 attempts, then `needs_attention`.
+4. **render**: ffmpeg (from `imageio-ffmpeg`) — per-scene zoompan for its `end_s - start_s`, concat, voice track, ASS captions (word-by-word yellow active word, white + black outline, bottom safe area), H.264 1080×1920 → PC folder; then a 720p preview (CRF tuned to stay ≤ 15 MB) → `reels/<id>/preview-v<reel version>.mp4`; `ready`.
 
 PC switched off mid-reel: finished steps stay done; `requeue_stuck_reels` releases claims older than 10 minutes and the worker resumes at the first unfinished step.
 

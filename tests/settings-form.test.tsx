@@ -107,4 +107,20 @@ describe("SettingsForm (shadcn controls)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
     expect(callAction).toHaveBeenCalledTimes(1);
   });
+
+  it("Reels: 'Images per reel' slider 10–40 with a value label; it is sent on Save", async () => {
+    render(<SettingsForm initial={{ ...initial, reel_max_images: 10 }} />);
+    const sl = screen.getByRole("slider", { name: "Images per reel" });
+    expect([sl.getAttribute("aria-valuemin"), sl.getAttribute("aria-valuemax"), sl.getAttribute("aria-valuenow")]).toEqual(["10", "40", "10"]);
+    fireEvent.keyDown(sl, { key: "ArrowRight" });
+    expect(sl.getAttribute("aria-valuenow")).toBe("11");
+    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+    expect(await captured()).toMatchObject({ reel_max_images: 11 });
+  });
+
+  it("Reels: before migration 005 (no column) the slider shows 40 and says to run 005", () => {
+    render(<SettingsForm initial={initial} />);
+    expect(screen.getByRole("slider", { name: "Images per reel" }).getAttribute("aria-valuenow")).toBe("40");
+    expect(screen.getByText(/005_reels\.sql/)).toBeTruthy();
+  });
 });

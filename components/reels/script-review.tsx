@@ -31,10 +31,13 @@ function Elapsed({ since }: { since: number }) {
   return <span className="tabular-nums">{clock((now - since) / 1000)}</span>;
 }
 
+const NO_LINES = "This script has no lines. Tap New script.";
+
 /** The first thing that would make Save fail, worded like the server ("Line N …"). */
 function firstProblem(title: string, lines: (Text & { position: number })[]): string | null {
   if (!oneLine(title)) return "Give the reel a title.";
   if (oneLine(title).length > TITLE_MAX) return `Keep the title under ${TITLE_MAX} characters.`;
+  if (!lines.length) return NO_LINES;
   for (const l of lines) {
     const at = `Line ${l.position}`;
     if (!oneLine(l.narration)) return `${at} has no words.`;

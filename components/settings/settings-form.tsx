@@ -16,7 +16,7 @@ import { callAction } from "@/lib/actions/call";
 import { validateSettings } from "@/lib/actions/validate";
 import { buildCaption } from "@/lib/planner";
 import { createClient } from "@/lib/supabase/client";
-import { TEXT_SETTING_KEYS, type TextSettings } from "@/lib/actions/validate";
+import { REEL_IMAGES_DEFAULT, REEL_IMAGES_MAX, REEL_IMAGES_MIN, TEXT_SETTING_KEYS, type TextSettings } from "@/lib/actions/validate";
 import { CardTextSettings, type PreviewSample } from "./card-text";
 
 // Card counts are picked on sliders, so a value is always a whole number in range;
@@ -34,7 +34,9 @@ export function SettingsForm({ initial, sample = DEFAULT_SAMPLE }: { initial: Se
   const router = useRouter();
   const [s, setS] = useState({ caption_template: initial.caption_template, hashtags: initial.hashtags, handle: initial.handle, min_images: initial.min_images, max_images: initial.max_images, sound_on: initial.sound_on,
     // undefined until migration 002 runs: the column default (on) is what the app uses then.
-    caption_ai: initial.caption_ai ?? TEXT_SETTINGS_DEFAULTS.caption_ai, ...textOf(initial) });
+    caption_ai: initial.caption_ai ?? TEXT_SETTINGS_DEFAULTS.caption_ai, ...textOf(initial),
+    // undefined until migration 005 runs: the column default (40) is what the app uses then.
+    reel_max_images: initial.reel_max_images ?? REEL_IMAGES_DEFAULT });
   const [busy, setBusy] = useState(false);
   const problem = validateSettings(s);
 
@@ -85,6 +87,14 @@ export function SettingsForm({ initial, sample = DEFAULT_SAMPLE }: { initial: Se
         </div>
         <p className="mt-2 text-xs text-muted">The handle change applies to cards made from now on.</p>
       </Panel>
+      <Panel title="Reels">
+        <div className="max-w-sm">
+          <CountSlider label="Images per reel" min={REEL_IMAGES_MIN} max={REEL_IMAGES_MAX} value={s.reel_max_images} onChange={(v) => setS({ ...s, reel_max_images: v })} />
+        </div>
+        <p className="mt-2 text-xs text-muted">{initial.reel_max_images === undefined
+          ? "Reels need the database update first (run supabase/migrations/005_reels.sql); until then 40 is used."
+          : "The most pictures a new script can have. Fewer images make a reel faster on your PC."}</p>
+      </Panel>
       <Panel title="Card text">
         <CardTextSettings value={textOf(s)} onChange={(t) => setS({ ...s, ...t })} sample={sample}
           aspect={initial.height / initial.width || 1} handle={s.handle.trim() || "@unique_names"} />
@@ -107,14 +117,14 @@ export function SettingsForm({ initial, sample = DEFAULT_SAMPLE }: { initial: Se
   );
 }
 
-function CountSlider({ label, value, onChange }: { label: string; value: number; onChange: (v: number) => void }) {
+function CountSlider({ label, value, onChange, min = COUNT_MIN, max = COUNT_MAX }: { label: string; value: number; onChange: (v: number) => void; min?: number; max?: number }) {
   return (
     <div>
       <div className="flex items-baseline justify-between gap-2">
         <span className="text-xs font-semibold text-muted">{label}</span>
         <span className="text-sm font-bold tabular-nums text-ink" aria-hidden>{value}</span>
       </div>
-      <Slider aria-label={label} min={COUNT_MIN} max={COUNT_MAX} step={1} value={[value]} onValueChange={([v]) => onChange(v)} className="mt-1" />
+      <Slider aria-label={label} min={min} max={max} step={1} value={[value]} onValueChange={([v]) => onChange(v)} className="mt-1" />
     </div>
   );
 }

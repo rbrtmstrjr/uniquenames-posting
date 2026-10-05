@@ -123,7 +123,7 @@ class ReelRunner:
             data = self._retry(lambda: self.supa.download(BUCKET, path))
         except SupaError as e:
             if is_http_4xx(e):
-                raise JobError("Your voice clip is missing from storage. Choose it again in Settings.")
+                raise JobError("Your voice clip is missing from storage. Clear settings.reel_voice_path in Supabase to use the built-in voice.")
             raise JobError(NO_NET)
         return voice.upload_input(self.renderer.comfy, "reel-voice" + (os.path.splitext(path)[1] or ".wav"), data)
 

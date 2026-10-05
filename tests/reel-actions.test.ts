@@ -43,6 +43,8 @@ interface World {
   maxImages?: number; reelUpdated?: boolean; sceneUpdated?: boolean; deleted?: boolean;
   listError?: { message: string; code?: string }; sceneInsertError?: { message: string };
   files?: Record<string, { name: string; id: string | null }[]>;
+  /** A scene whose guarded update matches nothing (changed in another tab). */
+  sceneMisses?: string; stillPending?: { id: string }[];
 }
 let w: World = {};
 function world(o: World = {}) {
@@ -63,8 +65,9 @@ function world(o: World = {}) {
     }
     if (q.table === "reel_scenes") {
       if (has("insert")) return w.sceneInsertError ? { error: w.sceneInsertError } : { data: null };
-      if (has("update")) return { data: w.sceneUpdated ? [{ id: "x" }] : [] };
+      if (has("update")) return { data: w.sceneUpdated && eqv("id") !== w.sceneMisses ? [{ id: "x" }] : [] };
       if (has("delete")) return { data: null };
+      if (eqv("status") === "pending") return { data: w.stillPending ?? [] };
       if (eqv("id")) return { data: w.scenes!.find((s) => s.id === eqv("id")) ?? null };
       return { data: w.scenes };
     }
@@ -341,6 +344,31 @@ describe("approveReelAction", () => {
       expect(s.ops).toContainEqual(["eq", "version", 3]);
       expect(s.ops).toContainEqual(["eq", "status", "queued"]);
     });
+  });
+
+  it("refuses a reel with no lines, without writing", async () => {
+    world({ scenes: [] });
+    expect(await A.approveReelAction(REEL)).toEqual({ ok: false, error: "This script has no lines. Tap New script." });
+    expect(fake.queries.filter(isUpdate)).toHaveLength(0);
+  });
+
+  it("a line that changed in another tab (not moved): reverts its own moves, the reel stays in script", async () => {
+    world({ sceneMisses: S2 });
+    expect(await A.approveReelAction(REEL)).toEqual({ ok: false, error: "The script changed in another tab. Try again." });
+    expect(qs("reels", "update")).toHaveLength(0);
+    const reverts = qs("reel_scenes", "update").slice(3);
+    expect(reverts.map((q) => q.ops.find((o) => o[0] === "eq" && o[1] === "id")?.[2])).toEqual([S1, S3]);
+    reverts.forEach((q) => expect(patchOf(q)).toEqual({ status: "pending", version: 4 }));
+  });
+
+  it("a pending line still left after the moves (another tab): reverts and refuses", async () => {
+    world({ stillPending: [{ id: S3 }] });
+    expect(await A.approveReelAction(REEL)).toEqual({ ok: false, error: "The script changed in another tab. Try again." });
+    expect(qs("reels", "update")).toHaveLength(0);
+    expect(qs("reel_scenes", "update")).toHaveLength(6);
+    const check = fake.queries.find((q) => q.table === "reel_scenes" && !isUpdate(q) && q.ops.some((o) => o[0] === "eq" && o[1] === "status"))!;
+    expect(check.ops).toContainEqual(["eq", "reel_id", REEL]);
+    expect(check.ops).toContainEqual(["eq", "status", "pending"]);
   });
 });
 

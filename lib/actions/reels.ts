@@ -26,6 +26,7 @@ const BUCKET = "reels";
 const NEEDS_005 = "Run supabase/migrations/005_reels.sql first.";
 const STALE = "This reel just changed. Reload the page and try again.";
 const NOT_FOUND = "Reel not found.";
+const SCRIPT_CHANGED = "The script changed in another tab. Try again.";
 const SCENE_NOT_FOUND = "Image not found.";
 const DUP_TITLE = "Another reel already has that title.";
 
@@ -233,16 +234,28 @@ export async function approveReelAction(reelId: string): Promise<ActionResult> {
   if (lock) return fail(lock);
   const { scenes, error: re } = await getScenes(sb, reelId);
   if (re) return dbFail(re);
+  // A failed New script insert can leave a reel with no lines: the voice would fail forever.
+  if (!scenes.length) return fail("This script has no lines. Tap New script.");
   // Scenes first: the PC never claims anything of a reel still in 'script', so once the reel is
   // queued every image is already in line.
-  const moved = await moveScenes(sb, scenes.filter((s) => s.status === "pending"), "pending", { status: "queued" });
-  const { data, error: ue } = moved.error ? { data: null, error: moved.error } : await sb.from("reels")
+  const pending = scenes.filter((s) => s.status === "pending");
+  const moved = await moveScenes(sb, pending, "pending", { status: "queued" });
+  // Back to pending (only the scenes THIS call moved), so the script can still be edited.
+  const revert = () => Promise.all(moved.done.map((s) => sb.from("reel_scenes").update({ status: "pending", version: s.version + 1 })
+    .eq("id", s.id).eq("version", s.version).eq("status", "queued")));
+  if (moved.error) { await revert(); return dbFail(moved.error); }
+  // A pending scene in a queued reel is never claimed (the render waits for it forever): every line
+  // must have moved, and none may be left (or added) as pending by another tab.
+  const left = moved.done.length === pending.length
+    ? await sb.from("reel_scenes").select("id").eq("reel_id", reelId).eq("status", "pending").limit(1)
+    : null;
+  if (left?.error) { await revert(); return dbFail(left.error); }
+  if (!left || left.data?.length) { await revert(); return fail(SCRIPT_CHANGED); }
+  const { data, error: ue } = await sb.from("reels")
     .update({ status: "queued", error: null, version: reel.version + 1 })
     .eq("id", reelId).eq("version", reel.version).eq("status", "script").select("id");
   if (ue || !data?.length) {
-    // Back to pending (only the scenes THIS call moved), so the script can still be edited.
-    await Promise.all(moved.done.map((s) => sb.from("reel_scenes").update({ status: "pending", version: s.version + 1 })
-      .eq("id", s.id).eq("version", s.version).eq("status", "queued")));
+    await revert();
     return ue ? dbFail(ue) : fail(STALE);
   }
   return done();
