@@ -185,6 +185,17 @@ describe("planPost", () => {
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.reason).toMatch(/No unused boy theme/);
   });
+  it("never plans pending (AI-suggested, not yet approved) names or themes", () => {
+    const pendingNames = Array.from({ length: 20 }, (_, i) => name(`Pend Name${String.fromCharCode(65 + i)}`, "boy", "two-word", "pending"));
+    const few = planPost({ request: req, names: [...boys.slice(0, 5), ...pendingNames], themes, settings });
+    expect(few.ok).toBe(false);
+    if (!few.ok) expect(few.reason).toMatch(/Only 5 unused boy two-word names/);
+    const pendingFirst = [theme("Suggested", "boy", 0, "pending"), ...themes];
+    const r = planPost({ request: req, names: boys, themes: pendingFirst, settings });
+    if (!r.ok) throw new Error(r.reason);
+    expect(r.theme_id).toBe("t-Boho Pampas");
+    expect(planPost({ request: req, names: boys, themes: pendingFirst, settings, themeId: "t-Suggested" }).ok).toBe(false);
+  });
   it("rejects a chosen theme of the wrong gender", () => {
     const r = planPost({ request: req, names: boys, themes, settings, themeId: "t-Blush Floral" });
     expect(r.ok).toBe(false);

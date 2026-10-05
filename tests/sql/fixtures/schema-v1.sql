@@ -1,6 +1,4 @@
 -- Unique Names posting: database. Paste the whole file into the Supabase SQL editor and run it once.
--- A project created before v2 runs supabase/migrations/002_v2.sql instead (this file already includes it).
--- Status 'pending' = an AI-suggested name/theme waiting for approval; nothing here ever plans it (only 'available').
 
 -- ---------------------------------------------------------------- tables
 create table if not exists public.settings (
@@ -13,17 +11,6 @@ create table if not exists public.settings (
   width int not null default 1080 check (width between 512 and 2048),
   height int not null default 1080 check (height between 512 and 2048),
   sound_on boolean not null default true,
-  -- card text (v2): font ids from the app's font catalog (checked in app code), sizes in px on a 1080 px card
-  title_font text not null default 'poppins' check (btrim(title_font) <> ''),
-  meaning_font text not null default 'poppins' check (btrim(meaning_font) <> ''),
-  mark_font text not null default 'poppins' check (btrim(mark_font) <> ''),
-  title_size int not null default 95 check (title_size between 40 and 180),
-  meaning_size int not null default 37 check (meaning_size between 16 and 90),
-  mark_size int not null default 21 check (mark_size between 12 and 48),
-  text_position text not null default 'auto' check (text_position in (
-    'auto', 'top-left', 'top-center', 'top-right', 'middle-left', 'middle-center', 'middle-right',
-    'bottom-left', 'bottom-center', 'bottom-right')),
-  caption_ai boolean not null default true,
   updated_at timestamptz not null default now(),
   check (min_images <= max_images)
 );
@@ -46,7 +33,7 @@ create table if not exists public.themes (
   title text not null unique,
   gender text not null check (gender in ('boy', 'girl')),
   backdrop text not null, outfit text not null, props text not null, lighting text not null, palette text not null,
-  status text not null default 'available' check (status in ('available', 'used', 'archived', 'pending')),
+  status text not null default 'available' check (status in ('available', 'used', 'archived')),
   sort_order int not null default 0,
   used_on date,
   preview_card_id uuid,
@@ -74,7 +61,7 @@ create table if not exists public.names (
   meaning text not null check (char_length(meaning) between 1 and 80),
   gender text not null check (gender in ('boy', 'girl')),
   style text not null check (style in ('two-word', 'single')),
-  status text not null default 'available' check (status in ('available', 'reserved', 'used', 'skip', 'pending')),
+  status text not null default 'available' check (status in ('available', 'reserved', 'used', 'skip')),
   post_id uuid references public.posts (id) on delete set null,
   position int,
   created_at timestamptz not null default now(),

@@ -16,8 +16,8 @@ import { Dialog } from "@/components/ui/dialog";
 import { NameForm } from "./name-form";
 import { BulkPaste } from "./bulk-paste";
 
-const STATUS_TONE: Record<NameStatus, "ok" | "accent" | "muted" | "warn"> = { available: "ok", reserved: "accent", used: "muted", skip: "warn" };
-const STATUS_TEXT: Record<NameStatus, string> = { available: "Available", reserved: "In a post", used: "Used", skip: "Skip" };
+const STATUS_TONE: Record<NameStatus, "ok" | "accent" | "muted" | "warn"> = { available: "ok", reserved: "accent", used: "muted", skip: "warn", pending: "accent" };
+const STATUS_TEXT: Record<NameStatus, string> = { available: "Available", reserved: "In a post", used: "Used", skip: "Skip", pending: "Pending" };
 
 export function NamesTable({ names: serverNames }: { names: NameRow[] }) {
   // Local copy for optimistic updates; re-seeded whenever the server sends fresh rows
@@ -34,6 +34,14 @@ export function NamesTable({ names: serverNames }: { names: NameRow[] }) {
   const [busy, setBusy] = useState<Set<string>>(new Set());
   const [confirmDel, setConfirmDel] = useState<NameRow | null>(null);
   const existing = useMemo(() => new Set(names.map((n) => nameKey(n.name))), [names]);
+  // AI suggestions waiting for approval. The Pending filter only appears while there are some
+  // (or while it is selected), so the usual four-option row stays short on a phone.
+  const pendingCount = useMemo(() => names.filter((n) => n.status === "pending").length, [names]);
+  const statusOptions: { value: "all" | NameStatus; label: string }[] = [
+    { value: "available", label: "Available" },
+    ...(pendingCount > 0 || status === "pending" ? [{ value: "pending" as const, label: `Pending · ${pendingCount}` }] : []),
+    { value: "used", label: "Used" }, { value: "skip", label: "Skip" }, { value: "all", label: "All" },
+  ];
 
   const shown = useMemo(() => names.filter((n) =>
     (gender === "all" || n.gender === gender) && (style === "all" || n.style === style) && (status === "all" || n.status === status) &&
@@ -66,7 +74,7 @@ export function NamesTable({ names: serverNames }: { names: NameRow[] }) {
         </label>
         <Segmented label="Gender" value={gender} onChange={setGender} options={[{ value: "all", label: "All" }, { value: "boy", label: "Boy" }, { value: "girl", label: "Girl" }]} />
         <Segmented label="Style" value={style} onChange={setStyle} options={[{ value: "all", label: "Any" }, { value: "two-word", label: "Two-word" }, { value: "single", label: "Single" }]} />
-        <Segmented label="Status" value={status} onChange={setStatus} options={[{ value: "available", label: "Available" }, { value: "used", label: "Used" }, { value: "skip", label: "Skip" }, { value: "all", label: "All" }]} />
+        <Segmented label="Status" value={status} onChange={setStatus} options={statusOptions} />
       </div>
       <p className="text-xs text-muted">{shown.length} of {names.length} names</p>
 
@@ -84,12 +92,12 @@ export function NamesTable({ names: serverNames }: { names: NameRow[] }) {
               <Badge tone="muted">{n.gender === "boy" ? "Boy" : "Girl"} · {n.style}</Badge>
               <Badge tone={STATUS_TONE[n.status]}>{STATUS_TEXT[n.status]}</Badge>
               <div className="ml-auto flex gap-1">
-                {(n.status === "available" || n.status === "skip") && (
+                {(n.status === "available" || n.status === "skip" || n.status === "pending") && (
                   <>
                     <Button variant="ghost" size="icon" disabled={busy.has(n.id)} aria-label={`Edit ${n.name}`} onClick={() => setForm({ open: true, editing: n })}><Pencil className="size-4" /></Button>
                     {n.status === "available"
                       ? <Button variant="ghost" size="icon" disabled={busy.has(n.id)} aria-label={`Skip ${n.name}`} onClick={() => act(n, { ...n, status: "skip" }, () => setSkipAction(n.id, true), `${n.name} will be skipped`)}><Ban className="size-4" /></Button>
-                      : <Button variant="ghost" size="icon" disabled={busy.has(n.id)} aria-label={`Use ${n.name} again`} onClick={() => act(n, { ...n, status: "available" }, () => setSkipAction(n.id, false), `${n.name} is available again`)}><Undo2 className="size-4" /></Button>}
+                      : n.status === "skip" && <Button variant="ghost" size="icon" disabled={busy.has(n.id)} aria-label={`Use ${n.name} again`} onClick={() => act(n, { ...n, status: "available" }, () => setSkipAction(n.id, false), `${n.name} is available again`)}><Undo2 className="size-4" /></Button>}
                     <Button variant="ghost" size="icon" disabled={busy.has(n.id)} aria-label={`Delete ${n.name}`} onClick={() => setConfirmDel(n)}><Trash2 className="size-4 text-bad" /></Button>
                   </>
                 )}

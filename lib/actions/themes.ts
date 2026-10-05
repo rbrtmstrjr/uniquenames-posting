@@ -37,9 +37,11 @@ export async function setArchivedAction(id: string, archived: boolean): Promise<
     const { data: last } = await sb.from("themes").select("sort_order").order("sort_order", { ascending: false }).limit(1);
     patch.sort_order = ((last?.[0]?.sort_order as number) ?? 0) + 1;
   }
-  const { data, error } = await sb.from("themes").update(patch).eq("id", id).neq("status", "used").select("id");
+  // Archive from available, restore from archived. Never touches used or pending (AI-suggested,
+  // waiting for approval) themes, so a suggestion cannot become "available" from here.
+  const { data, error } = await sb.from("themes").update(patch).eq("id", id).in("status", archived ? ["available"] : ["archived"]).select("id");
   if (error) return fail(error.message);
-  if (!data?.length) return fail("Themes that were used in a post cannot be archived or restored.");
+  if (!data?.length) return fail(archived ? "Only themes in Up next can be archived. Used themes stay in Used." : "Only archived themes can be restored.");
   revalidatePath("/", "layout");
   revalidatePath("/themes");
   return { ok: true };

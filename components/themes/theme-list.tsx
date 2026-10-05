@@ -108,6 +108,8 @@ export function ThemeList({ themes: serverThemes, previews: initialPreviews }: {
     : availableSorted;
   const used = mine.filter((t) => t.status === "used").sort((a, b) => (b.used_on ?? "").localeCompare(a.used_on ?? ""));
   const archived = mine.filter((t) => t.status === "archived");
+  // AI-suggested themes waiting for approval: never in Up next (never planned), listed on their own.
+  const pendingThemes = mine.filter((t) => t.status === "pending").sort((a, b) => a.title.localeCompare(b.title));
 
   const openTheme = themes.find((t) => t.id === openPreviewId) ?? null;
   const openCard = openTheme ? latestPreview.get(openTheme.id) ?? null : null;
@@ -175,6 +177,15 @@ export function ThemeList({ themes: serverThemes, previews: initialPreviews }: {
           </DndContext>
         )}
       </section>
+      {pendingThemes.length > 0 && (
+        <Disclosure summary={`Pending · ${pendingThemes.length}`} className="rounded-2xl border border-line bg-surface p-4" triggerClassName="text-sm text-ink">
+          <p className="mt-1 text-xs text-muted">Suggested themes waiting for your approval. They are not used in posts until approved.</p>
+          <ul className="mt-3 space-y-1">{pendingThemes.map((t) => (
+            <li key={t.id} className="flex items-center justify-between gap-2 text-sm"><span className="min-w-0 break-words text-ink">{t.title}</span>
+              <Button variant="ghost" size="sm" onClick={() => setForm({ open: true, editing: t })}><Pencil className="size-4" aria-hidden /> Edit</Button></li>
+          ))}</ul>
+        </Disclosure>
+      )}
       {used.length > 0 && (
         <Disclosure summary={`Used · ${used.length}`} className="rounded-2xl border border-line bg-surface p-4" triggerClassName="text-sm text-ink">
           <ul className="mt-3 space-y-1 text-sm">{used.map((t) => <li key={t.id} className="flex justify-between gap-2"><span className="text-ink">{t.title}</span><span className="text-muted">{t.used_on}</span></li>)}</ul>

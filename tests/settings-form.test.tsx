@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import type { SettingsRow } from "@/lib/db/types";
+import { TEXT_SETTINGS_DEFAULTS, type SettingsRow } from "@/lib/db/types";
 import { polyfillRadix } from "./helpers/radix-jsdom";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ replace: vi.fn() }) }));
@@ -15,7 +15,7 @@ const { SettingsForm } = await import("@/components/settings/settings-form");
 beforeAll(polyfillRadix);
 afterEach(() => { cleanup(); callAction.mockClear(); });
 
-const initial = { id: 1, caption_template: "Unique {gender} names", hashtags: "#babynames", handle: "@unique_names", min_images: 9, max_images: 13, width: 1080, height: 1350, sound_on: true, updated_at: "" } satisfies SettingsRow;
+const initial = { id: 1, caption_template: "Unique {gender} names", hashtags: "#babynames", handle: "@unique_names", min_images: 9, max_images: 13, width: 1080, height: 1350, sound_on: true, ...TEXT_SETTINGS_DEFAULTS, updated_at: "" } satisfies SettingsRow;
 
 describe("SettingsForm (shadcn controls)", () => {
   it("has no native checkbox, number input, raw input or textarea outside shadcn", () => {

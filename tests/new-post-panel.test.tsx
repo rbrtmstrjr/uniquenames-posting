@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import type { SettingsRow, ThemeRow } from "@/lib/db/types";
+import { TEXT_SETTINGS_DEFAULTS, type SettingsRow, type ThemeRow } from "@/lib/db/types";
 import { polyfillRadix } from "./helpers/radix-jsdom";
 
 vi.mock("next/link", () => ({ default: ({ href, children, ...rest }: { href: string; children: React.ReactNode }) => <a href={href} {...rest}>{children}</a> }));
@@ -20,7 +20,7 @@ beforeAll(() => {
 afterAll(() => vi.useRealTimers());
 afterEach(() => { cleanup(); health = "ready"; });
 
-const settings = { id: 1, caption_template: "x", hashtags: "", handle: "@u", min_images: 9, max_images: 13, width: 1080, height: 1350, sound_on: true, updated_at: "" } satisfies SettingsRow;
+const settings = { id: 1, caption_template: "x", hashtags: "", handle: "@u", min_images: 9, max_images: 13, width: 1080, height: 1350, sound_on: true, ...TEXT_SETTINGS_DEFAULTS, updated_at: "" } satisfies SettingsRow;
 const theme = (id: string, title: string, gender: "boy" | "girl" = "boy"): ThemeRow => ({
   id, title, gender, backdrop: "sage backdrop", outfit: "romper", props: "basket", lighting: "warm", palette: "rust",
   status: "queued" as ThemeRow["status"], sort_order: 0, used_on: null, preview_card_id: null, created_at: "", updated_at: "",

@@ -60,7 +60,8 @@ export async function setSkipAction(id: string, skip: boolean): Promise<ActionRe
 export async function deleteNameAction(id: string): Promise<ActionResult> {
   await requireOwner();
   const sb = await createClient();
-  const { data, error } = await sb.from("names").delete().eq("id", id).in("status", ["available", "skip"]).select("id");
+  // Pending = an AI suggestion never used in a post, so deleting it is how it is rejected.
+  const { data, error } = await sb.from("names").delete().eq("id", id).in("status", ["available", "skip", "pending"]).select("id");
   if (error) return fail(error.message);
   if (!data?.length) return fail("Names that were used in a post cannot be deleted. Mark it Skip instead.");
   revalidatePath("/names");
