@@ -5,7 +5,8 @@ import type { SettingsRow, ThemeRow } from "@/lib/db/types";
 import { polyfillRadix } from "./helpers/radix-jsdom";
 
 vi.mock("next/link", () => ({ default: ({ href, children, ...rest }: { href: string; children: React.ReactNode }) => <a href={href} {...rest}>{children}</a> }));
-vi.mock("@/components/shell/app-shell", () => ({ useWorkerContext: () => ({ health: "ready", lastSeen: "now", row: null }) }));
+let health = "ready";
+vi.mock("@/components/shell/app-shell", () => ({ useWorkerContext: () => ({ health, lastSeen: "now", row: null }) }));
 vi.mock("@/lib/actions/posts", () => ({ createPostAction: vi.fn() }));
 vi.mock("@/lib/actions/call", () => ({ callAction: vi.fn(async () => ({ ok: true })) }));
 const { NewPostPanel } = await import("@/components/today/new-post-panel");
@@ -17,7 +18,7 @@ beforeAll(() => {
   vi.setSystemTime(new Date("2026-10-05T02:00:00Z"));
 });
 afterAll(() => vi.useRealTimers());
-afterEach(cleanup);
+afterEach(() => { cleanup(); health = "ready"; });
 
 const settings = { id: 1, caption_template: "x", hashtags: "", handle: "@u", min_images: 9, max_images: 13, width: 1080, height: 1350, sound_on: true, updated_at: "" } satisfies SettingsRow;
 const theme = (id: string, title: string, gender: "boy" | "girl" = "boy"): ThemeRow => ({
@@ -66,5 +67,27 @@ describe("NewPostPanel (shadcn controls)", () => {
     expect((generateButton() as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByText(/No boy theme left/, { selector: "span.text-xs" })).toBeTruthy();
     expect((screen.getByRole("combobox", { name: "Theme" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it.each([
+    ["offline", "Your PC is offline — turn it on to generate"],
+    ["unknown", "Your PC is offline — turn it on to generate"],
+    ["comfy-off", "Open ComfyUI Desktop to generate"],
+  ])("PC %s: Generate is locked with the reason as visible text (#6)", (h, reason) => {
+    health = h;
+    render(<NewPostPanel settings={settings} themes={[theme("a", "Autumn Harvest")]} stock={stock(50)} busy={false} />);
+    expect((generateButton() as HTMLButtonElement).disabled).toBe(true);
+    const note = screen.getByText(reason);
+    expect(note).toBeTruthy();
+    expect(note.closest("[title]")).toBeNull(); // shown, not a tooltip
+  });
+
+  it("the G hotkey does not generate while locked", async () => {
+    const { callAction } = await import("@/lib/actions/call");
+    vi.mocked(callAction).mockClear();
+    health = "offline";
+    render(<NewPostPanel settings={settings} themes={[theme("a", "Autumn Harvest")]} stock={stock(50)} busy={false} />);
+    fireEvent.keyDown(window, { key: "g" });
+    expect(vi.mocked(callAction)).not.toHaveBeenCalled();
   });
 });

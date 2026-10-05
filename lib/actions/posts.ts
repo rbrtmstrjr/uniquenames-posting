@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { planExtraCard, planPost, subjectKey } from "@/lib/planner";
 import type { Gender, NameRow, NameStyle, PostRow, SettingsRow, ThemeRow } from "@/lib/db/types";
 import { validateCreatePost } from "./helpers";
+import { generateLockReason } from "./generate-guard";
 import { fail, requireOwner, type ActionResult } from "./result";
 
 export async function createPostAction(input: {
@@ -14,6 +15,8 @@ export async function createPostAction(input: {
   if (badInput) return fail(badInput);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(input.postDate)) return fail("Pick a valid date.");
   const sb = await createClient();
+  const lock = await generateLockReason(sb);
+  if (lock) return fail(lock);
   for (let attempt = 0; attempt < 2; attempt++) {
     const [{ data: settings }, { data: names }, { data: themes }] = await Promise.all([
       sb.from("settings").select("*").eq("id", 1).single(),
@@ -78,7 +81,8 @@ export async function deletePostAction(postId: string): Promise<ActionResult> {
 export async function addCardAction(postId: string): Promise<ActionResult<{ cardId: string }>> {
   await requireOwner();
   const sb = await createClient();
-  const { data: post } = await sb.from("posts").select("*").eq("id", postId).single();
+  const [{ data: post }, lock] = await Promise.all([sb.from("posts").select("*").eq("id", postId).single(), generateLockReason(sb)]);
+  if (lock) return fail(lock);
   if (!post) return fail("Post not found.");
   const p = post as PostRow;
   const [{ data: theme }, { data: names }, { data: cards }] = await Promise.all([

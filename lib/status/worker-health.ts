@@ -9,6 +9,20 @@ export function workerHealth(w: WorkerStatusRow | null, now: number): WorkerHeal
   return w.comfyui_ok ? "ready" : "comfy-off";
 }
 
+/** Why Generate / New picture / Add a card / Make preview are locked (shown as visible text, not only a tooltip). */
+export const GENERATE_LOCK = {
+  offline: "Your PC is offline — turn it on to generate",
+  comfy: "Open ComfyUI Desktop to generate",
+} as const;
+
+export type GenerateLock = { ok: true } | { ok: false; reason: string };
+
+/** New photos need the PC on AND ComfyUI open. Re-stamps only need Pillow (see cardVisual). */
+export function canGenerate(health: WorkerHealth): GenerateLock {
+  if (health === "ready") return { ok: true };
+  return { ok: false, reason: health === "comfy-off" ? GENERATE_LOCK.comfy : GENERATE_LOCK.offline };
+}
+
 export function lastSeenText(w: WorkerStatusRow | null, now: number): string {
   if (!w?.last_seen) return "never";
   const s = Math.max(0, Math.round((now - Date.parse(w.last_seen)) / 1000));

@@ -13,7 +13,8 @@ import { createPostAction } from "@/lib/actions/posts";
 import { callAction } from "@/lib/actions/call";
 import type { Gender, NameStyle, SettingsRow, ThemeRow } from "@/lib/db/types";
 import { useWorkerContext } from "@/components/shell/app-shell";
-import { PC_TEXT } from "@/components/shell/pc-status";
+import { GenerateLockNote } from "@/components/shell/generate-lock-note";
+import { canGenerate } from "@/lib/status/worker-health";
 
 function manilaToday() {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Manila" }).format(new Date());
@@ -35,7 +36,9 @@ export function NewPostPanel({ settings, themes, stock, busy }: {
   const left = stock.find((s) => s.gender === gender && s.style === style)?.count ?? 0;
   const counts = Array.from({ length: settings.max_images - settings.min_images + 1 }, (_, i) => String(settings.min_images + i));
   const wanted = count === "auto" ? settings.min_images : Number(count);
-  const blocked = left < wanted ? `Only ${left} ${gender} ${style} names left${count === "auto" ? "" : `, but you chose ${count} cards`}. Add names or pick fewer cards.` : !theme ? `No ${gender} theme left. Add a theme first.` : null;
+  const gen = canGenerate(health);
+  // The PC lock comes first: it is the one the owner fixes at the PC, not on this form.
+  const blocked = !gen.ok ? gen.reason : left < wanted ? `Only ${left} ${gender} ${style} names left${count === "auto" ? "" : `, but you chose ${count} cards`}. Add names or pick fewer cards.` : !theme ? `No ${gender} theme left. Add a theme first.` : null;
 
   const generate = () => {
     if (blocked || pending) return;
@@ -43,7 +46,7 @@ export function NewPostPanel({ settings, themes, stock, busy }: {
       const r = await callAction(() => createPostAction({ gender, style, count: count === "auto" ? null : Number(count), postDate: date || manilaToday(), themeId: theme?.id, requestId: crypto.randomUUID() }));
       if (!r.ok) { toast.error(r.error); return; }
       // The action's revalidatePath re-renders Today with the new post in the same response.
-      toast.success(health === "ready" ? "Post queued. Cards will appear as they are made." : `Post queued. ${PC_TEXT[health].fix}`);
+      toast.success("Post queued. Cards will appear as they are made.");
     });
   };
   useHotkey("g", generate);
@@ -86,7 +89,9 @@ export function NewPostPanel({ settings, themes, stock, busy }: {
           <Button size="lg" onClick={generate} loading={pending} disabled={!!blocked} className="w-full sm:w-auto">
             <Sparkles className="size-4" /> Generate post
           </Button>
-          <span className="text-xs text-muted">{blocked ?? (busy ? "If a post is still being made, the new cards wait in line." : `${left} names left for this style · press G`)}</span>
+          {!gen.ok
+            ? <GenerateLockNote reason={gen.reason} className="w-full sm:w-auto" />
+            : <span className="text-xs text-muted">{blocked ?? (busy ? "If a post is still being made, the new cards wait in line." : `${left} names left for this style · press G`)}</span>}
         </div>
       </div>
     </Panel>

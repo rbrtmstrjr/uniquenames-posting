@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { BABY_SHOTS, PREVIEW_MEANING, PREVIEW_NAME, buildPrompt, hashSeed } from "@/lib/planner";
 import type { ThemeRow } from "@/lib/db/types";
 import { validateTheme, type ThemeInput } from "./validate";
+import { generateLockReason } from "./generate-guard";
 import { fail, requireOwner, type ActionResult } from "./result";
 
 export async function saveThemeAction(input: ThemeInput & { id?: string }): Promise<ActionResult<{ id: string }>> {
@@ -69,7 +70,8 @@ export async function moveThemeNextAction(id: string): Promise<ActionResult> {
 export async function makePreviewAction(themeId: string): Promise<ActionResult<{ cardId: string }>> {
   await requireOwner();
   const sb = await createClient();
-  const { data: theme } = await sb.from("themes").select("*").eq("id", themeId).single();
+  const [{ data: theme }, lock] = await Promise.all([sb.from("themes").select("*").eq("id", themeId).single(), generateLockReason(sb)]);
+  if (lock) return fail(lock);
   if (!theme) return fail("Theme not found.");
   const t = theme as ThemeRow;
   const { data: busy } = await sb.from("cards").select("id").eq("theme_id", themeId).eq("kind", "preview").in("status", ["queued", "generating"]).limit(1);

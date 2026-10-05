@@ -1,5 +1,6 @@
 import type { CardStatus, Gender, NameStyle } from "@/lib/db/types";
 import { normalizeQuotes } from "@/lib/names/bulk-paste";
+import { hashSeed } from "@/lib/planner/random";
 
 export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -8,6 +9,17 @@ export const normalizeName = (name: string): string => normalizeQuotes(name).rep
 /** Case-insensitive dedup key; matches the lower(name) unique index. */
 export const nameKey = (name: string): string => normalizeName(name).toLowerCase();
 export const styleOf = (name: string): NameStyle => (normalizeName(name).split(" ").length > 1 ? "two-word" : "single");
+
+/**
+ * The seed for a card's next version. ComfyUI is deterministic: the same prompt + seed
+ * makes the same photo, so "New picture" must change the seed or nothing visibly changes.
+ * `avoid` (the current seed) is never returned.
+ */
+export function nextSeed(cardId: string, version: number, avoid?: number): number {
+  let s = hashSeed(`${cardId}|v${version}`) || 1;
+  if (s === avoid) s = (s % 4294967295) + 1;
+  return s;
+}
 
 /** Restamp only when a clean photo is current: done/failed with a photo, or already restamping. */
 export function restampMode(card: { status: CardStatus; photo_path: string | null }): "restamp" | "regenerate" {

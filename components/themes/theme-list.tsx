@@ -21,6 +21,8 @@ import { makePreviewAction, moveThemeNextAction, reorderThemesAction, setArchive
 import { callAction, optimistic } from "@/lib/actions/call";
 import type { ActionResult } from "@/lib/actions/result";
 import { Dialog } from "@/components/ui/dialog";
+import { GenerateLockNote } from "@/components/shell/generate-lock-note";
+import { canGenerate } from "@/lib/status/worker-health";
 import { ThemeForm } from "./theme-form";
 
 type Pending = "preview" | "archive" | "restore" | "next";
@@ -29,6 +31,7 @@ function Row({ t, next, pending, preview, url, onEdit, onOpen, onPreview, onArch
   t: ThemeRow; next: boolean; pending?: Pending; preview: CardRow | null; url?: string; onEdit: () => void; onOpen: () => void; onPreview: () => void; onArchive: () => void; onNext: () => void;
 }) {
   const { health } = useWorkerContext();
+  const gen = canGenerate(health);
   const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({ id: t.id });
   const busy = !!pending;
   return (
@@ -41,7 +44,7 @@ function Row({ t, next, pending, preview, url, onEdit, onOpen, onPreview, onArch
       <div className={preview?.status === "failed" ? "w-36 shrink-0 sm:w-40" : "w-24 shrink-0 sm:w-28"}>
         {preview ? <CardTile card={preview} url={url} health={health} queuePos={0} onOpen={onOpen} onRetry={onPreview} />
           : (
-            <button type="button" onClick={onPreview} disabled={busy} aria-busy={pending === "preview"}
+            <button type="button" onClick={onPreview} disabled={busy || !gen.ok} aria-busy={pending === "preview"}
               className="grid aspect-square w-full place-items-center rounded-xl border-2 border-dashed border-line text-[11px] font-semibold text-muted transition hover:border-accent hover:text-accent active:scale-[.98] disabled:opacity-55">
               <span className="flex flex-col items-center gap-1">
                 {pending === "preview" ? <Loader2 className="size-4 animate-spin" aria-hidden /> : <Sparkles className="size-4" aria-hidden />}
@@ -58,7 +61,7 @@ function Row({ t, next, pending, preview, url, onEdit, onOpen, onPreview, onArch
         <p className="mt-1 line-clamp-2 text-xs text-muted">{t.backdrop} · {t.outfit} · {t.props}</p>
         <div className="mt-2 flex flex-wrap gap-1">
           <Button variant="ghost" size="sm" onClick={onEdit}><Pencil className="size-4" aria-hidden /> Edit</Button>
-          {preview && <Button variant="ghost" size="sm" disabled={busy} loading={pending === "preview"} onClick={onPreview}>{pending !== "preview" && <Sparkles className="size-4" aria-hidden />} New preview</Button>}
+          {preview && <Button variant="ghost" size="sm" disabled={busy || !gen.ok} loading={pending === "preview"} onClick={onPreview}>{pending !== "preview" && <Sparkles className="size-4" aria-hidden />} New preview</Button>}
           {!next && <Button variant="ghost" size="sm" disabled={busy} onClick={onNext}><ArrowUpToLine className="size-4" aria-hidden /> Use next</Button>}
           <Button variant="ghost" size="sm" disabled={busy} onClick={onArchive}><Archive className="size-4" aria-hidden /> Archive</Button>
         </div>
@@ -66,8 +69,8 @@ function Row({ t, next, pending, preview, url, onEdit, onOpen, onPreview, onArch
     </li>
   );
 }
-
 export function ThemeList({ themes: serverThemes, previews: initialPreviews }: { themes: ThemeRow[]; previews: CardRow[] }) {
+  const gen = canGenerate(useWorkerContext().health);
   const [gender, setGender] = useState<Gender>("boy");
   const [form, setForm] = useState<{ open: boolean; editing: ThemeRow | null }>({ open: false, editing: null });
   const [order, setOrder] = useState<string[] | null>(null);
@@ -147,6 +150,7 @@ export function ThemeList({ themes: serverThemes, previews: initialPreviews }: {
         <Segmented label="Gender" value={gender} onChange={(g) => { setGender(g); setOrder(null); }} options={[{ value: "boy", label: "Boy themes" }, { value: "girl", label: "Girl themes" }]} />
         <Button onClick={() => setForm({ open: true, editing: null })}><Plus className="size-4" aria-hidden /> New theme</Button>
       </div>
+      {!gen.ok && <GenerateLockNote reason={gen.reason} extra="Previews are paused until then." />}
       <section>
         <h2 className="mb-2 text-xs font-bold uppercase tracking-[.08em] text-muted">Up next · {available.length} left</h2>
         {available.length === 0 ? (
@@ -194,8 +198,9 @@ export function ThemeList({ themes: serverThemes, previews: initialPreviews }: {
             ) : (
               <p className="rounded-2xl bg-surface-2 p-6 text-center text-sm text-muted">This preview is not ready yet.</p>
             )}
+            {!gen.ok && <GenerateLockNote reason={gen.reason} />}
             <div className="flex justify-end">
-              <Button loading={pending.get(openTheme.id) === "preview"} disabled={pending.has(openTheme.id)} onClick={() => void makePreview(openTheme)}><Sparkles className="size-4" aria-hidden /> Make a new preview</Button>
+              <Button loading={pending.get(openTheme.id) === "preview"} disabled={pending.has(openTheme.id) || !gen.ok} onClick={() => void makePreview(openTheme)}><Sparkles className="size-4" aria-hidden /> Make a new preview</Button>
             </div>
           </div>
         )}

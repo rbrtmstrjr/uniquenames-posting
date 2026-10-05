@@ -2,7 +2,7 @@
 import { useCallback, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, CheckCircle2, CircleDashed, GripVertical, Loader2, Plus, Trash2 } from "lucide-react";
+import { ArrowLeft, CheckCircle2, CircleDashed, GripVertical, Loader2, PlugZap, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { DndContext, KeyboardSensor, PointerSensor, TouchSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, arrayMove, rectSortingStrategy, sortableKeyboardCoordinates, useSortable } from "@dnd-kit/sortable";
@@ -22,6 +22,7 @@ import { useHotkey } from "@/lib/realtime/hotkey";
 import { useWorkerContext } from "@/components/shell/app-shell";
 import { createClient } from "@/lib/supabase/client";
 import { queuePosition } from "@/lib/status/card-state";
+import { canGenerate } from "@/lib/status/worker-health";
 import { uploadNumbers } from "@/lib/files/save";
 import { addCardAction, deletePostAction, setPostedAction } from "@/lib/actions/posts";
 import { regenerateCardAction, reorderCardsAction, selectAllAction, setSelectedAction } from "@/lib/actions/cards";
@@ -54,6 +55,7 @@ export function PostDetail({ post: initialPost, theme, initialCards }: { post: P
   const router = useRouter();
   const params = useSearchParams();
   const { health } = useWorkerContext();
+  const gen = canGenerate(health);
   const refetch = useCallback(async () => {
     const { data, error } = await createClient().from("cards").select("*").eq("post_id", initialPost.id);
     return error ? null : ((data ?? []) as CardRow[]);
@@ -158,8 +160,8 @@ export function PostDetail({ post: initialPost, theme, initialCards }: { post: P
 
       {failed.length > 0 && (
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-bad/30 bg-bad/10 p-3 text-sm text-bad">
-          <span>{failed.length} card(s) failed. {failed[0].error}</span>
-          <Button variant="danger" size="sm" loading={busy === "retry-all"} onClick={() => void retryAll(failed)}>Retry all</Button>
+          <span>{failed.length} card(s) failed. {failed[0].error}{!gen.ok && <> · <strong>{gen.reason}</strong></>}</span>
+          <Button variant="danger" size="sm" loading={busy === "retry-all"} disabled={!gen.ok} onClick={() => void retryAll(failed)}>Retry all</Button>
         </div>
       )}
 
@@ -180,10 +182,12 @@ export function PostDetail({ post: initialPost, theme, initialCards }: { post: P
                       selection={{ selected: c.selected, order: numbers.get(c.id) ?? null, onToggle: () => void toggle(c) }} />
                   </Sortable>
                 ))}
-                <button type="button" onClick={() => run("add", () => addCardAction(post.id), "Adding one more card…")} disabled={busy === "add"} aria-busy={busy === "add"}
-                  className="grid aspect-square place-items-center rounded-xl border-2 border-dashed border-line text-sm font-semibold text-muted transition hover:border-accent hover:text-accent active:scale-[.98] disabled:border-accent disabled:text-accent">
+                <button type="button" onClick={() => run("add", () => addCardAction(post.id), "Adding one more card…")} disabled={busy === "add" || !gen.ok} aria-busy={busy === "add"}
+                  className={`grid aspect-square place-items-center rounded-xl border-2 border-dashed border-line p-2 text-center text-sm font-semibold text-muted transition ${gen.ok ? "hover:border-accent hover:text-accent active:scale-[.98] disabled:border-accent disabled:text-accent" : "cursor-not-allowed"}`}>
                   <span className="flex flex-col items-center gap-1">
-                    {busy === "add" ? <Loader2 className="size-5 animate-spin" aria-hidden /> : <Plus className="size-5" aria-hidden />} {busy === "add" ? "Adding…" : "Add a card"}
+                    {busy === "add" ? <Loader2 className="size-5 animate-spin" aria-hidden /> : gen.ok ? <Plus className="size-5" aria-hidden /> : <PlugZap className="size-5" aria-hidden />}
+                    {busy === "add" ? "Adding…" : "Add a card"}
+                    {!gen.ok && <span className="text-xs font-normal">{gen.reason}</span>}
                   </span>
                 </button>
               </div>
@@ -202,7 +206,9 @@ export function PostDetail({ post: initialPost, theme, initialCards }: { post: P
         </div>
       </div>
 
-      <CardDialog card={open} url={open ? urlFor(open.card_path) : undefined} health={health} onClose={() => setOpenId(null)} onDelete={deleteCard} />
+      <CardDialog card={open} url={open ? urlFor(open.card_path) : undefined} health={health} queuePos={open ? queuePosition(open, visible) : 0}
+        onClose={() => setOpenId(null)} onDelete={deleteCard}
+        onPatch={(id, p) => setCards((prev) => prev.map((x) => (x.id === id ? { ...x, ...p } : x)))} />
 
       <Dialog open={confirmDelete} onOpenChange={setConfirmDelete} title="Delete this post?"
         description="Its cards are deleted from the website and its names and theme go back on the list. The copies on your PC stay.">
