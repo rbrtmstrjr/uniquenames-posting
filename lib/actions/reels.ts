@@ -160,15 +160,23 @@ function badEdit(e: ReelScriptEdit): string | null {
   if (title.length > TITLE_MAX) return `Keep the title under ${TITLE_MAX} characters.`;
   if (!Array.isArray(e.lines) || e.lines.length > 40) return "Bad script. Reload the page and try again.";
   const seen = new Set<string>();
-  for (const [i, l] of e.lines.entries()) {
+  for (const l of e.lines) {
     if (!l || typeof l.id !== "string" || !UUID_RE.test(l.id) || seen.has(l.id)) return "Bad line id. Reload the page and try again.";
     seen.add(l.id);
+  }
+  return null;
+}
+
+/** A line's text, numbered by its scene's position (the "Line N" the review page shows). */
+function badLines(lines: ReelScriptEdit["lines"], positionOf: (id: string) => number): string | null {
+  for (const l of lines) {
+    const at = `Line ${positionOf(l.id)}`;
     const n = oneLine(l.narration);
-    if (!n) return `Line ${i + 1} has no words.`;
-    if (n.length > NARRATION_MAX || wordCount(n) > LINE_MAX_WORDS) return `Line ${i + 1} is longer than ${LINE_MAX_WORDS} words.`;
+    if (!n) return `${at} has no words.`;
+    if (n.length > NARRATION_MAX || wordCount(n) > LINE_MAX_WORDS) return `${at} is longer than ${LINE_MAX_WORDS} words.`;
     const idea = oneLine(l.idea);
-    if (!idea) return `Line ${i + 1} has no picture idea.`;
-    if (idea.length > IDEA_MAX) return `Line ${i + 1}'s picture idea is longer than ${IDEA_MAX} characters.`;
+    if (!idea) return `${at} has no picture idea.`;
+    if (idea.length > IDEA_MAX) return `${at}'s picture idea is longer than ${IDEA_MAX} characters.`;
   }
   return null;
 }
@@ -187,6 +195,8 @@ export async function saveReelScriptAction(reelId: string, edit: ReelScriptEdit)
   if (reel.status !== "script") return fail("This reel was already approved, so its script can't change.");
   const byId = new Map(scenes.map((s) => [s.id, s]));
   if (edit.lines.some((l) => !byId.has(l.id))) return fail("A line of this script was replaced. Reload the page and try again.");
+  const badLine = badLines(edit.lines, (id) => byId.get(id)!.position);
+  if (badLine) return fail(badLine);
   const title = oneLine(edit.title);
   if (titleKey(title) !== titleKey(reel.title) && made.rows.some((m) => m.id !== reelId && titleKey(m.title ?? "") === titleKey(title))) return fail(DUP_TITLE);
 
@@ -221,15 +231,16 @@ export async function approveReelAction(reelId: string): Promise<ActionResult> {
   if (!reel) return fail(NOT_FOUND);
   if (reel.status !== "script") return fail("This reel was already approved.");
   if (lock) return fail(lock);
-  // The reel first: until its scenes are queued the PC can only make the voice, which needs no scene.
+  // Scenes first: the PC never claims anything of a reel still in 'script', so once the reel is
+  // queued every image is already in line.
+  const { error: se } = await sb.from("reel_scenes").update({ status: "queued" }).eq("reel_id", reelId).eq("status", "pending");
+  if (se) return dbFail(se);
   const { data, error: ue } = await sb.from("reels").update({ status: "queued", error: null, version: reel.version + 1 })
     .eq("id", reelId).eq("version", reel.version).eq("status", "script").select("id");
-  if (ue) return dbFail(ue);
-  if (!data?.length) return fail(STALE);
-  const { error: se } = await sb.from("reel_scenes").update({ status: "queued" }).eq("reel_id", reelId).eq("status", "pending");
-  if (se) {
-    await sb.from("reels").update({ status: "script", version: reel.version + 2 }).eq("id", reelId).eq("version", reel.version + 1).eq("status", "queued");
-    return fail(`Could not queue the images: ${se.message}`);
+  if (ue || !data?.length) {
+    // Back to pending, so the script can still be edited.
+    await sb.from("reel_scenes").update({ status: "pending" }).eq("reel_id", reelId).eq("status", "queued");
+    return ue ? dbFail(ue) : fail(STALE);
   }
   return done();
 }
@@ -245,6 +256,8 @@ async function getSceneAndReel(sb: SB, sceneId: string) {
 
 /** Reel statuses where the PC is still making images: a requeued scene is simply picked up. */
 const MAKING: ReelStatus[] = ["queued", "voicing", "imaging"];
+/** Scenes that can be made again: finished, failed, or skipped earlier (a skipped image can come back). */
+const REDOABLE: ReelSceneStatus[] = ["done", "failed", "skipped"];
 const REQUEUE_REEL = { status: "queued", preview_path: null, pc_path: null, error: null, claimed_at: null, finished_at: null };
 
 /**
@@ -260,12 +273,12 @@ export async function redoReelSceneAction(sceneId: string): Promise<ActionResult
   if (error) return dbFail(error);
   if (!scene || !reel) return fail(SCENE_NOT_FOUND);
   if (reel.status === "script") return fail("Approve the script first.");
-  if (scene.status !== "done" && scene.status !== "failed") return fail("This image is still being made. Wait for it to finish.");
+  if (!REDOABLE.includes(scene.status)) return fail("This image is still being made. Wait for it to finish.");
   if (lock) return fail(lock);
   const v = scene.version + 1;
   const { data, error: ue } = await sb.from("reel_scenes")
     .update({ status: "queued", seed: randomSeed(scene.seed), attempts: 0, error: null, claimed_at: null, version: v })
-    .eq("id", scene.id).eq("version", scene.version).in("status", ["done", "failed"]).select("id");
+    .eq("id", scene.id).eq("version", scene.version).in("status", REDOABLE).select("id");
   if (ue) return dbFail(ue);
   if (!data?.length) return fail("This image just changed. Reload the page and try again.");
   if (MAKING.includes(reel.status)) return done();
@@ -281,7 +294,10 @@ export async function redoReelSceneAction(sceneId: string): Promise<ActionResult
   return done();
 }
 
-/** "Skip image" when a reel needs attention: the video is made without that picture. */
+/**
+ * "Skip image": the video is made without that picture. For a failed image of a reel that needs
+ * attention, or of a reel still in line whose image already failed 3 times (before the PC flags it).
+ */
 export async function skipReelSceneAction(sceneId: string): Promise<ActionResult> {
   await requireOwner();
   if (!UUID_RE.test(sceneId ?? "")) return fail(SCENE_NOT_FOUND);
@@ -289,13 +305,15 @@ export async function skipReelSceneAction(sceneId: string): Promise<ActionResult
   const { scene, reel, error } = await getSceneAndReel(sb, sceneId);
   if (error) return dbFail(error);
   if (!scene || !reel) return fail(SCENE_NOT_FOUND);
-  if (reel.status !== "needs_attention") return fail("Images can only be skipped when the reel needs attention.");
   if (scene.status !== "failed") return fail("Only an image that failed can be skipped.");
+  const inLine = reel.status === "queued" && scene.attempts >= 3;
+  if (reel.status !== "needs_attention" && !inLine) return fail("An image can be skipped once it has failed 3 times.");
   const { data, error: ue } = await sb.from("reel_scenes")
     .update({ status: "skipped", error: null, claimed_at: null, version: scene.version + 1 })
     .eq("id", scene.id).eq("version", scene.version).eq("status", "failed").select("id");
   if (ue) return dbFail(ue);
   if (!data?.length) return fail("This image just changed. Reload the page and try again.");
+  if (inLine) return done(); // already in line: the PC moves on by itself
   const { data: rd, error: re } = await sb.from("reels").update({ status: "queued", error: null, claimed_at: null, version: reel.version + 1 })
     .eq("id", reel.id).eq("version", reel.version).eq("status", "needs_attention").select("id");
   if (re) return dbFail(re);
@@ -319,6 +337,31 @@ export async function rerenderReelAction(reelId: string): Promise<ActionResult> 
   const { data, error: ue } = await sb.from("reels")
     .update({ status: "queued", preview_path: null, error: null, claimed_at: null, finished_at: null, version: reel.version + 1 })
     .eq("id", reelId).eq("version", reel.version).in("status", ["ready", "failed"]).select("id");
+  if (ue) return dbFail(ue);
+  if (!data?.length) return fail(STALE);
+  return done();
+}
+
+/**
+ * "Try again" for a reel that stopped (voice, timing or render failed): back in line where it stopped.
+ * The voice, word times and finished images are kept; failed images get fresh attempts.
+ */
+export async function retryReelAction(reelId: string): Promise<ActionResult> {
+  await requireOwner();
+  if (!UUID_RE.test(reelId ?? "")) return fail(NOT_FOUND);
+  const sb = await createClient();
+  const [{ reel, error }, lock] = await Promise.all([getReel(sb, reelId), generateLockReason(sb)]);
+  if (error) return dbFail(error);
+  if (!reel) return fail(NOT_FOUND);
+  if (reel.status !== "failed") return fail("Only a reel that stopped can be tried again.");
+  if (lock) return fail(lock);
+  // Scenes first (the PC ignores a failed reel), then the reel.
+  const { error: se } = await sb.from("reel_scenes").update({ status: "queued", attempts: 0, error: null, claimed_at: null })
+    .eq("reel_id", reelId).eq("status", "failed");
+  if (se) return dbFail(se);
+  const { data, error: ue } = await sb.from("reels")
+    .update({ status: "queued", error: null, claimed_at: null, finished_at: null, preview_path: null, version: reel.version + 1 })
+    .eq("id", reelId).eq("version", reel.version).eq("status", "failed").select("id");
   if (ue) return dbFail(ue);
   if (!data?.length) return fail(STALE);
   return done();

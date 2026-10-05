@@ -88,6 +88,7 @@ describe("every action: owner first, then the id", () => {
     ["redo", () => A.redoReelSceneAction(S1)],
     ["skip", () => A.skipReelSceneAction(S1)],
     ["rerender", () => A.rerenderReelAction(REEL)],
+    ["retry", () => A.retryReelAction(REEL)],
     ["delete", () => A.deleteReelAction(REEL)],
   ];
   for (const [name, call] of calls) {
@@ -105,6 +106,7 @@ describe("every action: owner first, then the id", () => {
     ["redo", (id) => A.redoReelSceneAction(id)],
     ["skip", (id) => A.skipReelSceneAction(id)],
     ["rerender", (id) => A.rerenderReelAction(id)],
+    ["retry", (id) => A.retryReelAction(id)],
     ["delete", (id) => A.deleteReelAction(id)],
   ];
   for (const [name, call] of byId) {
@@ -273,6 +275,12 @@ describe("saveReelScriptAction", () => {
     expect(fake.queries.filter(isUpdate)).toHaveLength(0);
   });
 
+  it("a bad line is named by its scene's position, not its place in the list", async () => {
+    const r = await A.saveReelScriptAction(REEL, { title: "T", lines: [{ id: S3, narration: "", idea: "i" }] });
+    expect(r).toEqual({ ok: false, error: "Line 3 has no words." });
+    expect(fake.queries.filter(isUpdate)).toHaveLength(0);
+  });
+
   it("refuses a line from another reel, a title another reel has, or a reel already approved", async () => {
     const other = "44444444-4444-4444-8444-444444444444";
     expect((await A.saveReelScriptAction(REEL, { title: "T", lines: [{ id: other, narration: "n", idea: "i" }] })).ok).toBe(false);
@@ -289,8 +297,9 @@ describe("saveReelScriptAction", () => {
 });
 
 describe("approveReelAction", () => {
-  it("queues the reel (guarded) and every pending scene", async () => {
+  it("queues every pending scene first, then the reel (guarded)", async () => {
     expect(await A.approveReelAction(REEL)).toEqual({ ok: true });
+    expect(fake.queries.filter(isUpdate).map((q) => q.table)).toEqual(["reel_scenes", "reels"]);
     const [u] = qs("reels", "update");
     expect(patchOf(u)).toMatchObject({ status: "queued", error: null, version: 5 });
     expect(u.ops).toContainEqual(["eq", "version", 4]);
@@ -307,12 +316,17 @@ describe("approveReelAction", () => {
     expect(fake.queries.filter(isUpdate)).toHaveLength(0);
   });
 
-  it("only from script; a stale version changes nothing else", async () => {
+  it("only from script; a stale version puts the scenes back to pending", async () => {
     world({ reel: reelRow({ status: "ready" }) });
     expect((await A.approveReelAction(REEL)).ok).toBe(false);
+    expect(fake.queries.filter(isUpdate)).toHaveLength(0);
     world({ reelUpdated: false });
     expect(await A.approveReelAction(REEL)).toEqual({ ok: false, error: expect.stringMatching(/changed/) });
-    expect(qs("reel_scenes", "update")).toHaveLength(0);
+    const ups = qs("reel_scenes", "update");
+    expect(ups).toHaveLength(2);
+    expect(patchOf(ups[1])).toEqual({ status: "pending" });
+    expect(ups[1].ops).toContainEqual(["eq", "reel_id", REEL]);
+    expect(ups[1].ops).toContainEqual(["eq", "status", "queued"]);
   });
 });
 
@@ -328,7 +342,7 @@ describe("redoReelSceneAction", () => {
     expect(p.seed).not.toBe(77);
     expect(Number.isSafeInteger(p.seed) && (p.seed as number) > 0).toBe(true);
     expect(s.ops).toContainEqual(["eq", "version", 2]);
-    expect(s.ops).toContainEqual(["in", "status", ["done", "failed"]]);
+    expect(s.ops).toContainEqual(["in", "status", ["done", "failed", "skipped"]]);
     const [r] = qs("reels", "update");
     expect(patchOf(r)).toMatchObject({ status: "queued", preview_path: null, pc_path: null, error: null, claimed_at: null, finished_at: null, version: 5 });
     expect(r.ops).toContainEqual(["eq", "version", 4]);
@@ -339,6 +353,13 @@ describe("redoReelSceneAction", () => {
     expect(await A.redoReelSceneAction(S1)).toEqual({ ok: true });
     expect(qs("reel_scenes", "update")).toHaveLength(1);
     expect(qs("reels", "update")).toHaveLength(0);
+  });
+
+  it("a skipped image can be made again (reset like a failed one)", async () => {
+    world({ reel: reelRow({ status: "ready" }), scenes: [sceneRow(S1, 1, { status: "skipped", attempts: 3, error: "x" }), sceneRow(S2, 2, { status: "done" })] });
+    expect(await A.redoReelSceneAction(S1)).toEqual({ ok: true });
+    expect(patchOf(qs("reel_scenes", "update")[0])).toMatchObject({ status: "queued", attempts: 0, error: null });
+    expect(qs("reels", "update")).toHaveLength(1);
   });
 
   it("refuses a scene not finished, a script reel, and obeys the lock", async () => {
@@ -374,8 +395,17 @@ describe("skipReelSceneAction", () => {
     expect(r.ops).toContainEqual(["eq", "version", 4]);
   });
 
+  it("a reel still in line whose image failed 3 times: only the scene is skipped", async () => {
+    world({ reel: reelRow({ status: "queued", claimed_at: "now" }), scenes: [sceneRow(S1, 1, { status: "failed", attempts: 3 })] });
+    expect(await A.skipReelSceneAction(S1)).toEqual({ ok: true });
+    expect(patchOf(qs("reel_scenes", "update")[0])).toMatchObject({ status: "skipped" });
+    expect(qs("reels", "update")).toHaveLength(0);
+  });
+
   it("refused otherwise", async () => {
     world({ reel: reelRow({ status: "imaging" }), scenes: [sceneRow(S1, 1, { status: "failed" })] });
+    expect((await A.skipReelSceneAction(S1)).ok).toBe(false);
+    world({ reel: reelRow({ status: "queued" }), scenes: [sceneRow(S1, 1, { status: "failed", attempts: 2 })] });
     expect((await A.skipReelSceneAction(S1)).ok).toBe(false);
     world({ reel: reelRow({ status: "needs_attention" }), scenes: [sceneRow(S1, 1, { status: "done" })] });
     expect((await A.skipReelSceneAction(S1)).ok).toBe(false);
@@ -405,6 +435,32 @@ describe("rerenderReelAction", () => {
     world({ reel: reelRow({ status: "ready" }), scenes: finished(), health: "comfy-off" });
     expect(await A.rerenderReelAction(REEL)).toEqual({ ok: false, error: expect.stringMatching(/ComfyUI/i) });
     expect(fake.queries.filter(isUpdate)).toHaveLength(0);
+  });
+});
+
+describe("retryReelAction", () => {
+  it("a stopped reel goes back in line: failed images get fresh attempts, the voice / words / done images stay", async () => {
+    world({ reel: reelRow({ status: "failed", error: "voice boom", voice_path: "v", words: [] }) });
+    expect(await A.retryReelAction(REEL)).toEqual({ ok: true });
+    expect(fake.queries.filter(isUpdate).map((q) => q.table)).toEqual(["reel_scenes", "reels"]);
+    const [s] = qs("reel_scenes", "update");
+    expect(patchOf(s)).toEqual({ status: "queued", attempts: 0, error: null, claimed_at: null });
+    expect(s.ops).toContainEqual(["eq", "reel_id", REEL]);
+    expect(s.ops).toContainEqual(["eq", "status", "failed"]);
+    const [r] = qs("reels", "update");
+    expect(patchOf(r)).toEqual({ status: "queued", error: null, claimed_at: null, finished_at: null, preview_path: null, version: 5 });
+    expect(r.ops).toContainEqual(["eq", "version", 4]);
+    expect(r.ops).toContainEqual(["eq", "status", "failed"]);
+  });
+
+  it("only from failed; obeys the lock; stale version", async () => {
+    world({ reel: reelRow({ status: "ready" }) });
+    expect((await A.retryReelAction(REEL)).ok).toBe(false);
+    world({ reel: reelRow({ status: "failed" }), health: "comfy-off" });
+    expect(await A.retryReelAction(REEL)).toEqual({ ok: false, error: expect.stringMatching(/ComfyUI/i) });
+    expect(fake.queries.filter(isUpdate)).toHaveLength(0);
+    world({ reel: reelRow({ status: "failed" }), reelUpdated: false });
+    expect(await A.retryReelAction(REEL)).toEqual({ ok: false, error: expect.stringMatching(/changed/) });
   });
 });
 
