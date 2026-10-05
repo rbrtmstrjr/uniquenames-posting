@@ -41,9 +41,9 @@ export function TodaySkeleton() {
   return (
     <Frame label="Today">
       <HeaderSkeleton />
-      <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_380px] xl:grid-cols-[minmax(0,1fr)_440px] 2xl:grid-cols-2">
+      <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_380px] xl:grid-cols-[minmax(0,1fr)_440px] 2xl:grid-cols-[minmax(0,7fr)_minmax(0,3fr)]">
         {/* New post: title + date, Who (3 fields), Look (theme, details tile, fonts row), Cards, footer. */}
-        <div className="space-y-6 rounded-2xl border border-line bg-surface p-4 shadow-soft sm:p-5">
+        <div className="space-y-6 rounded-2xl lg:order-2 border border-line bg-surface p-4 shadow-soft sm:p-5">
           <div className="flex items-center justify-between gap-3"><Skeleton className="h-7 w-28 rounded-md" /><Skeleton className="h-11 w-40" /></div>
           <div>
             <Skeleton className="mb-3 h-3 w-10 rounded-md" />
@@ -64,11 +64,11 @@ export function TodaySkeleton() {
             <Skeleton className="h-12 w-full sm:w-44" />
           </div>
         </div>
-        {/* Right column: the post being made, then the compact Stock strip (2×2 table beside themes left). */}
-        <div className="min-w-0 space-y-4">
+        {/* Left on desktop: the post being made, then the compact Stock strip. */}
+        <div className="min-w-0 space-y-4 lg:order-1">
         <PanelSkeleton>
           <Skeleton className="mb-4 h-2.5 w-full rounded-full" />
-          <TileGrid count={9} className="grid-cols-3 gap-2 sm:grid-cols-4 lg:grid-cols-3 2xl:grid-cols-5" />
+          <TileGrid count={9} className="grid-cols-3 gap-2 sm:grid-cols-4 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-6" />
         </PanelSkeleton>
         <PanelSkeleton>
           <div className="@container">
