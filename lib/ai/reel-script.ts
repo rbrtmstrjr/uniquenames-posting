@@ -1,5 +1,7 @@
 import "server-only";
+import { capKeys, emotionOf, fixShots, REEL_EMOTIONS, REEL_SHOTS, type ReelEmotion, type ReelShot } from "@/lib/reels/motion";
 import type { ReelCast } from "@/lib/reels/prompt";
+import { DEFAULT_THEME_ID, isDollTheme, type ReelTheme } from "@/lib/reels/themes";
 import { generateJson, type GeminiSchema } from "./gemini";
 
 /** Same model as the n8n Knitted Doll storyboard. */
@@ -11,10 +13,24 @@ export const ALREADY_MADE_CAP = 150;
 /** Longest spoken line (Chatterbox ~4 words/s, one image per line). */
 export const LINE_MAX_WORDS = 14;
 export const TITLE_MAX = 80;
+/** The opening line is a scroll-stopper spoken in under 2 s: the prompt asks for at most 7 words, 9 are accepted. */
+export const HOOK_LINE_MAX_WORDS = 9;
+/** Longest body-language note per line. */
+export const ACTION_MAX = 200;
 
 export const REEL_STAGES = ["newborn", "baby", "toddler", "preschooler"] as const;
 export type ReelStage = (typeof REEL_STAGES)[number];
-export interface ReelScriptScene { beat: string; narration: string; idea: string }
+export interface ReelScriptScene {
+  beat: string; narration: string; idea: string;
+  /** The line's feeling (one of REEL_EMOTIONS). */
+  emotion: ReelEmotion;
+  /** Body language + what the hands do ('' when Gemini gave none). */
+  action: string;
+  /** The framing (one of REEL_SHOTS); never the same on two lines in a row. */
+  shot: ReelShot;
+  /** One of the (at most 3) key moments: gets the 'punch' emphasis. */
+  key: boolean;
+}
 export interface ReelScript { title: string; stage: ReelStage; cast: ReelCast; scenes: ReelScriptScene[] }
 /** An earlier reel, newest first, for the "already made" block. */
 export interface MadeReel { title: string; stage?: string | null }
@@ -22,6 +38,8 @@ export interface ReelScriptInput {
   topic?: string; maxScenes: number; alreadyMade: MadeReel[]; timeoutMs?: number;
   /** Narration speed (settings.reel_speed, 1.00–1.25; default 1 = unchanged): a faster voice fits more words in the same time. */
   speed?: number;
+  /** The reel's visual theme (default knitted): the cast is written as dolls only for Knitted Doll. */
+  theme?: Pick<ReelTheme, "id" | "faces">;
 }
 export type ReelScriptResult = { ok: true; script: ReelScript } | { ok: false; error: string };
 
@@ -67,42 +85,76 @@ export function reelWordBudget(maxScenes: number, speed = 1) {
   };
 }
 
+/** The cast block: crocheted dolls for Knitted Doll, people for every other theme (the style turns them into clay, paper, …). */
+function castRules(dolls: boolean): string {
+  return dolls
+    ? "- The art is a HANDMADE KNITTED-TEXTILE DOLL style (amigurumi crochet dolls made of soft wool and yarn), so describe the recurring cast AS TEXTILE DOLLS, not as people. Start each description with a short name, then the details — e.g. \"the mom doll: a crocheted mother doll with chunky dark-brown yarn hair gathered in a low bun, warm tan wool skin, a mustard-yellow cable-knit cardigan over a cream knitted dress\" and \"the baby doll: a small crocheted baby doll about six months old with a few soft tufts of dark-brown yarn hair, warm tan wool skin, a rust-orange knitted romper with a round cream collar\". Give exact fixed doll details (approximate age, yarn hair colour and length, build, knitted clothing in warm earthy colours — mustard, cream, rust, oatmeal, sage — and its shapes) so the same two dolls appear in every image."
+    : "- The art style is added later by the image system, so describe the recurring cast as REAL PEOPLE with plain, exact details. Start each description with a short name, then the details — e.g. \"the mom: a young Filipino mother in her early thirties with warm tan skin and dark-brown hair gathered in a low bun, wearing a mustard-yellow cardigan over a cream dress\" and \"the baby: a chubby six-month-old baby with warm tan skin and a few soft tufts of dark-brown hair, wearing a rust-orange romper with a round cream collar\". Give exact fixed details (approximate age, hair colour and length, build, clothing in warm earthy colours — mustard, cream, rust, oatmeal, sage — and its shapes) so the same two people appear in every image.";
+}
+
+/** Feeling + pose rules: faceless themes (Knitted Doll, Paper Craft) show the feeling through body language only. */
+function feelingRule(dolls: boolean, faces: boolean): string {
+  if (dolls) return "- The dolls have fixed embroidered faces, so EVERY emotion must show through POSE and HANDS (posture, head tilt, how they hold each other). Keep the dolls grounded and close: sitting, standing, kneeling, lying or cuddling together, the child doll held snugly against the chest or resting in a lap, on a blanket or on the floor. Never have a doll lift, raise, toss or hold the child doll up in the air.";
+  if (!faces) return "- The characters have simple fixed faces, so EVERY emotion must show through POSE and HANDS (posture, head tilt, how they hold each other).";
+  return "- Faces are expressive in this style: the emotion should be readable on both faces, and the body language should match it.";
+}
+
 /** The ported storyboard prompt; `alreadyMade` is newest first. */
-export function reelScriptPrompt({ topic, maxScenes, alreadyMade, speed }: ReelScriptInput): { system: string; prompt: string } {
+export function reelScriptPrompt({ topic, maxScenes, alreadyMade, speed, theme }: ReelScriptInput): { system: string; prompt: string } {
   const t = oneLine(topic ?? "");
   const made = alreadyMade
     .map((m) => ({ title: oneLine(m.title ?? ""), stage: oneLine(m.stage ?? "") }))
     .filter((m) => m.title)
     .slice(0, ALREADY_MADE_CAP);
   const b = reelWordBudget(maxScenes, speed);
+  const th = theme ?? { id: DEFAULT_THEME_ID, faces: false };
+  const dolls = isDollTheme(th);
+  const name = dolls ? "'the mom doll', 'the toddler doll'" : "'the mom', 'the toddler'";
+  const who = dolls ? "dolls" : "characters";
   const prompt = [
     t ? `Topic: ${t}` : AUTO_TOPIC,
     "",
     "ALREADY MADE — DO NOT REPEAT: below are titles you have ALREADY produced. Do NOT repeat any of these titles, themes, or the same stage/angle. Deliberately choose a CLEARLY DIFFERENT topic and (when possible) a different early-childhood stage from the recent ones:",
     made.length ? made.map((m) => `- ${m.title}${m.stage ? ` (${m.stage})` : ""}`).join("\n") : "(none yet — this is the first one)",
     "",
-    "Write a COHESIVE vertical Reel told with STATIC images (one still image per scene), featuring the SAME recurring parent-and-child characters, that builds ONE continuous emotional wave. Structure (built for SHARES & saves): HOOK — an emotional gut-punch that opens a tender loop ('One day you'll carry them for the last time — and you won't even know it's the last'); then gently BUILD with small, specific, aching-sweet details of this fleeting stage (the tiny socks, the 3am feeds, the way they reach for you); then TURN to a soft, wise truth that reframes the exhaustion as a gift; then a warm emotional CLOSE giving permission to slow down and hold on + a heartfelt signature tagline. FEEL like a warm hug and flow as ONE story — never a tip list.",
+    "Write a COHESIVE vertical Reel told with STATIC images (one still image per scene), featuring the SAME recurring parent-and-child characters, that builds ONE continuous emotional wave. Structure (built for SHARES & saves): HOOK — a scroll-stopping gut-punch that opens a tender loop ('You'll carry them for the last time.'); then gently BUILD with small, specific, aching-sweet details of this fleeting stage (the tiny socks, the 3am feeds, the way they reach for you); then TURN to a soft, wise truth that reframes the exhaustion as a gift; then a warm emotional CLOSE giving permission to slow down and hold on + a heartfelt signature tagline. FEEL like a warm hug and flow as ONE story — never a tip list.",
     "",
-    "RETENTION & UNSKIPPABILITY (bake these in): (1) The FIRST image must be visually dramatic — the opening scene's idea is a striking, high-emotion moment, NEVER a calm establishing view. (2) Open a CURIOSITY LOOP in the first lines and only pay it off near the END (tease 'the one thing most parents miss', 'wait for the last one', 'number 3 changed everything'). (3) If you list things, PROMISE the number up front ('here are 3...') and count them out loud so viewers stay for all of them. (4) NO dead weight — every single line must make them need the next one; cut anything skippable. (5) END with a satisfying payoff, then a short, casual call to action to follow the page for more (never salesy). (6) The very first line is a short, punchy hook. Only the first 1-2 lines are the 'hook' beat; then build, turn and close.",
+    "THE AD-STYLE HOOK, MINI-HOOKS AND LOOP (CRITICAL — this must play like an unskippable ad):",
+    `- LINE 1 IS A SCROLL-STOPPER spoken in under 2 seconds: at most 7 words (never more than ${HOOK_LINE_MAX_WORDS}). Make it a bold claim ('Your baby remembers more than you think.'), a 'stop doing X' warning ('Stop rushing bedtime, mama.'), or an open question ('Why do babies fight sleep?'). NEVER a greeting (no 'hi', 'hello', 'hey mama', 'welcome'), never an introduction, never the page name.`,
+    "- Every 4-6 lines, drop a MINI-HOOK line that re-opens curiosity and pulls them forward ('But here's the part nobody tells you...', 'And the next one surprised me.', 'Wait, it gets better.'). It still counts as a normal 8-12 word line.",
+    "- The LAST line LOOPS BACK to the opening: it echoes line 1's words or answers its question, so the video replays seamlessly.",
     "",
-    `PACING & COUNT (CRITICAL): Write the COMPLETE narration for a ${b.secLo}-${b.secHi} second video. The voice speaks briskly (about ${b.wpsLo}-${b.wpsHi} words per second), so the narration must be ${b.lo}-${b.hi} words in total. Break it into spoken lines of 8-12 words EACH (only the very first hook line may be shorter) — ONE image per line, so cuts stay fast with zero dead space. Never more than ${LINE_MAX_WORDS} words in a line. Write EXACTLY ${b.minScenes}-${maxScenes} scenes — never fewer than ${b.minScenes}, never more than ${maxScenes}. A script under ${b.lo} words is TOO SHORT and will be rejected. BEFORE ANSWERING, COUNT: count your scenes (must be ${b.minScenes}-${maxScenes}), count the words in every line (8-12 each) and add them up (must be ${b.lo}-${b.hi}); if it is short, add more lines to the story until it fits.`,
+    "RETENTION & UNSKIPPABILITY (bake these in): (1) The FIRST image must be visually dramatic — the opening scene's idea is a striking, high-emotion moment, NEVER a calm establishing view. (2) Open a CURIOSITY LOOP in the first lines and only pay it off near the END (tease 'the one thing most parents miss', 'wait for the last one', 'number 3 changed everything'). (3) If you list things, PROMISE the number up front ('here are 3...') and count them out loud so viewers stay for all of them. (4) NO dead weight — every single line must make them need the next one; cut anything skippable. (5) END with a satisfying payoff, then a short, casual call to action to follow the page for more (never salesy), and the loop back to line 1. (6) The very first line is a short, punchy hook. Only the first 1-2 lines are the 'hook' beat; then build, turn and close.",
+    "",
+    `PACING & COUNT (CRITICAL): Write the COMPLETE narration for a ${b.secLo}-${b.secHi} second video. The voice speaks briskly (about ${b.wpsLo}-${b.wpsHi} words per second), so the narration must be ${b.lo}-${b.hi} words in total. Break it into spoken lines of 8-12 words EACH (only the very first hook line is shorter) — ONE image per line, so cuts stay fast with zero dead space. Never more than ${LINE_MAX_WORDS} words in a line. Write EXACTLY ${b.minScenes}-${maxScenes} scenes — never fewer than ${b.minScenes}, never more than ${maxScenes}. A script under ${b.lo} words is TOO SHORT and will be rejected. BEFORE ANSWERING, COUNT: count your scenes (must be ${b.minScenes}-${maxScenes}), count the words in every line (8-12 each) and add them up (must be ${b.lo}-${b.hi}); if it is short, add more lines to the story until it fits.`,
     "",
     "CRITICAL for visual consistency:",
     "- Define ONE recurring cast that FITS THIS TOPIC — a parent and a YOUNG child of the appropriate stage for the subject (e.g. a mother cradling her newborn, a father holding his baby, a mom and her toddler, a dad and his preschooler). The child MUST be a newborn, baby, toddler, or young child (age 0-5) — NEVER a tween or teenager. Vary the parent (mom or dad) and the child's stage to match the topic.",
-    "- The art is a HANDMADE KNITTED-TEXTILE DOLL style (amigurumi crochet dolls made of soft wool and yarn), so describe the recurring cast AS TEXTILE DOLLS, not as people. Start each description with a short name, then the details — e.g. \"the mom doll: a crocheted mother doll with chunky dark-brown yarn hair gathered in a low bun, warm tan wool skin, a mustard-yellow cable-knit cardigan over a cream knitted dress\" and \"the baby doll: a small crocheted baby doll about six months old with a few soft tufts of dark-brown yarn hair, warm tan wool skin, a rust-orange knitted romper with a round cream collar\". Give exact fixed doll details (approximate age, yarn hair colour and length, build, knitted clothing in warm earthy colours — mustard, cream, rust, oatmeal, sage — and its shapes) so the same two dolls appear in every image.",
+    castRules(dolls),
     "",
-    "THE IMAGE IDEA for each scene (the knitted style and the cast details are added later by the image system, so keep the idea plain):",
-    "- One or two sentences of plain visual description: who is in frame (by their short names, e.g. 'the mom doll', 'the toddler doll'), what they are doing, where, and the emotion. It must visually MATCH that scene's line and advance the story.",
-    "- Vary the scenes by ACTION and SETTING: different rooms and places (bedroom, kitchen, sala, garden, a jeepney ride, a market, a church, lola's house, a bath, a park) and different activities. Use mostly medium and wide views of the dolls in their setting; never rely on extreme close-ups or tiny details filling the frame.",
-    "- Describe only what IS in the picture (never mention what is absent). Leave out style words (knitted, crochet, yarn, wool, felt, amigurumi, doll materials), lighting, colours of the art style, lenses, picture-taking gear and framing jargon.",
+    "THE IMAGE IDEA for each scene (the art style and the cast details are added later by the image system, so keep the idea plain):",
+    `- One or two sentences of plain visual description: who is in frame (by their short names, e.g. ${name}), what they are doing, and where. It must visually MATCH that scene's line and advance the story.`,
+    `- Vary the scenes by ACTION and SETTING: different rooms and places (bedroom, kitchen, sala, garden, a jeepney ride, a market, a church, lola's house, a bath, a park) and different activities. Keep the ${who} clearly in view; never rely on extreme close-ups or tiny details filling the frame.`,
+    dolls
+      ? "- Describe only what IS in the picture (never mention what is absent). Leave out style words (knitted, crochet, yarn, wool, felt, amigurumi, doll materials), lighting, colours of the art style, lenses, picture-taking gear and framing jargon."
+      : "- Describe only what IS in the picture (never mention what is absent). Leave out art-style words (materials, drawing or rendering style), lighting, colours of the art style, lenses, picture-taking gear and framing jargon.",
     "- Pictures carry no writing: never ask for signs, labels, books with words, screens with text, letters or numbers.",
+    "",
+    "EMOTION, ACTION, SHOT AND KEY for each scene (they make every picture feel different):",
+    `- "emotion": exactly one of ${REEL_EMOTIONS.join("|")} — the feeling of that moment. Follow the story's wave and VARY it: never the same emotion on more than 2 lines in a row.`,
+    "- \"action\": the body language and what the hands do, in one short phrase (e.g. 'kneels and cups the toddler's cheeks in both hands', 'leans back laughing, arms wrapped around the baby').",
+    feelingRule(dolls, th.faces),
+    `- "shot": exactly one of ${REEL_SHOTS.join("|")}. NEVER the same shot on two lines in a row; mostly medium, wide and eye-level, with low-angle, over-the-shoulder and hands-detail as accents.`,
+    "- \"key\": true on AT MOST 3 lines — the biggest emotional turns or payoffs later in the story (they get a punchy zoom; line 1 already has one, so never line 1); false on every other line.",
     "",
     "Return ONLY JSON in EXACTLY this shape:",
     "{",
     '  "title": "<short internal title, at most 60 characters, different from every already-made title>",',
     '  "stage": "<the single early-childhood stage this video targets: exactly one of newborn|baby|toddler|preschooler>",',
-    '  "cast": { "adult": "<the parent doll, exact fixed description>", "child": "<the child doll, exact fixed description>" },',
-    '  "scenes": [ { "beat": "<hook|build|turn|close>", "narration": "<the short spoken line for this scene — natural, second person>", "idea": "<plain visual description of this scene\'s picture>" } ]',
+    dolls
+      ? '  "cast": { "adult": "<the parent doll, exact fixed description>", "child": "<the child doll, exact fixed description>" },'
+      : '  "cast": { "adult": "<the parent, exact fixed description>", "child": "<the child, exact fixed description>" },',
+    `  "scenes": [ { "beat": "<hook|build|turn|close>", "narration": "<the short spoken line for this scene — natural, second person>", "idea": "<plain visual description of this scene's picture>", "emotion": "<${REEL_EMOTIONS.join("|")}>", "action": "<body language + hands>", "shot": "<${REEL_SHOTS.join("|")}>", "key": <true|false> } ]`,
     "}",
     `The number of scenes follows the script (one image per short line), up to ${maxScenes} scenes.`,
   ].join("\n");
@@ -127,8 +179,12 @@ const SCHEMA: GeminiSchema = {
           beat: { type: "STRING", enum: BEATS },
           narration: { type: "STRING", description: "one spoken line, 8-12 words" },
           idea: { type: "STRING", description: "plain visual description of the picture" },
+          emotion: { type: "STRING", enum: [...REEL_EMOTIONS] },
+          action: { type: "STRING", description: "body language + what the hands do, one short phrase" },
+          shot: { type: "STRING", enum: [...REEL_SHOTS] },
+          key: { type: "BOOLEAN", description: "true on at most 3 lines: the biggest emotional moments" },
         },
-        required: ["beat", "narration", "idea"],
+        required: ["beat", "narration", "idea", "emotion", "action", "shot", "key"],
       },
     },
   },
@@ -139,6 +195,8 @@ const str = (v: unknown) => (typeof v === "string" ? oneLine(v) : "");
 const words = (s: string) => s.split(" ").filter(Boolean).length;
 // "camera" in an image prompt summons one: the usual "looks at the camera" becomes "toward the viewer".
 export const lightClean = (s: string) => s.replace(/\b(?:at|into|towards?) (?:the |a )?camera\b/gi, "toward the viewer");
+/** Line 1 must stop the scroll, never greet. */
+export const GREETING_RE = /^(?:hi|hello|hey|hiya|welcome|greetings|good (?:morning|afternoon|evening|day)|kumusta|mabuhay)\b/i;
 
 /** Check and normalise Gemini's JSON into a script, or say what is wrong. */
 export function validateReelScript(raw: unknown, maxScenes: number, speed = 1): ReelScriptResult {
@@ -154,7 +212,8 @@ export function validateReelScript(raw: unknown, maxScenes: number, speed = 1): 
   const list = Array.isArray(d.scenes) ? d.scenes.slice(0, maxScenes) : [];
   if (list.length < 2) return { ok: false, error: "The script needs at least 2 scenes." };
   const budget = reelWordBudget(maxScenes, speed);
-  const scenes: ReelScriptScene[] = [];
+  const scenes: Omit<ReelScriptScene, "shot" | "key">[] = [];
+  const raws: Record<string, unknown>[] = [];
   for (const [i, s] of list.entries()) {
     const o = (s && typeof s === "object" ? s : {}) as Record<string, unknown>;
     const narration = str(o.narration);
@@ -162,13 +221,24 @@ export function validateReelScript(raw: unknown, maxScenes: number, speed = 1): 
     if (words(narration) > LINE_MAX_WORDS) return { ok: false, error: `Line ${i + 1} is longer than ${LINE_MAX_WORDS} words.` };
     const idea = lightClean(str(o.idea));
     if (!idea) return { ok: false, error: `Line ${i + 1} has no image idea.` };
+    if (i === 0 && words(narration) > HOOK_LINE_MAX_WORDS) {
+      return { ok: false, error: `Line 1 is too long for a hook (${words(narration)} words; at most ${HOOK_LINE_MAX_WORDS}).` };
+    }
+    if (i === 0 && GREETING_RE.test(narration)) return { ok: false, error: "Line 1 is a greeting, not a hook." };
     const beat = BEATS.includes(str(o.beat)) ? str(o.beat) : "build";
-    scenes.push({ beat, narration, idea });
+    // A feeling Gemini made up falls back to tender; the body-language note is optional.
+    const emotion = emotionOf(o.emotion) ?? "tender";
+    const action = lightClean(str(o.action)).slice(0, ACTION_MAX).trim();
+    scenes.push({ beat, narration, idea, emotion, action });
+    raws.push(o);
   }
   if (scenes.length < budget.minScenes) return { ok: false, error: `Script too short: ${scenes.length} scenes (needs at least ${budget.minScenes}).` };
   const total = scenes.reduce((n, x) => n + words(x.narration), 0);
   if (total < budget.minWords) return { ok: false, error: `Script too short: ${total} words (needs at least ${budget.minWords}).` };
-  return { ok: true, script: { title, stage, cast, scenes } };
+  // Never the same shot twice in a row; at most 3 key lines after line 1 (the first ones marked).
+  const shots = fixShots(raws.map((o) => o.shot));
+  const keys = capKeys(raws.map((o, i) => ({ key: i > 0 && o.key === true })));   // line 1 punches anyway
+  return { ok: true, script: { title, stage, cast, scenes: scenes.map((x, i) => ({ ...x, shot: shots[i], key: keys[i] })) } };
 }
 
 /** Write a reel script with Gemini. Never throws. */

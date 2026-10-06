@@ -1,44 +1,118 @@
 import { NO_TEXT } from "@/lib/planner/prompt";
+import { emotionOf, shotOf, type ReelEmotion, type ReelShot } from "./motion";
+import { isDollTheme, KNIT_STYLE, type ReelTheme } from "./themes";
+
+export { KNIT_STYLE };
 
 // Z-Image runs at cfg 1 with no negative prompt: naming an unwanted thing summons it, so every
 // line here only describes what should be in frame (NO_TEXT is the one proven exception).
 // Never the word "camera"; framing is set with a lens line, as in the photoshoot planner.
 
-/** The knitted-doll look from the PC spike (round 3, docs/reference/reel-pc-spike.md); the set line widened beyond rooms. */
-export const KNIT_STYLE =
-  "Handmade amigurumi doll scene: every character is a soft crocheted wool doll, captured as premium handcrafted toy photography. " +
-  "A tight, clearly visible crochet stitch grid covers the whole face and body, with fine fuzzy wool fibres on every surface; " +
-  "a slightly oversized round head and soft chubby rounded limbs. Large glossy round black bead eyes with a small bright catchlight, " +
-  "a tiny stitched nose bump, a simple curved embroidered smile, thin embroidered eyebrows, and hair made of loose chunky yarn strands, " +
-  "each strand individually visible and softly fuzzy. The whole world is sewn and knitted by hand: every setting is built from felt and linen — " +
-  "felt walls or felt sky, felt ground and floors, felt furniture and shelves, knitted blankets, stitched felt props and yarn details, " +
-  "with small charming irregularities in the stitching. Soft diffused warm daylight from the front and a little to the side, " +
-  "gentle low contrast, soft contact shadows, gentle highlights on the wool fibres and the bead eyes. " +
-  "Palette: warm beige, cream, oatmeal and natural linen with mustard yellow, warm orange, rust and sage accents. " +
-  "Soft rounded edges everywhere, cozy and tender.";
-
-/** The script's two recurring dolls (stored as `reels.doll_cast`). */
+/** The script's two recurring characters (stored as `reels.doll_cast`). */
 export interface ReelCast { adult: string; child: string }
 
-/** Z-Image keeps a medium/wide doll shot, so framing stays there; the opening hook just asks for more emotion. */
-const HOOK_LENS = "50mm lens at f/2.8, a medium shot full of strong emotion, the dolls sharp";
-const CLOSE_LENS = "35mm lens at f/4, a warm medium-wide view, the dolls sharp";
-const DEFAULT_LENS = "35mm lens at f/4, the whole cozy handmade setting in view, the dolls sharp";
+/** What scenePrompt needs from a line (emotion / action / shot are null on reels written before migration 007). */
+export interface PromptScene {
+  idea: string; beat?: string | null;
+  emotion?: string | null; action?: string | null; shot?: string | null;
+}
+
+/** Lines written before 007 have no shot: the old lens choice (opening = medium full of emotion). */
+const lensOld = (who: string, hook: boolean, beat?: string | null) =>
+  hook ? `50mm lens at f/2.8, a medium shot full of strong emotion, the ${who} sharp`
+    : beat === "close" ? `35mm lens at f/4, a warm medium-wide view, the ${who} sharp`
+      : `35mm lens at f/4, the whole cozy setting in view, the ${who} sharp`;
+
+/** The framing per shot, as a lens line (positive-only, never "camera"). */
+export const SHOT_LENS: Record<ReelShot, (who: string) => string> = {
+  wide: (who) => `24mm lens at f/5.6, a wide view of the whole setting, the ${who} clear and sharp within it`,
+  medium: (who) => `50mm lens at f/2.8, a medium view of the ${who} from the waist up, the ${who} sharp`,
+  "over-the-shoulder": () => "35mm lens at f/2.8, a view over the parent's shoulder toward the child, the shoulder soft in the foreground, the child sharp",
+  "low-angle": (who) => `28mm lens at f/4, a low-angle view looking up at the ${who}, the ${who} sharp`,
+  "hands-detail": () => "85mm lens at f/2.8, a close medium view centred on the hands and what they hold, the faces still in frame, the hands sharp",
+  "eye-level": (who) => `35mm lens at f/4, an eye-level view at the child's height, the cozy setting around them, the ${who} sharp`,
+};
+
+/** A feeling as a visible facial expression (themes with expressive faces). */
+export const EMOTION_FACE: Record<ReelEmotion, string> = {
+  laughing: "laughing, eyes squeezed into happy crescents, mouths wide open in delight",
+  playful: "playful, wide cheeky grins, bright sparkling eyes, eyebrows raised in fun",
+  surprised: "surprised, eyebrows high, eyes wide, mouths open round in wonder",
+  curious: "curious, heads tilted, eyes wide and bright, small wondering smiles",
+  determined: "determined, brows set, lips pressed into a firm brave smile, eyes focused",
+  proud: "proud, chins up, beaming wide smiles, shining eyes",
+  relieved: "relieved, eyes softly closed, long easy smiles, faces calm and loose",
+  tender: "tender, a soft loving gaze, gentle small smiles",
+  cuddly: "cozy and content, eyes half closed, cheeks pressed together, sleepy smiles",
+  teary: "teary, inner brows lifted, glistening eyes with a visible tear, a soft trembling smile",
+  worried: "worried, brows drawn together, lips pressed tight, eyes searching",
+  exhausted: "exhausted, heavy-lidded tired eyes, a weary half smile",
+};
+
+/** A feeling as body language only (themes whose faces stay fixed: knitted, papercraft). */
+export const EMOTION_POSE: Record<ReelEmotion, string> = {
+  laughing: "bodies tipped back with joy, arms flung wide",
+  playful: "bouncy and mid-play, arms reaching out to each other",
+  surprised: "leaning back all of a sudden, hands up at the cheeks",
+  curious: "leaning forward, heads tilted toward what they are looking at",
+  determined: "standing tall, chest forward, one hand in a small brave fist",
+  proud: "standing upright, chest high, arms open wide",
+  relieved: "shoulders dropped, leaning back softly, a hand resting on the chest",
+  tender: "leaning in close, heads gently tipped toward each other",
+  cuddly: "wrapped in a snug hug, cheek against cheek",
+  teary: "heads bowed close together, holding each other near, a hand over the heart",
+  worried: "hunched forward, hands clasped tight, leaning close to the child",
+  exhausted: "slumped low on the seat, head resting back, arms heavy and still",
+};
+
+/** Knitted dolls: a lifted baby doll turns into two babies (spike), so the dolls stay grounded (positive wording). */
+export const KNIT_POSE =
+  "Both dolls stay close and grounded: sitting, standing, kneeling or cuddling together, the child doll held snugly against the chest or resting in a lap, on a blanket or on the floor.";
 
 const clean = (s: string) => s.replace(/\s+/g, " ").trim().replace(/[\s.;,]+$/, "");
 
 /**
- * One scene's image prompt: moment + lens first (order matters), then style, cast, composition, NO_TEXT.
- * Only the opening picture (index 0) gets the hook treatment.
+ * Doll wording → people wording, for themes that are not Knitted Doll ("the mom doll: a crocheted mother doll with
+ * yarn hair, warm tan wool skin" → "the mom: a mother with hair, warm tan skin"). The stored cast and ideas keep
+ * their words, so switching back to Knitted Doll gives the original prompt again.
  */
-export function scenePrompt(cast: ReelCast, idea: string, beat: string, index: number): string {
+export function undoll(s: string): string {
+  return s
+    .replace(/\b(?:crocheted|crochet|amigurumi|knitted|handmade|stitched)\s+(?=[a-z])/gi, "")
+    .replace(/\b(?:yarn|wool|woollen|woolen)\s+(?=(?:hair|skin|tufts?|curls?|strands?|braids?|ponytails?|eyebrows?|lashes|fringe)\b)/gi, "")
+    .replace(/\b(the|both|two|these|those) dolls\b/gi, (_, w: string) => `${w} ${w.toLowerCase() === "the" ? "characters" : "of them"}`)
+    .replace(/(\w) doll(?:'s|’s)/gi, "$1's")
+    .replace(/(\w) dolls?\b/gi, "$1")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * One line's image prompt: moment + feeling + lens first (order matters), then the theme's style, the cast,
+ * composition, NO_TEXT. The feeling is a visible facial expression for themes with faces and body language only
+ * for the others. Only the opening picture (index 0) gets the hook treatment.
+ */
+export function scenePrompt(theme: ReelTheme, cast: ReelCast, scene: PromptScene, index: number): string {
+  const dolls = isDollTheme(theme);
+  const fix = (s: string | null | undefined) => clean(dolls ? (s ?? "") : undoll(s ?? ""));
+  const who = dolls ? "dolls" : "characters";
   const hook = index === 0;
   const moment = hook ? "one striking, high-emotion moment" : "one tender moment";
-  const lens = hook ? HOOK_LENS : beat === "close" ? CLOSE_LENS : DEFAULT_LENS;
+  const emotion = emotionOf(scene.emotion);
+  const action = fix(scene.action);
+  const feeling = !emotion ? "" : theme.faces
+    ? ` Emotion: ${EMOTION_FACE[emotion]}.`
+    : ` Feeling: ${emotion}, shown through pose: ${EMOTION_POSE[emotion]}.`;
+  const body = action ? ` Body language: ${action}.` : "";
+  const shot = shotOf(scene.shot);
+  let lens = shot ? SHOT_LENS[shot](who) : lensOld(who, hook, scene.beat);
+  if (hook && shot) lens += ", full of strong emotion";
+  const characters = dolls ? "the same two dolls in every picture" : "the same two people in every picture";
+  const set = dolls ? "the handmade set" : "the scene";
   return [
-    `A single full-bleed vertical 9:16 picture of ${moment}. Moment: ${clean(idea)}. Lens: ${lens}.`,
-    `${KNIT_STYLE} Characters (the same two dolls in every picture): ${clean(cast.adult)}; ${clean(cast.child)}.`,
-    "Composition: the handmade set fills the whole frame edge to edge; the dolls and their action sit in the upper and middle part of the frame, and the band just below the middle is calm and uncluttered — a soft, simple, evenly lit stretch of the scene's own floor, blanket or background.",
+    `A single full-bleed vertical 9:16 picture of ${moment}. Moment: ${fix(scene.idea)}.${feeling}${body} Lens: ${lens}.`,
+    `${theme.style} Characters (${characters}): ${fix(cast.adult)}; ${fix(cast.child)}.${dolls ? ` ${KNIT_POSE}` : ""}`,
+    `Composition: ${set} fills the whole frame edge to edge; the ${who} and their action sit in the upper and middle part of the frame, and the band just below the middle is calm and uncluttered — a soft, simple, evenly lit stretch of the scene's own floor, blanket or background.`,
     NO_TEXT,
   ].join("\n");
 }
