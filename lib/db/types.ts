@@ -58,6 +58,8 @@ export interface SettingsRow {
   /** Background music under the voice (default on) and its volume in % (5–40, default 18). */
   reel_music?: boolean;
   reel_music_volume?: number;
+  /** Reels (migration 007; absent before it runs): the default visual theme, a reel_themes id (default 'knitted'). */
+  reel_theme_id?: ReelThemeId;
   updated_at: string;
 }
 export type VoiceSampleStatus = "missing" | "queued" | "making" | "ready" | "failed";
@@ -81,6 +83,34 @@ export interface ReelVoiceRow {
 }
 /** What claim_next_voice_sample() returns to the PC (null = nothing to do). */
 export interface VoiceSampleClaim { voice: ReelVoiceRow }
+/** The 8 visual themes (migration 007), in display order. */
+export const REEL_THEME_IDS = ["knitted", "animated3d", "watercolor", "clay", "papercraft", "anime", "sketch", "cinematic"] as const;
+export type ReelThemeId = (typeof REEL_THEME_IDS)[number];
+export type ThemePreviewStatus = "missing" | "queued" | "making" | "ready" | "failed";
+/** A visual theme (migration 007): a fixed positive-only style block + one preview picture made by the PC. */
+export interface ReelThemeRow {
+  id: ReelThemeId;
+  label: string;
+  emoji: string;
+  blurb: string;
+  /** The positive-only style block put in front of every image prompt. */
+  style: string;
+  /** Expressive faces; false = feelings show through pose only (knitted, papercraft). */
+  faces: boolean;
+  /** The worker turns the picture grey after Z-Image (sketch). */
+  grayscale: boolean;
+  sort: number;
+  /** `themes/<id>/preview-v<version>.jpg` in the reels bucket. */
+  preview_path: string | null;
+  preview_status: ThemePreviewStatus;
+  error: string | null;
+  version: number; claimed_at: string | null; created_at: string; updated_at: string;
+}
+/** What claim_next_theme_preview() returns to the PC (null = nothing to do). */
+export interface ThemePreviewClaim { theme: ReelThemeRow }
+/** The camera move per line (migration 007, reel_scenes_motion_check); no AI motion this round. */
+export const REEL_MOTIONS = ["push_in", "pull_out", "pan_left", "pan_right", "tilt_up", "tilt_down", "punch"] as const;
+export type ReelMotion = (typeof REEL_MOTIONS)[number];
 /** Reel lifecycle (migration 005). script = waiting for review; queued..rendering = the PC is working on it. */
 export type ReelStatus = "script" | "queued" | "voicing" | "imaging" | "rendering" | "ready" | "needs_attention" | "failed";
 export type ReelSceneStatus = "pending" | "queued" | "generating" | "done" | "failed" | "skipped";
@@ -99,6 +129,8 @@ export interface ReelRow {
   voice_id?: string | null;
   /** Migration 006: null = music not made yet; '' = the music step failed (voice only); else `<id>/music-v<n>.flac`. */
   music_path?: string | null;
+  /** Migration 007 (absent before it runs): the visual theme (null = settings.reel_theme_id). */
+  theme_id?: ReelThemeId | null;
   version: number; claimed_at: string | null; started_at: string | null; finished_at: string | null;
   created_at: string; updated_at: string;
 }
@@ -109,6 +141,12 @@ export interface ReelSceneRow {
   narration: string; image_prompt: string; seed: number;
   status: ReelSceneStatus; photo_path: string | null; attempts: number; error: string | null;
   start_s: number | null; end_s: number | null; version: number; claimed_at: string | null;
+  /** Migration 007 (absent before it runs): the line's feeling, body language + hands, framing (all null until the script sets them). */
+  emotion?: string | null; action?: string | null; shot?: string | null;
+  /** Migration 007: a key line (gets the 'punch' emphasis); default false. */
+  key_moment?: boolean;
+  /** Migration 007: the camera move the render uses; null = the render picks one. */
+  motion?: ReelMotion | null;
   created_at: string; updated_at: string;
 }
 /** What claim_next_reel_step(p_no_comfy) returns to the PC (null = nothing to do). */

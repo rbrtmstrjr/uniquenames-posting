@@ -14,6 +14,7 @@ const m004 = read("supabase", "migrations", "004_subject_age.sql");
 const m005raw = read("supabase", "migrations", "005_reels.sql");
 const m005 = stripSupabase(m005raw);
 const m006 = stripSupabase(read("supabase", "migrations", "006_reel_voices.sql"));
+const m007 = stripSupabase(read("supabase", "migrations", "007_reel_themes.sql"));
 
 async function liveDb() {
   const db = new PGlite();
@@ -294,8 +295,8 @@ describe("requeue_stuck_reels", () => {
   });
 });
 
-// schema.sql also holds 006 (it changes claim_next_reel_step / requeue_stuck_reels): compare with 006 applied too.
-describe("fresh schema.sql matches v1 + 002..005 (+ 006)", () => {
+// schema.sql also holds 006 and 007 (they change claim_next_reel_step / requeue_stuck_reels): compare with them applied too.
+describe("fresh schema.sql matches v1 + 002..005 (+ 006, 007)", () => {
   const TABLES = "('settings','reels','reel_scenes','cards','posts')";
   const shape = async (db: PGlite) => ({
     columns: (await db.query(`select table_name, column_name, data_type, is_nullable, column_default from information_schema.columns
@@ -314,6 +315,7 @@ describe("fresh schema.sql matches v1 + 002..005 (+ 006)", () => {
   it("has the same columns, constraints, indexes, triggers and function bodies", async () => {
     const migrated = await migratedDb();
     await migrated.exec(m006);
+    await migrated.exec(m007);
     const want = await shape(migrated);
     expect(want.functions).toHaveLength(5);
     expect(want.triggers.filter((t) => (t as { t: string }).t.startsWith("reel"))).toHaveLength(2);

@@ -14,6 +14,7 @@ const m004 = read("supabase", "migrations", "004_subject_age.sql");
 const m005 = stripSupabase(read("supabase", "migrations", "005_reels.sql"));
 const m006raw = read("supabase", "migrations", "006_reel_voices.sql");
 const m006 = stripSupabase(m006raw);
+const m007 = stripSupabase(read("supabase", "migrations", "007_reel_themes.sql"));
 
 const GEMINI = [
   ["zephyr", "Bright"], ["puck", "Upbeat"], ["charon", "Informative"], ["kore", "Firm"], ["fenrir", "Excitable"],
@@ -291,7 +292,8 @@ describe("claim_next_voice_sample", () => {
   });
 });
 
-describe("fresh schema.sql matches v1 + 002..006", () => {
+// schema.sql also holds 007 (new columns, requeue_stuck_reels): compare with it applied too.
+describe("fresh schema.sql matches v1 + 002..006 (+ 007)", () => {
   const TABLES = "('settings','reels','reel_scenes','reel_voices','cards','posts')";
   const FUNCS = "('create_post','claim_next_card','requeue_stuck_cards','claim_next_reel_step','requeue_stuck_reels','reel_next_step','claim_next_voice_sample')";
   const shape = async (db: PGlite) => ({
@@ -309,7 +311,9 @@ describe("fresh schema.sql matches v1 + 002..006", () => {
   });
 
   it("has the same columns, constraints, indexes, triggers, function bodies and voice rows", async () => {
-    const want = await shape(await migratedDb());
+    const migrated = await migratedDb();
+    await migrated.exec(m007);
+    const want = await shape(migrated);
     expect(want.functions).toHaveLength(7);
     expect(want.voices).toHaveLength(31);
     expect(want.triggers.filter((t) => (t as { t: string }).t === "reel_voices")).toHaveLength(1);
@@ -351,6 +355,6 @@ describe("006 Supabase-only block", () => {
       expect(sql).not.toMatch(/function public\.claim_next_reel_step\(boolean\) to/);
     }
     expect(m006raw).toMatch(/alter publication supabase_realtime add table public\.reel_voices/);
-    expect(schema).toMatch(/array\[[^\]]*'reel_voices'\][\s\S]*supabase_realtime/);
+    expect(schema).toMatch(/array\[[^\]]*'reel_voices'[^\]]*\][\s\S]*supabase_realtime/);
   });
 });

@@ -1,5 +1,5 @@
 -- Unique Names posting: database. Paste the whole file into the Supabase SQL editor and run it once.
--- A project created before v2 runs supabase/migrations/002_v2.sql, 003_post_fonts.sql, 004_subject_age.sql, 005_reels.sql then 006_reel_voices.sql instead (this file already includes them).
+-- A project created before v2 runs supabase/migrations/002_v2.sql, 003_post_fonts.sql, 004_subject_age.sql, 005_reels.sql, 006_reel_voices.sql then 007_reel_themes.sql instead (this file already includes them).
 -- Status 'pending' = an AI-suggested name/theme waiting for approval; nothing here ever plans it (only 'available').
 
 -- ---------------------------------------------------------------- tables
@@ -33,6 +33,47 @@ insert into public.reel_voices (id, label, tone) values
   ('builtin', 'Built-in', 'Default')
 on conflict (id) do nothing;
 
+-- reels (007): visual themes, each a positive-only style block + one preview picture; before settings, which references them
+create table if not exists public.reel_themes (
+  id text primary key,               -- knitted | animated3d | watercolor | clay | papercraft | anime | sketch | cinematic
+  label text not null,
+  emoji text not null default '',
+  blurb text not null default '',
+  style text not null,               -- the positive-only style block put in front of every image prompt
+  faces boolean not null default true,      -- expressive faces (false: feelings show through pose only)
+  grayscale boolean not null default false, -- the worker turns the picture grey after Z-Image (sketch)
+  sort int not null default 0,
+  preview_path text,                 -- themes/<id>/preview-v<version>.jpg in the reels bucket
+  preview_status text not null default 'missing' check (preview_status in ('missing', 'queued', 'making', 'ready', 'failed')),
+  error text,
+  version int not null default 1,
+  claimed_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+insert into public.reel_themes as t (id, label, emoji, blurb, faces, grayscale, sort, style) values
+  ('knitted', 'Knitted Doll', '🧶', 'Soft crocheted wool dolls in a felt and yarn world; feelings show through pose.', false, false, 1,
+   'Handmade amigurumi doll scene: every character is a soft crocheted wool doll, captured as premium handcrafted toy photography. A tight, clearly visible crochet stitch grid covers the whole face and body, with fine fuzzy wool fibres on every surface; a slightly oversized round head and soft chubby rounded limbs. Large glossy round black bead eyes with a small bright catchlight, a tiny stitched nose bump, a simple curved embroidered smile, thin embroidered eyebrows, and hair made of loose chunky yarn strands, each strand individually visible and softly fuzzy. The whole world is sewn and knitted by hand: every setting is built from felt and linen — felt walls or felt sky, felt ground and floors, felt furniture and shelves, knitted blankets, stitched felt props and yarn details, with small charming irregularities in the stitching. Soft diffused warm daylight from the front and a little to the side, gentle low contrast, soft contact shadows, gentle highlights on the wool fibres and the bead eyes. Palette: warm beige, cream, oatmeal and natural linen with mustard yellow, warm orange, rust and sage accents. Soft rounded edges everywhere, cozy and tender.'),
+  ('animated3d', '3D Animated', '🎬', 'Family-movie 3D with big, expressive faces and warm window light.', true, false, 2,
+   'Stylized 3D animated feature-film still: characters with appealing rounded proportions, slightly oversized heads and large expressive eyes with bright catchlights, soft smooth skin with a subtle warm glow, rich and clearly readable facial expressions with expressive brows and mouths, softly sculpted hair. Polished family-movie rendering with global illumination, soft volumetric window light, a warm rim light, gentle bounce light and soft ambient shadows. A cozy, richly detailed home set with rounded furniture and tactile fabrics. Palette: warm cream, honey gold, soft peach and terracotta with teal accents. Shallow depth of field, heartwarming and full of life.'),
+  ('watercolor', 'Storybook Watercolor', '🎨', 'Hand-painted washes and fine ink lines, like a picture-book page.', true, false, 3,
+   'Storybook watercolor illustration painted by hand on textured cold-press paper: soft transparent washes, gentle wet-in-wet blooms and pigment granulation, visible paper grain, delicate fine ink and pencil linework around the figures, soft painted edges. Characters drawn with simple, gentle rounded features, rosy cheeks and warm expressive faces. Warm light painted as luminous washes of pale yellow and peach. Palette: soft peach, warm ochre, rose, sage green and sky blue on warm ivory paper. Airy and tender, a classic children''s picture-book page.'),
+  ('clay', 'Clay Stop-motion', '🏺', 'Sculpted matte clay figures on a tiny handmade set.', true, false, 4,
+   'Handmade clay stop-motion animation still: every character and object is sculpted from smooth matte modelling clay with subtle fingerprints and tool marks, soft rounded chunky forms, slightly oversized heads, small glossy bead eyes and sculpted expressive mouths and brows. A miniature handcrafted set built from clay, painted card and fabric, with tiny clay props. Soft warm light from the window, gentle soft shadows, miniature tabletop scale with a shallow depth of field. Palette: warm cream, terracotta, mustard, soft teal and dusty pink. Charming, tactile and playful.'),
+  ('papercraft', 'Paper Craft', '✂️', 'A layered cut-paper diorama with real depth and soft shadows.', false, false, 5,
+   'Handmade layered paper-craft diorama, photographed up close as a real tabletop paper model: every character, object and wall is cut from thick coloured cardstock and textured craft paper, built in many stacked layers that stand apart with real depth and soft shadows between them, crisp hand-cut edges with tiny white paper cores showing, visible paper fibre texture, gentle folds and curls. Characters are cut-paper figures made of simple layered paper shapes, with cut-paper hair, small dot eyes and curved paper smiles, posed with clear expressive gestures. A cozy paper room with a layered paper window, paper curtains and paper sunbeams. Soft warm light from the side casting gentle depth shadows between the layers. Palette: warm cream, coral, mustard, teal and soft pink paper. Handmade, whimsical and tactile.'),
+  ('anime', 'Soft Anime', '🌸', 'Gentle slice-of-life anime: clean lines, soft shading, sunlit rooms.', true, false, 6,
+   'Soft anime illustration in a gentle slice-of-life film style: clean confident line art, smooth cel shading with soft gradient shadows, large expressive eyes with layered highlights, a delicate blush on the cheeks, softly flowing hair drawn in clean shapes. A painterly, detailed background of a cozy sunlit home, warm afternoon light streaming in with a soft bloom and glowing dust motes. Palette: warm cream, soft peach, butter yellow, sky blue and leafy green. Tender, heartfelt and luminous.'),
+  ('sketch', 'Pencil Sketch (B&W)', '✏️', 'A black-and-white graphite drawing on sketchbook paper.', true, true, 7,
+   'Black-and-white grayscale pencil drawing, a colourless graphite study made by hand on white sketchbook paper: the whole picture is pure greyscale, drawn entirely in shades of pencil grey, so every garment, skin tone, hair colour and object reads only as a lighter or darker graphite grey, from soft silver to deep charcoal black, on white paper. Confident graphite line work, expressive loose strokes, soft cross-hatching and smudged tonal shading, visible paper texture, the brightest highlights left as bare white paper, the drawing filling the whole page. Faces drawn with care and clear, readable expressions. Gentle light from the window rendered with soft shading. Intimate, artistic and timeless, a classic monochrome pencil study.'),
+  ('cinematic', 'Cinematic Real', '📷', 'Real people, golden-hour light and a 35mm film look.', true, false, 8,
+   'Cinematic real-life photograph, a still from a modern drama film: real people with natural skin texture, fine hair detail and genuine, readable emotion. 35mm film look with soft natural grain, shallow depth of field and creamy background bokeh. Warm golden-hour sunlight streaming through the window, a soft haze in the light, a gentle rim light on the hair, rich natural colour grading with warm highlights and soft teal shadows. A lived-in, cozy home with real textures. Intimate, emotional and true to life.')
+on conflict (id) do update set
+  label = excluded.label, emoji = excluded.emoji, blurb = excluded.blurb, faces = excluded.faces,
+  grayscale = excluded.grayscale, sort = excluded.sort, style = excluded.style
+where (t.label, t.emoji, t.blurb, t.faces, t.grayscale, t.sort, t.style)
+  is distinct from (excluded.label, excluded.emoji, excluded.blurb, excluded.faces, excluded.grayscale, excluded.sort, excluded.style);
+
 create table if not exists public.settings (
   id int primary key default 1 check (id = 1),
   caption_template text not null default 'Here are some beautiful names you can give to your baby {gender}. 🥰',
@@ -62,6 +103,8 @@ create table if not exists public.settings (
   reel_speed numeric(3,2) not null default 1.12 constraint settings_reel_speed_check check (reel_speed between 1.00 and 1.25),
   reel_music boolean not null default true,
   reel_music_volume int not null default 18 constraint settings_reel_music_volume_check check (reel_music_volume between 5 and 40),
+  -- reels (007): the default visual theme
+  reel_theme_id text not null default 'knitted' references public.reel_themes (id),
   updated_at timestamptz not null default now(),
   check (min_images <= max_images)
 );
@@ -167,6 +210,8 @@ create table if not exists public.reels (
   -- 006: the narrator (null = settings.reel_voice_id); music: null = not made yet, '' = the music step failed (voice only)
   voice_id text references public.reel_voices (id) on delete set null,
   music_path text,
+  -- 007: the visual theme (null = settings.reel_theme_id)
+  theme_id text references public.reel_themes (id) on delete set null,
   duration_s numeric,
   version int not null default 1,
   claimed_at timestamptz, started_at timestamptz, finished_at timestamptz,
@@ -193,6 +238,13 @@ create table if not exists public.reel_scenes (
   claimed_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
+  -- 007: the line's feeling, body language + hands, framing, a key moment ('punch' emphasis) and its camera move
+  emotion text,
+  action text,
+  shot text,
+  key_moment boolean not null default false,
+  motion text constraint reel_scenes_motion_check
+    check (motion in ('push_in', 'pull_out', 'pan_left', 'pan_right', 'tilt_up', 'tilt_down', 'punch')),
   unique (reel_id, position)
 );
 alter table public.themes drop constraint if exists themes_preview_fk;
@@ -203,7 +255,7 @@ create or replace function public.touch_updated_at() returns trigger language pl
 begin new.updated_at := now(); return new; end $$;
 
 do $$ declare t text; begin
-  foreach t in array array['settings', 'worker_status', 'themes', 'posts', 'names', 'cards', 'reels', 'reel_scenes', 'reel_voices'] loop
+  foreach t in array array['settings', 'worker_status', 'themes', 'posts', 'names', 'cards', 'reels', 'reel_scenes', 'reel_voices', 'reel_themes'] loop
     execute format('drop trigger if exists touch on public.%I', t);
     execute format('create trigger touch before update on public.%I for each row execute function public.touch_updated_at()', t);
   end loop;
@@ -513,12 +565,58 @@ begin
   return jsonb_build_object('voice', to_jsonb(v_voice));
 end $$;
 
+-- The next theme preview to make: {theme: reel_themes row} or null. Lowest priority of all GPU work: no card waiting
+-- or being made, no reel step in progress (claim younger than 10 minutes) or runnable (with ComfyUI), and no voice
+-- sample waiting (queued with a reference clip, or the built-in voice) or being made. Oldest queued theme -> 'making'.
+-- Call it only while ComfyUI is up (Z-Image needs it).
+-- WORKER CONTRACT: Z-Image with the theme's style + the fixed preview moment (grayscale themes are turned grey
+-- after), write themes/<id>/preview-v<version>.jpg, then save preview_path, preview_status 'ready', claimed_at null
+-- WHERE id and version match the claimed row (the app bumps version when it re-queues a preview; a mismatch means
+-- the work is stale: discard it). On failure: preview_status 'failed', error, claimed_at null.
+-- requeue_stuck_reels() puts a 'making' preview claimed more than 10 minutes ago back in the queue.
+create or replace function public.claim_next_theme_preview() returns jsonb language plpgsql as $$
+declare v_theme public.reel_themes%rowtype; v_reel public.reels%rowtype;
+begin
+  perform 1 from public.cards
+    where status in ('queued', 'generating', 'restamp')
+      and (claimed_at is null or claimed_at >= now() - interval '5 minutes')
+    limit 1;
+  if found then return null; end if;
+
+  perform 1 from public.reels
+    where status in ('queued', 'voicing', 'imaging', 'rendering') and claimed_at >= now() - interval '10 minutes'
+    limit 1;
+  if found then return null; end if;
+  for v_reel in
+    select * from public.reels where claimed_at is null and status in ('queued', 'voicing', 'imaging', 'rendering')
+  loop
+    if public.reel_next_step(v_reel, false, true) is not null then return null; end if;
+  end loop;
+
+  perform 1 from public.reel_voices
+    where (sample_status = 'queued' and (ref_path is not null or id = 'builtin'))
+       or (sample_status = 'making' and claimed_at >= now() - interval '10 minutes')
+    limit 1;
+  if found then return null; end if;
+
+  select * into v_theme from public.reel_themes
+    where preview_status = 'queued'
+    order by updated_at, sort, id
+    limit 1
+    for update skip locked;
+  if not found then return null; end if;
+  update public.reel_themes set preview_status = 'making', claimed_at = now(), error = null
+  where id = v_theme.id
+  returning * into v_theme;
+  return jsonb_build_object('theme', to_jsonb(v_theme));
+end $$;
+
 -- Releases reel and scene claims older than 10 minutes (the PC was switched off mid-step); the worker then
 -- resumes at the first unfinished step. A scene stuck on its 3rd try fails and its reel needs attention.
 -- Also settles unclaimed reels that can't progress (needs_attention / failed) and puts voice samples stuck in
--- 'making' for 10 minutes back in the queue. Returns the rows changed.
+-- 'making' for 10 minutes back in the queue; 007: theme previews too. Returns the rows changed.
 create or replace function public.requeue_stuck_reels() returns int language plpgsql as $$
-declare v_scenes int; v_reels int; v_flagged int; v_empty int; v_samples int;
+declare v_scenes int; v_reels int; v_flagged int; v_empty int; v_samples int; v_previews int;
   v_gave_up constant text := 'Gave up after 3 tries: the PC stopped responding in the middle of this image.';
 begin
   with stuck as (
@@ -565,7 +663,11 @@ begin
   update public.reel_voices set sample_status = 'queued', claimed_at = null
   where sample_status = 'making' and claimed_at < now() - interval '10 minutes';
   get diagnostics v_samples = row_count;
-  return v_scenes + v_reels + v_flagged + v_empty + v_samples;
+
+  update public.reel_themes set preview_status = 'queued', claimed_at = null
+  where preview_status = 'making' and claimed_at < now() - interval '10 minutes';
+  get diagnostics v_previews = row_count;
+  return v_scenes + v_reels + v_flagged + v_empty + v_samples + v_previews;
 end $$;
 
 -- @supabase-only begin
@@ -579,9 +681,10 @@ alter table public.cards enable row level security;
 alter table public.reels enable row level security;
 alter table public.reel_scenes enable row level security;
 alter table public.reel_voices enable row level security;
+alter table public.reel_themes enable row level security;
 
 do $$ declare t text; begin
-  foreach t in array array['settings', 'themes', 'posts', 'names', 'cards', 'reels', 'reel_scenes', 'reel_voices'] loop
+  foreach t in array array['settings', 'themes', 'posts', 'names', 'cards', 'reels', 'reel_scenes', 'reel_voices', 'reel_themes'] loop
     execute format('drop policy if exists owner_all on public.%I', t);
     execute format('create policy owner_all on public.%I for all to authenticated using (true) with check (true)', t);
   end loop;
@@ -603,10 +706,12 @@ revoke execute on function public.reel_next_step(public.reels, boolean, boolean)
 revoke execute on function public.claim_next_reel_step(boolean, boolean) from public, anon, authenticated;
 revoke execute on function public.claim_next_voice_sample() from public, anon, authenticated;
 revoke execute on function public.requeue_stuck_reels() from public, anon, authenticated;
+revoke execute on function public.claim_next_theme_preview() from public, anon, authenticated;
 grant execute on function public.reel_next_step(public.reels, boolean, boolean) to service_role;
 grant execute on function public.claim_next_reel_step(boolean, boolean) to service_role;
 grant execute on function public.claim_next_voice_sample() to service_role;
 grant execute on function public.requeue_stuck_reels() to service_role;
+grant execute on function public.claim_next_theme_preview() to service_role;
 revoke execute on function public.create_post(jsonb) from public, anon;
 revoke execute on function public.add_card(uuid, jsonb) from public, anon;
 revoke execute on function public.delete_card(uuid) from public, anon;
@@ -638,8 +743,9 @@ alter table public.posts replica identity full;
 alter table public.reels replica identity full;
 alter table public.reel_scenes replica identity full;
 alter table public.reel_voices replica identity full;
+alter table public.reel_themes replica identity full;
 do $$ declare t text; begin
-  foreach t in array array['cards', 'posts', 'worker_status', 'themes', 'names', 'reels', 'reel_scenes', 'reel_voices'] loop
+  foreach t in array array['cards', 'posts', 'worker_status', 'themes', 'names', 'reels', 'reel_scenes', 'reel_voices', 'reel_themes'] loop
     begin execute format('alter publication supabase_realtime add table public.%I', t);
     exception when duplicate_object then null; end;
   end loop;
