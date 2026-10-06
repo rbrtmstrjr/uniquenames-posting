@@ -43,6 +43,14 @@ def make_scene(pos, **kw):
     return s
 
 
+def _has_ffmpeg():
+    try:
+        import imageio_ffmpeg
+        return bool(imageio_ffmpeg.get_ffmpeg_exe())
+    except Exception:
+        return False
+
+
 class FakeSupa:
     def __init__(self, scenes=None):
         self.scenes = scenes if scenes is not None else [make_scene(i, status="queued") for i in (1, 2, 3)]
@@ -55,6 +63,9 @@ class FakeSupa:
         self.rpc_args = []
         self.scene_update_error = None
         self.listing = None
+        self.voices = []
+        self.sample_jobs = []
+        self.music_rpc_error = None   # raised for claim_next_reel_step calls that pass p_music (a pre-006 DB)
 
     def rpc(self, fn, args=None):
         self.rpcs.append(fn)
@@ -64,11 +75,19 @@ class FakeSupa:
         if self.rpc_error and fn in ("requeue_stuck_reels", "claim_next_reel_step"):
             raise self.rpc_error
         if fn == "claim_next_reel_step":
+            if self.music_rpc_error and "p_music" in (args or {}):
+                raise self.music_rpc_error
             return self.reel_steps.pop(0) if self.reel_steps else None
+        if fn == "claim_next_voice_sample":
+            if self.music_rpc_error:
+                raise self.music_rpc_error
+            return self.sample_jobs.pop(0) if self.sample_jobs else None
         return 0
 
     def select(self, table, query):
         self.selects.append((table, query))
+        if table == "reel_voices":
+            return [dict(v) for v in self.voices if "id=eq.%s&" % v["id"] in query + "&"]
         return self.settings if table == "settings" else [dict(s) for s in self.scenes]
 
     def update(self, table, match, values, returning=False):
@@ -157,7 +176,7 @@ class ReelRunnerTest(unittest.TestCase):
         self.supa.uploads["voice/ref.mp3"] = ("reels", b"MP3", "audio/mpeg")
         with mock.patch.object(reels.voice, "upload_input", return_value="unique-names/reel-voice.mp3") as up:
             synth = self.run_voice()
-        up.assert_called_once_with("http://comfy", "reel-voice.mp3", b"MP3")
+        up.assert_called_once_with("http://comfy", "voice-ref-v0.mp3", b"MP3")
         self.assertEqual(synth.call_args[0][3], "unique-names/reel-voice.mp3")
 
     def test_voice_stale_result_is_dropped(self):
@@ -183,6 +202,178 @@ class ReelRunnerTest(unittest.TestCase):
         self.assertEqual(v["error"], "Restart ComfyUI so it loads the Chatterbox voice node.")
         self.assertIsNone(v["claimed_at"])
         self.assertEqual(self.supa.uploads, {})
+
+    # ------------------------------------------------------------ voice resolution (006)
+    def voices_db(self):
+        self.supa.settings = [{"id": 1, "reel_voice_id": "gacrux", "reel_speed": 1.12, "reel_music": True}]
+        self.supa.voices = [{"id": "gacrux", "label": "Gacrux", "ref_path": "voices/gacrux/ref.wav", "version": 2},
+                            {"id": "kore", "label": "Kore", "ref_path": "voices/kore/ref.wav", "version": 1},
+                            {"id": "puck", "label": "Puck", "ref_path": None, "version": 1}]
+        self.supa.uploads["voices/gacrux/ref.wav"] = ("reels", b"GAC", "audio/wav")
+        self.supa.uploads["voices/kore/ref.wav"] = ("reels", b"KORE", "audio/wav")
+
+    def run_voice_006(self, reel, exists=True):
+        up = mock.Mock(side_effect=lambda url, name, data: "unique-names/" + name)
+        with mock.patch.object(reels.voice, "upload_input", up), \
+                mock.patch.object(reels.voice, "input_exists", return_value=exists), \
+                mock.patch.object(reels.voice, "speed_up", side_effect=lambda w, s: w) as sp:
+            synth = self.run_voice(reel)
+        return up, synth, sp
+
+    def test_voice_defaults_to_the_settings_voice_with_its_speed(self):
+        self.voices_db()
+        up, synth, sp = self.run_voice_006(make_reel())
+        up.assert_called_once_with("http://comfy", "voices-gacrux-ref-v2.wav", b"GAC")
+        self.assertEqual(synth.call_args[0][3], "unique-names/voices-gacrux-ref-v2.wav")
+        self.assertEqual(sp.call_args[0][1], 1.12)
+
+    def test_the_reels_own_voice_wins(self):
+        self.voices_db()
+        up, synth, _sp = self.run_voice_006(make_reel(voice_id="kore"))
+        self.assertEqual(up.call_args[0][1:], ("voices-kore-ref-v1.wav", b"KORE"))
+
+    def test_builtin_and_unready_voices_use_the_built_in_voice(self):
+        self.voices_db()
+        up, synth, _sp = self.run_voice_006(make_reel(voice_id="builtin"))
+        up.assert_not_called()
+        self.assertIsNone(synth.call_args[0][3])
+        up, synth, _sp = self.run_voice_006(make_reel(voice_id="puck"))   # no reference clip yet
+        self.assertIsNone(synth.call_args[0][3])
+        self.assertTrue(any("puck has no reference clip" in m for m in self.logs))
+        self.supa.settings = [{"id": 1, "reel_voice_id": None}]
+        up, synth, _sp = self.run_voice_006(make_reel())
+        self.assertIsNone(synth.call_args[0][3])
+
+    def test_reference_clip_is_cached_until_comfyui_loses_it(self):
+        self.voices_db()
+        self.run_voice_006(make_reel())
+        up2, synth, _sp = self.run_voice_006(make_reel())
+        up2.assert_not_called()                                            # cached: no download, no upload
+        self.assertEqual(synth.call_args[0][3], "unique-names/voices-gacrux-ref-v2.wav")
+        up3, _s, _sp = self.run_voice_006(make_reel(), exists=False)        # the input folder lost it
+        self.assertEqual(up3.call_count, 1)
+
+    def test_missing_reference_file_fails_with_a_clear_message(self):
+        self.voices_db()
+        del self.supa.uploads["voices/gacrux/ref.wav"]
+        self.run_voice_006(make_reel())
+        v = self.supa.of("reels")[-1][2]
+        self.assertEqual(v["status"], "failed")
+        self.assertIn("Gacrux voice clip is missing", v["error"])
+
+    @unittest.skipIf(not _has_ffmpeg(), "imageio-ffmpeg is not installed")
+    def test_voice_is_sped_up_before_upload(self):
+        self.voices_db()
+        self.supa.settings[0]["reel_speed"] = 1.25
+        with mock.patch.object(reels.voice, "upload_input", return_value="x.wav"), \
+                mock.patch.object(reels.voice, "input_exists", return_value=True):
+            self.run_voice()
+        with wave.open(io.BytesIO(self.supa.uploads["%s/voice-v3.wav" % RID][1]), "rb") as w:
+            self.assertEqual((w.getnchannels(), w.getframerate()), (1, 24000))
+            self.assertAlmostEqual(w.getnframes() / 24000.0, 1.0 / 1.25, delta=0.03)
+
+    # ------------------------------------------------------------ music (006)
+    def music_reel(self, **kw):
+        reel = make_reel(voice_path="%s/voice-v3.wav" % RID, words=[{"word": "hi", "start": 0, "end": 1}], music_path=None)
+        reel.update(kw)
+        self.supa.uploads[reel["voice_path"]] = ("reels", wav(10.0), "audio/wav")
+        return reel
+
+    def run_music(self, reel, bed=b"fLaC-bed", boom=None):
+        mk = mock.Mock(side_effect=boom, return_value=bed)
+        with mock.patch.object(reels.music, "make_bed", mk), mock.patch.object(reels.music, "random_seed", return_value=77):
+            self.rr.run_step({"step": "music", "reel": reel, "scene": None})
+        return mk
+
+    def test_music_makes_a_bed_two_seconds_longer_than_the_voice(self):
+        self.supa.listing = {RID: [{"name": "music-v2.flac", "id": "a"}, {"name": "voice-v3.wav", "id": "b"}]}
+        mk = self.run_music(self.music_reel())
+        url, secs, seed, timeout = mk.call_args[0][:4]
+        self.assertEqual((url, secs, seed, timeout), ("http://comfy", 12.0, 77, 300))
+        path = "%s/music-v3.flac" % RID
+        self.assertEqual(self.supa.uploads[path], ("reels", b"fLaC-bed", "audio/flac"))
+        _t, match, v = self.supa.of("reels")[-1]
+        self.assertEqual(match, "id=eq.%s&version=eq.3" % RID)
+        self.assertEqual(v, {"music_path": path, "claimed_at": None})
+        self.assertEqual(self.supa.removed, ["%s/music-v2.flac" % RID])       # the superseded bed only
+        heartbeats = [u for u in self.supa.of("reels") if set(u[2]) == {"claimed_at"} and u[2]["claimed_at"]]
+        self.assertGreaterEqual(len(heartbeats), 2)
+
+    def test_music_failure_goes_on_with_the_voice_only(self):
+        self.run_music(self.music_reel(), boom=JobError("ComfyUI refused the music job: no such node"))
+        _t, _m, v = self.supa.of("reels")[-1]
+        self.assertEqual(v, {"music_path": "", "claimed_at": None})          # not failed, not retried
+        self.assertFalse([u for u in self.supa.of("reels") if "status" in u[2]])
+        self.assertTrue(any("voice only" in m for m in self.logs))
+
+    def test_music_with_comfy_closed_waits(self):
+        self.r.ok = False
+        mk = self.run_music(self.music_reel())
+        mk.assert_not_called()
+        self.assertEqual(self.supa.of("reels")[-1][2], {"claimed_at": None})
+
+    def test_comfy_closing_mid_music_waits(self):
+        def boom(*a, **kw):
+            self.r.ok = False
+            raise JobError("ComfyUI stopped answering while making the music. Is it still open?")
+        self.run_music(self.music_reel(), boom=boom)
+        self.assertEqual(self.supa.of("reels")[-1][2], {"claimed_at": None})   # no '': it runs again later
+
+    def test_stale_music_is_dropped(self):
+        self.supa.stale.add("reels")
+        self.supa.stale_key = "music_path"
+        self.run_music(self.music_reel())
+        self.assertEqual(self.supa.removed, ["%s/music-v3.flac" % RID])
+        self.assertIn(reels.STALE, self.logs)
+
+    # ------------------------------------------------------------ voice samples (006)
+    def run_sample(self, row, synth_boom=None):
+        self.supa.settings = [{"id": 1, "reel_voice_id": "gacrux", "reel_speed": 1.12}]
+        self.supa.uploads["voices/kore/ref.wav"] = ("reels", b"KORE", "audio/wav")
+        synth = mock.Mock(side_effect=synth_boom, return_value=wav(2.0))
+        with mock.patch.object(reels.voice, "ensure_node"), mock.patch.object(reels.voice, "synthesize", synth), \
+                mock.patch.object(reels.voice, "upload_input", side_effect=lambda u, n, d: "unique-names/" + n), \
+                mock.patch.object(reels.voice, "speed_up", side_effect=lambda w, s: w) as sp:
+            self.rr.run_sample({"voice": row})
+        return synth, sp
+
+    def test_sample_reads_the_sentence_and_saves_versioned(self):
+        self.supa.listing = {"voices/kore": [{"name": "ref.wav", "id": "r"}, {"name": "sample-v3.wav", "id": "o"}]}
+        row = {"id": "kore", "ref_path": "voices/kore/ref.wav", "version": 4, "sample_path": "voices/kore/sample-v3.wav"}
+        synth, sp = self.run_sample(row)
+        _u, text, seed, ref, _t = synth.call_args[0]
+        self.assertEqual((text, seed, ref), (reels.voice.SAMPLE_TEXT, 42, "unique-names/voices-kore-ref-v4.wav"))
+        self.assertEqual(sp.call_args[0][1], 1.12)
+        self.assertIn("voices/kore/sample-v4.wav", self.supa.uploads)
+        _table, match, v = self.supa.of("reel_voices")[-1]
+        self.assertEqual(match, "id=eq.kore&version=eq.4")
+        self.assertEqual(v, {"sample_status": "ready", "sample_path": "voices/kore/sample-v4.wav",
+                             "sample_key": "e0.35-t0.7-c0.5-s1.12", "error": None, "claimed_at": None})
+        self.assertEqual(self.supa.removed, ["voices/kore/sample-v3.wav"])
+
+    def test_builtin_sample_needs_no_reference(self):
+        synth, _sp = self.run_sample({"id": "builtin", "ref_path": None, "version": 1})
+        self.assertIsNone(synth.call_args[0][3])
+        self.assertEqual(self.supa.of("reel_voices")[-1][2]["sample_status"], "ready")
+
+    def test_requeued_sample_is_dropped(self):
+        self.supa.stale.add("reel_voices")
+        self.run_sample({"id": "kore", "ref_path": "voices/kore/ref.wav", "version": 4})
+        self.assertEqual(self.supa.removed, ["voices/kore/sample-v4.wav"])
+
+    def test_sample_failure_and_comfy_closed(self):
+        self.run_sample({"id": "kore", "ref_path": "voices/kore/ref.wav", "version": 4}, synth_boom=JobError("oom"))
+        _t, match, v = self.supa.of("reel_voices")[-1]
+        self.assertEqual((match, v), ("id=eq.kore&version=eq.4", {"sample_status": "failed", "error": "oom", "claimed_at": None}))
+        self.r.ok = False
+        self.run_sample({"id": "kore", "ref_path": "voices/kore/ref.wav", "version": 4}, synth_boom=JobError("down"))
+        self.assertEqual(self.supa.of("reel_voices")[-1][2], {"sample_status": "queued", "claimed_at": None})
+        self.r.ok = True
+        self.run_sample({"id": "puck", "ref_path": None, "version": 1})
+        self.assertIn("no reference clip", self.supa.of("reel_voices")[-1][2]["error"])
+        n = len(self.supa.updates)
+        self.rr.run_sample({"voice": {"id": "../x", "version": 1}})            # never a path from a bad id
+        self.assertEqual(len(self.supa.updates), n)
 
     # ------------------------------------------------------------ timing
     def test_timing_saves_scene_times_then_words(self):
@@ -335,10 +526,12 @@ class RunnerReelTickTest(unittest.TestCase):
     def test_comfy_down_asks_only_for_steps_without_comfy(self):
         self.run_.renderer = FakeRenderer(ok=False)
         self.assertFalse(self.run_.tick())
-        self.assertEqual(self.supa.rpc_args[-1], {"p_no_comfy": True})
+        self.assertEqual(self.supa.rpc_args[-1], {"p_no_comfy": True, "p_music": True})
+        self.assertNotIn("claim_next_voice_sample", self.supa.rpcs)        # no samples without ComfyUI
         self.run_.renderer = FakeRenderer()
         self.run_.tick()
-        self.assertEqual(self.supa.rpc_args[-1], {"p_no_comfy": False})
+        self.assertEqual(self.supa.rpc_args[-2], {"p_no_comfy": False, "p_music": True})
+        self.assertEqual(self.supa.rpcs[-1], "claim_next_voice_sample")    # nothing for the reels: a sample
 
     def test_missing_rpc_is_skipped_quietly_and_rechecked_later(self):
         self.supa.rpc_error = SupaError('POST /rest/v1/rpc/requeue_stuck_reels -> HTTP 404 {"code":"PGRST202"}')
@@ -389,6 +582,26 @@ class RunnerReelTickTest(unittest.TestCase):
         os.utime(other, (now - 2 * 86400, now - 2 * 86400))
         jobs.prune_render_temps(self.root, now=now)
         self.assertEqual((os.path.exists(old), os.path.exists(new), os.path.exists(other)), (False, True, True))
+
+    def test_pre_006_database_claims_without_music_and_no_samples(self):
+        self.supa.music_rpc_error = SupaError('POST /rest/v1/rpc/claim_next_reel_step -> HTTP 404 {"code":"PGRST202"}')
+        step = {"step": "timing", "reel": make_reel(), "scene": None}
+        self.supa.reel_steps.append(step)
+        self.assertTrue(self.run_.tick())
+        self.reels.run_step.assert_called_once_with(step)
+        self.assertEqual(self.supa.rpc_args[-1], {"p_no_comfy": False})
+        self.assertFalse(self.run_.tick())                                   # no reel step, no samples asked
+        self.assertNotIn("claim_next_voice_sample", self.supa.rpcs)
+        self.assertEqual(len([a for a in self.supa.rpc_args if a and "p_music" in a]), 1)   # re-checked later
+        self.assertEqual(len([m for m in self.logs if "006_reel_voices" in m]), 1)
+        self.assertNotIn("005_reels", " ".join(self.logs))
+
+    def test_voice_sample_runs_when_no_reel_step(self):
+        job = {"voice": {"id": "kore", "version": 2}}
+        self.supa.sample_jobs.append(job)
+        self.assertTrue(self.run_.tick())
+        self.reels.run_sample.assert_called_once_with(job)
+        self.reels.run_step.assert_not_called()
 
     def test_without_a_reel_runner_cards_behave_as_before(self):
         self.run_.reels = None

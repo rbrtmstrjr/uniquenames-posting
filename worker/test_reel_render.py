@@ -320,6 +320,27 @@ class RealRenderTest(unittest.TestCase):
             with self.assertRaises(JobError):
                 rr.probe_duration("ff", "x.mp4")
 
+    def test_music_goes_under_the_voice_when_on(self):
+        bed = os.path.join(self.root, "bed.flac")
+        subprocess.run([FFMPEG, "-v", "error", "-f", "lavfi", "-i", "sine=frequency=330:duration=5:sample_rate=48000",
+                        "-ac", "2", bed], check=True)
+        with open(bed, "rb") as fh:
+            self.store[RID + "/music-v4.flac"] = fh.read()
+        self.reel["music_path"] = RID + "/music-v4.flac"
+        self.supa.select = lambda table, q: [{"id": 1, "reel_music": True, "reel_music_volume": 18}]
+        self.render()
+        self.assertTrue(any("music at 18%" in m for m in self.logs))
+        v = [u for u in self.supa.updates if "status" in u[2]][-1][2]
+        self.assertAlmostEqual(v["duration_s"], 3.0, delta=0.15)              # the bed never makes it longer
+        self.logs.clear()
+        self.supa.select = lambda table, q: [{"id": 1, "reel_music": False}]
+        self.render()
+        self.assertFalse(any("music at" in m for m in self.logs))
+        del self.store[RID + "/music-v4.flac"]                                # gone from storage: voice only
+        self.supa.select = lambda table, q: [{"id": 1, "reel_music": True, "reel_music_volume": 18}]
+        self.render()
+        self.assertTrue(any("music file is missing" in m for m in self.logs))
+
     def test_render_does_not_touch_comfyui(self):
         self.runner.renderer = mock.Mock(side_effect=AssertionError("ComfyUI used"))
         self.render()

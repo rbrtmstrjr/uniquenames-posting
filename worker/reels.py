@@ -1,5 +1,6 @@
-# Reel steps on the PC: voice (Chatterbox in ComfyUI) -> timing (faster-whisper) -> one image per scene
-# (Z-Image in ComfyUI) -> render (reel_render.py, Task 7). One step per claim_next_reel_step() claim.
+# Reel steps on the PC: voice (Chatterbox in ComfyUI, sped up with atempo) -> timing (faster-whisper) ->
+# music (ACE-Step in ComfyUI, 006) -> one image per scene (Z-Image in ComfyUI) -> render (reel_render.py).
+# One step per claim_next_reel_step() claim. Voice samples (006): one per claim_next_voice_sample() claim.
 # Contract (supabase/migrations/005_reels.sql): save each result version-guarded AND clear the claim;
 # re-touch reels.claimed_at between long sub-steps; on an image's 3rd failure the reel needs attention.
 import datetime
@@ -7,11 +8,14 @@ import io
 import os
 import re
 import tempfile
+import threading
 import time
 import traceback
+import wave
 
 from render import JobError, fit_to_size
 from supa import SupaError
+import music
 import timing
 import voice
 
@@ -23,7 +27,8 @@ COMFY_CLOSED = "ComfyUI is closed. Open ComfyUI Desktop on your PC, then press R
 NO_NET = "Couldn't reach the internet to save this reel. Press Retry."
 NO_RENDER = "Video step not built yet"
 STALE = "stale reel result dropped (the reel changed while it was being made)"
-SCENE_COLS = "id,position,narration,image_prompt,seed,status,photo_path,version,attempts,start_s,end_s"
+VOICE_ID = re.compile(r"^[a-z]+$")
+SCENE_COLS ="id,position,narration,image_prompt,seed,status,photo_path,version,attempts,start_s,end_s"
 
 
 def now_iso():
@@ -60,6 +65,8 @@ class ReelRunner:
         self.renderer = renderer          # ComfyRenderer: .comfy, .timeout, .health(), .generate_photo()
         self.log = log
         self.sleep = sleep
+        self._refs = {}                   # (ref_path, version) -> the clip's name in ComfyUI's input folder
+        self._refs_lock = threading.Lock()
 
     # ------------------------------------------------------------ dispatch
     def run_step(self, job):
@@ -84,6 +91,8 @@ class ReelRunner:
             self._voice(reel)
         elif step == "timing":
             self._timing(reel)
+        elif step == "music":
+            self._music(reel)
         elif step == "image":
             self._image(reel, scene)
         elif step == "render":
@@ -98,14 +107,16 @@ class ReelRunner:
         lines = [s["narration"] for s in scenes if (s.get("narration") or "").strip()]
         if not lines:
             raise JobError("This reel has no narration to voice.")
-        ref = self._voice_ref()
+        settings = self._settings_row()
+        ref = self._voice_ref(reel, settings)
+        speed = voice.reel_speed(settings)
         chunks = voice.chunk_lines(lines)
         wavs = []
         for i, text in enumerate(chunks):
             self.log("reel voice %d/%d (%d words)" % (i + 1, len(chunks), len(text.split())))
             self._heartbeat(reel)
             wavs.append(voice.synthesize(self.renderer.comfy, text, voice_seed(reel["id"]), ref, self.renderer.timeout))
-        wav = voice.concat_wavs(wavs)
+        wav = voice.speed_up(voice.concat_wavs(wavs), speed)  # Whisper (timing) then hears the sped-up track
         path = "%s/voice-v%d.wav" % (reel["id"], int(reel["version"]))
         self._net(lambda: self.supa.upload(BUCKET, path, wav, "audio/wav"))
         if not self._save_reel(reel, {"voice_path": path, "words": None, "error": None, "claimed_at": None}):
@@ -114,18 +125,52 @@ class ReelRunner:
         if reel.get("voice_path") and reel["voice_path"] != path:
             self._remove([reel["voice_path"]])
 
-    def _voice_ref(self):
+    def _settings_row(self):
         rows = self._net(lambda: self.supa.select("settings", "id=eq.1&select=*")) or [{}]
-        path = (rows[0] or {}).get("reel_voice_path")
-        if not path:
-            return None  # Chatterbox's built-in voice
+        return rows[0] or {}
+
+    def _voice_ref(self, reel, settings):
+        """The LoadAudio name of the narrator's reference clip, or None for Chatterbox's built-in voice.
+        Voice: reels.voice_id -> settings.reel_voice_id -> builtin (006). A database without 006 keeps 005's
+        single clip (settings.reel_voice_path)."""
+        if "reel_voice_id" not in settings and not reel.get("voice_id"):
+            path = settings.get("reel_voice_path")
+            if not path:
+                return None
+            return self._comfy_ref(path, 0, "Your voice clip is missing from storage. Clear settings.reel_voice_path "
+                                            "in Supabase to use the built-in voice.")
+        vid = voice.resolve_voice_id(reel, settings)
+        if vid == voice.BUILTIN:
+            return None
+        rows = []
+        if VOICE_ID.match(vid):
+            rows = self._net(lambda: self.supa.select("reel_voices", "id=eq.%s&select=id,label,ref_path,version" % vid)) or []
+        if not rows or not rows[0].get("ref_path"):
+            self.log("voice %s has no reference clip yet: using the built-in voice" % vid)
+            return None
+        row = rows[0]
+        return self._comfy_ref(row["ref_path"], row.get("version") or 1,
+                               "The %s voice clip is missing from storage. Press Set up voices in Settings, or pick "
+                               "another voice." % (row.get("label") or vid))
+
+    def _comfy_ref(self, path, version, missing):
+        """Download a reference clip once and put it in ComfyUI's input folder (cached by path + version; sent
+        again if ComfyUI lost the file). Returns the name LoadAudio takes."""
+        key = (path, int(version or 0))
+        with self._refs_lock:
+            name = self._refs.get(key)
+        if name and voice.input_exists(self.renderer.comfy, name):
+            return name
         try:
             data = self._retry(lambda: self.supa.download(BUCKET, path))
         except SupaError as e:
             if is_http_4xx(e):
-                raise JobError("Your voice clip is missing from storage. Clear settings.reel_voice_path in Supabase to use the built-in voice.")
+                raise JobError(missing)
             raise JobError(NO_NET)
-        return voice.upload_input(self.renderer.comfy, "reel-voice" + (os.path.splitext(path)[1] or ".wav"), data)
+        name = voice.upload_input(self.renderer.comfy, voice.input_name(path, version), data)
+        with self._refs_lock:
+            self._refs[key] = name
+        return name
 
     # ------------------------------------------------------------ timing
     def _timing(self, reel):
@@ -158,6 +203,87 @@ class ReelRunner:
             self._net(lambda: self.supa.update("reel_scenes", "id=eq.%s" % s["id"], {"start_s": start, "end_s": end}))
         if not self._save_reel(reel, {"words": words, "error": None, "claimed_at": None}):
             self.log(STALE)
+
+    # ------------------------------------------------------------ music (006)
+    def _music(self, reel):
+        """One ACE-Step bed, voice length + 2 s. Any failure leaves music_path '' (the reel goes on with the
+        voice only and the step is not retried); ComfyUI being closed just hands the step back."""
+        if not self.renderer.health()["ok"]:
+            self.log("ComfyUI is closed: the music waits")
+            self._release(reel)
+            return
+        path = "%s/music-v%d.flac" % (reel["id"], int(reel["version"]))
+        try:
+            data = self._retry(lambda: self.supa.download(BUCKET, reel.get("voice_path")))
+            secs = music.music_seconds(voice_seconds(data))
+            seed = music.random_seed()
+            self.log("reel music: %.1f s bed (seed %d)" % (secs, seed))
+            self._heartbeat(reel)
+            flac = music.make_bed(self.renderer.comfy, secs, seed, self.renderer.timeout, lambda: self._heartbeat(reel))
+            self._heartbeat(reel)
+            self._retry(lambda: self.supa.upload(BUCKET, path, flac, "audio/flac"))
+        except StaleReel:
+            raise
+        except Exception as e:
+            if not self.renderer.health()["ok"]:
+                self.log("ComfyUI closed while making the music: it waits")
+                self._release(reel)
+                return
+            if not isinstance(e, JobError):
+                self.log(traceback.format_exc())
+            self.log("reel music failed, the reel goes on with the voice only: %s" % e)
+            try:
+                self._save_reel(reel, {"music_path": "", "claimed_at": None})
+            except Exception as e2:
+                self.log("could not save the music failure: %s" % e2)
+            return
+        if not self._save_reel(reel, {"music_path": path, "claimed_at": None}):
+            self._drop_stale([path])
+            return
+        self._tidy(str(reel["id"]), r"music-v\d+\.flac$", path)
+
+    # ------------------------------------------------------------ voice samples (006)
+    def run_sample(self, job):
+        """Read the sample sentence with one voice at the current calm + speed settings (claim_next_voice_sample)."""
+        row = (job or {}).get("voice") or {}
+        vid = str(row.get("id") or "")
+        if not VOICE_ID.match(vid):
+            self.log("voice sample skipped: bad voice id %r" % vid)
+            return
+        version = int(row.get("version") or 0)
+        match = "id=eq.%s&version=eq.%d" % (vid, version)
+        path = "voices/%s/sample-v%d.wav" % (vid, version)
+        try:
+            voice.ensure_node(self.renderer.comfy)
+            speed = voice.reel_speed(self._settings_row())
+            ref = None
+            if vid != voice.BUILTIN:
+                if not row.get("ref_path"):
+                    raise JobError("This voice has no reference clip yet. Press Set up voices.")
+                ref = self._comfy_ref(row["ref_path"], version, "The reference clip is missing from storage. Press Set up voices.")
+            wav = voice.synthesize(self.renderer.comfy, voice.SAMPLE_TEXT, voice.SAMPLE_SEED, ref, self.renderer.timeout)
+            wav = voice.speed_up(wav, speed)
+            self._net(lambda: self.supa.upload(BUCKET, path, wav, "audio/wav"))
+        except Exception as e:
+            if not isinstance(e, JobError):
+                self.log(traceback.format_exc())
+            try:
+                if not self.renderer.health()["ok"]:
+                    self.log("ComfyUI is closed: the %s sample goes back in line" % vid)
+                    body = {"sample_status": "queued", "claimed_at": None}
+                else:
+                    self.log("voice sample %s failed: %s" % (vid, e))
+                    body = {"sample_status": "failed", "error": self._message(e)[:300], "claimed_at": None}
+                self._retry(lambda: self.supa.update("reel_voices", match, body))
+            except Exception as e2:
+                self.log("could not save the sample failure: %s" % e2)
+            return
+        body = {"sample_status": "ready", "sample_path": path, "sample_key": voice.sample_key(speed), "error": None,
+                "claimed_at": None}
+        if not self._retry(lambda: self.supa.update("reel_voices", match, body, returning=True)):
+            self._drop_stale([path])  # re-queued meanwhile (new version): this sample is not the one wanted
+            return
+        self._tidy("voices/%s" % vid, r"sample-v\d+\.wav$", path)
 
     # ------------------------------------------------------------ one image
     def _image(self, reel, scene):
@@ -247,6 +373,17 @@ class ReelRunner:
     def _message(e):
         return str(e) if isinstance(e, JobError) else "Something went wrong on your PC: %s" % (str(e) or type(e).__name__)
 
+    def _tidy(self, folder, pattern, keep):
+        """Best effort: remove this folder's superseded files matching `pattern` (all but `keep`)."""
+        try:
+            rows = self.supa.list(BUCKET, folder) or []
+            old = ["%s/%s" % (folder, r["name"]) for r in rows if r.get("id") and re.match(pattern, r.get("name") or "")]
+            old = [p for p in old if p != keep]
+            if old:
+                self._remove(old)
+        except Exception as e:
+            self.log("could not tidy old files: %s" % e)
+
     def _drop_stale(self, paths):
         self.log(STALE)
         self._remove(paths)
@@ -275,6 +412,14 @@ class ReelRunner:
                     raise
                 self.sleep(delay)
                 delay = min(delay * 2, 15)
+
+
+def voice_seconds(wav_bytes):
+    try:
+        with wave.open(io.BytesIO(wav_bytes), "rb") as w:
+            return w.getnframes() / float(w.getframerate())
+    except (wave.Error, EOFError):
+        raise JobError("The voice file could not be read.")
 
 
 def _redo_voice(message):

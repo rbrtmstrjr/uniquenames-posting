@@ -3,6 +3,7 @@
 # joined with a short natural pause. ComfyUI saves FLAC only; ffmpeg (imageio-ffmpeg) turns it into PCM.
 import io
 import json
+import re
 import time
 import urllib.error
 import urllib.parse
@@ -19,11 +20,18 @@ CHUNK_SECONDS = 25.0         # well under Chatterbox's ~40 s cap
 PAUSE_SECONDS = 0.35         # between chunks, like a breath between sentences
 NEEDS_RESTART = "Restart ComfyUI so it loads the Chatterbox voice node."
 COMFY_CLOSED = "ComfyUI is closed. Open ComfyUI Desktop on your PC, then press Retry."
+# Calm delivery (006): less acting, steadier pace than Chatterbox's defaults (0.5 / 0.8 / 0.5).
+CALM = {"exaggeration": 0.35, "temperature": 0.7, "cfg_weight": 0.5}
+SPEED_MIN, SPEED_MAX, SPEED_DEFAULT = 1.00, 1.25, 1.12
+SAMPLE_TEXT = "They're only little once. Hold them a little longer tonight, and let the dishes wait."
+SAMPLE_SEED = 42             # every voice reads the sample the same way: only the voice differs
+BUILTIN = "builtin"
 
 
 def chatterbox_graph(text, seed, voice_ref=None):
     """ComfyUI API graph: text -> Chatterbox -> FLAC. voice_ref = a file in ComfyUI's input folder to clone."""
-    tts = {"text": text, "exaggeration": 0.5, "cfg_weight": 0.5, "temperature": 0.8, "seed": int(seed),
+    tts = {"text": text, "exaggeration": CALM["exaggeration"], "cfg_weight": CALM["cfg_weight"],
+           "temperature": CALM["temperature"], "seed": int(seed),
            # off: Z-Image keeps its VRAM between the voice and the images
            "use_cpu": False, "keep_model_loaded": False}
     g = {
@@ -35,6 +43,67 @@ def chatterbox_graph(text, seed, voice_ref=None):
         g["3"] = {"class_type": "LoadAudio", "inputs": {"audio": voice_ref}}
         tts["audio_prompt"] = ["3", 0]
     return g
+
+
+def resolve_voice_id(reel, settings):
+    """The reel's own voice, else the Settings default, else Chatterbox's built-in voice."""
+    return ((reel or {}).get("voice_id") or (settings or {}).get("reel_voice_id") or BUILTIN).strip().lower()
+
+
+def reel_speed(settings):
+    """settings.reel_speed clamped to 1.00-1.25. A database without 006 (no column) keeps the old 1.0;
+    an unreadable value gets the default."""
+    if "reel_speed" not in (settings or {}):
+        return 1.0
+    try:
+        v = float(settings["reel_speed"])
+    except (TypeError, ValueError):
+        return SPEED_DEFAULT
+    if v != v:  # NaN
+        return SPEED_DEFAULT
+    return round(min(SPEED_MAX, max(SPEED_MIN, v)), 2)
+
+
+def atempo_filter(speed):
+    """The ffmpeg filter that speeds the voice up with its pitch kept; None at 1.0 (nothing to do)."""
+    speed = round(min(SPEED_MAX, max(SPEED_MIN, float(speed))), 2)
+    return None if speed == 1.0 else "atempo=%.2f" % speed
+
+
+def sample_key(speed):
+    """What a voice sample was made with (the app re-queues samples whose key differs from the current one)."""
+    return "e%g-t%g-c%g-s%.2f" % (CALM["exaggeration"], CALM["temperature"], CALM["cfg_weight"], float(speed))
+
+
+def speed_up(wav_bytes, speed):
+    """24 kHz mono WAV -> the same, `speed` times faster (atempo keeps the pitch). 1.0 returns it as is."""
+    f = atempo_filter(speed)
+    if not f:
+        return wav_bytes
+    from timing import run_ffmpeg
+    pcm = run_ffmpeg(["-nostdin", "-v", "error", "-f", "wav", "-i", "pipe:0", "-af", f, "-f", "s16le",
+                      "-acodec", "pcm_s16le", "-ac", "1", "-ar", str(RATE), "pipe:1"], "the voice to speed it up", wav_bytes)
+    return pcm_to_wav(pcm)
+
+
+def input_name(path, version):
+    """A safe, stable ComfyUI input file name for a reference clip: voices/gacrux/ref.wav v3 -> voices-gacrux-ref-v3.wav."""
+    base = path.rsplit("/", 1)[-1]
+    stem, ext = (path[:-(len(base) - base.rindex("."))], base[base.rindex(".") + 1:]) if "." in base else (path, "")
+    stem = re.sub(r"[^A-Za-z0-9_-]+", "-", stem).strip("-")[:80] or "voice"
+    ext = re.sub(r"[^A-Za-z0-9]", "", ext)[:5].lower() or "wav"
+    return "%s-v%d.%s" % (stem, int(version or 0), ext)
+
+
+def input_exists(comfy_url, name):
+    """True if ComfyUI still has this file in its input folder (name as LoadAudio takes it: 'sub/file')."""
+    sub, _, fn = name.rpartition("/")
+    q = urllib.parse.urlencode({"filename": fn, "subfolder": sub, "type": "input"})
+    try:
+        with urllib.request.urlopen(comfy_url.rstrip("/") + "/view?" + q, timeout=15) as r:
+            return r.status == 200
+    except Exception:
+        return False
 
 
 def chunk_lines(lines, max_words=int(CHUNK_SECONDS * WORDS_PER_SECOND)):

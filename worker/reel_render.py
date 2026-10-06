@@ -14,6 +14,7 @@ import time
 from render import JobError, default_output_root
 from supa import SupaError
 import fonts
+import music as music_mod
 import timing
 
 FPS = 30
@@ -164,14 +165,18 @@ def filter_path(p):
     return "'%s'" % p.replace("\\", "/").replace(":", "\\:").replace("'", "")
 
 
-def ffmpeg_args(ffmpeg, scenes, voice_wav, ass_path, out_path, width=WIDTH, height=HEIGHT, fps=FPS, fontsdir=None):
+def ffmpeg_args(ffmpeg, scenes, voice_wav, ass_path, out_path, width=WIDTH, height=HEIGHT, fps=FPS, fontsdir=None,
+                music=None, music_volume=0.18):
     """scenes: [{"image": path, "duration": seconds}]. One input per picture (a single frame that zoompan
-    turns into the scene's frames), zoom in / out alternately, concat, captions, H.264 + AAC."""
+    turns into the scene's frames), zoom in / out alternately, concat, captions, H.264 + AAC.
+    music: a bed to duck under the voice (music.mix_filter) at music_volume (0..1); None = the voice only."""
     frames = frame_counts([s["duration"] for s in scenes], fps)
     args = [ffmpeg, "-y", "-nostdin", "-hide_banner", "-v", "error"]
     for s in scenes:
         args += ["-i", s["image"]]
     args += ["-i", voice_wav]
+    if music:
+        args += ["-i", music]
     parts = []
     for i, n in enumerate(frames):
         last = max(1, n - 1)
@@ -187,7 +192,13 @@ def ffmpeg_args(ffmpeg, scenes, voice_wav, ass_path, out_path, width=WIDTH, heig
     if fontsdir:
         subs += ":fontsdir=%s" % filter_path(fontsdir)
     parts.append("[vcat]%s[vout]" % subs)
-    args += ["-filter_complex", ";\n".join(parts), "-map", "[vout]", "-map", "%d:a" % len(scenes),
+    audio = "%d:a" % len(scenes)
+    if music:
+        # the video is exactly sum(frames) / fps long: the mix is made that long
+        parts.append(music_mod.mix_filter("%d:a" % len(scenes), "%d:a" % (len(scenes) + 1), music_volume,
+                                          sum(frames) / float(fps)))
+        audio = "[aout]"
+    args += ["-filter_complex", ";\n".join(parts), "-map", "[vout]", "-map", audio,
              "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-maxrate", "8M", "-bufsize", "16M",
              "-pix_fmt", "yuv420p", "-r", str(fps),
              "-c:a", "aac", "-b:a", "160k", "-ar", "48000", "-ac", "2", "-movflags", "+faststart", "-shortest", out_path]
@@ -367,6 +378,7 @@ def render_reel(runner, reel, scenes):
             with open(os.path.join(work, name), "wb") as fh:
                 fh.write(fetch(s["photo_path"], JobError("Picture %s is missing from storage. Redo that picture." % s.get("position"))))
             items.append({"image": name, "duration": secs})
+        bed, volume = fetch_music(runner, reel, work, BUCKET, is_http_4xx)
         beat()
 
         with open(os.path.join(work, "captions.ass"), "w", encoding="utf-8") as fh:
@@ -378,8 +390,10 @@ def render_reel(runner, reel, scenes):
             shutil.copyfile(font, os.path.join(work, "fonts", os.path.basename(font)))
             fontsdir = "fonts"
 
-        runner.log("reel render: %d pictures, %.1f s of voice" % (len(items), total))
-        args = ffmpeg_args(ffmpeg, items, "voice.wav", "captions.ass", "full.mp4", fontsdir=fontsdir)
+        runner.log("reel render: %d pictures, %.1f s of voice%s" % (
+            len(items), total, ", music at %d%%" % round(volume * 100) if bed else ""))
+        args = ffmpeg_args(ffmpeg, items, "voice.wav", "captions.ass", "full.mp4", fontsdir=fontsdir,
+                           music=bed, music_volume=volume)
         args = use_filter_script(args, os.path.join(work, "graph.txt"))
         run_ffmpeg(args, work, RENDER_TIMEOUT, "video", beat, log=runner.log)
         full = os.path.join(work, "full.mp4")
@@ -429,6 +443,34 @@ def render_reel(runner, reel, scenes):
             _remove_file(old_pc)  # this reel's superseded video (only ever inside the Reels folder)
     finally:
         shutil.rmtree(work, ignore_errors=True)
+
+
+def music_choice(settings, reel):
+    """(music_path, volume 0..1) when the bed goes under the voice: settings.reel_music on and the reel has a
+    bed (006; '' = its music step failed); else (None, 0)."""
+    settings = settings or {}
+    path = (reel or {}).get("music_path")
+    if not path or not settings.get("reel_music", False):
+        return None, 0.0
+    return path, music_mod.clamp_volume(settings.get("reel_music_volume", 18)) / 100.0
+
+
+def fetch_music(runner, reel, work, bucket, is_http_4xx):
+    """('music.flac' in `work`, volume) or (None, 0). A bed missing from storage only means no music."""
+    rows = runner._net(lambda: runner.supa.select("settings", "id=eq.1&select=*")) or [{}]
+    path, volume = music_choice(rows[0] if rows else {}, reel)
+    if not path:
+        return None, 0.0
+    try:
+        data = runner._retry(lambda: runner.supa.download(bucket, path))
+    except SupaError as e:
+        if is_http_4xx(e):
+            runner.log("the music file is missing from storage: rendering with the voice only")
+            return None, 0.0
+        raise JobError(NO_NET)
+    with open(os.path.join(work, "music.flac"), "wb") as fh:
+        fh.write(data)
+    return "music.flac", volume
 
 
 def remove_old_previews(runner, reel_id, keep):

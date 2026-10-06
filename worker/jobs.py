@@ -15,7 +15,7 @@ from PIL import Image
 from render import JobError, slugify, text_style
 from supa import SupaError
 
-VERSION = "2.0.0"
+VERSION = "2.1.0"
 BUCKET = "cards"
 COMFY_CLOSED = "ComfyUI is closed. Open ComfyUI Desktop on your PC, then press Retry."
 NO_NET_SAVE = "Couldn't reach the internet to save this card. Press Retry."
@@ -148,6 +148,8 @@ class Runner:
         self.reels = reels             # reels.ReelRunner, or None (cards only)
         self.reels_off_until = 0.0     # the reel functions are missing (migration 005 not run): re-check later
         self.reels_missing_logged = False
+        self.music_off_until = 0.0     # the 006 functions are missing: claim without music, no voice samples
+        self.music_missing_logged = False
         self.next_preview_sweep = 0.0
 
     # ------------------------------------------------------------ heartbeat
@@ -205,7 +207,7 @@ class Runner:
             return False
         try:
             self.supa.rpc("requeue_stuck_reels")
-            step = self.supa.rpc("claim_next_reel_step", {"p_no_comfy": not comfy_ok})
+            step = self._claim_reel_step(comfy_ok)
         except SupaError as e:
             if not is_missing_function(e):
                 raise
@@ -215,12 +217,44 @@ class Runner:
             self.reels_off_until = time.time() + REELS_RECHECK_SECONDS
             return False
         if not step:
-            return False
+            # Voice samples only when no reel step can run, and only with ComfyUI up (Chatterbox).
+            return self._sample_tick() if comfy_ok else False
         reel = step.get("reel") or {}
         scene = step.get("scene") or {}
         self.log("reel %s: %s%s (%s)" % (step.get("step"), reel.get("title"),
                                          " image %s" % scene.get("position") if scene else "", reel.get("id")))
         self.reels.run_step(step)
+        return True
+
+    def _claim_reel_step(self, comfy_ok):
+        """claim_next_reel_step with the music step (006: p_music). A database without 006 has only 005's
+        one-argument function: then ask without music (logged once, re-checked every REELS_RECHECK_SECONDS)."""
+        if time.time() >= self.music_off_until:
+            try:
+                return self.supa.rpc("claim_next_reel_step", {"p_no_comfy": not comfy_ok, "p_music": True})
+            except SupaError as e:
+                if not is_missing_function(e):
+                    raise
+                if not self.music_missing_logged:
+                    self.log("reel music and voices are off until supabase/migrations/006_reel_voices.sql is run")
+                    self.music_missing_logged = True
+                self.music_off_until = time.time() + REELS_RECHECK_SECONDS
+        return self.supa.rpc("claim_next_reel_step", {"p_no_comfy": not comfy_ok})
+
+    def _sample_tick(self):
+        if time.time() < self.music_off_until or not hasattr(self.reels, "run_sample"):
+            return False
+        try:
+            job = self.supa.rpc("claim_next_voice_sample")
+        except SupaError as e:
+            if not is_missing_function(e):
+                raise
+            self.music_off_until = time.time() + REELS_RECHECK_SECONDS
+            return False
+        if not isinstance(job, dict) or not job.get("voice"):
+            return False
+        self.log("voice sample: %s" % (job["voice"].get("id")))
+        self.reels.run_sample(job)
         return True
 
     def _settings(self):
