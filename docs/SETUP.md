@@ -76,6 +76,15 @@ Any order is safe; this one is the smoothest:
 
 Music: ACE-Step 1.5 in ComfyUI makes a new instrumental bed for every reel. Its model files (~10 GB, in ComfyUI's models folders: `diffusion_models/acestep_v1.5_turbo`, `text_encoders/qwen_0.6b_ace15` + `qwen_1.7b_ace15`, `vae/ace_1.5_vae`) are already installed on this PC; see `docs/reference/reel-voices-music-spike.md` to set up another PC. If music fails, the reel is still made with the voice only.
 
+## Adding themes, feelings and camera moves (existing install)
+Any order is safe; this one is the smoothest:
+1. Restart the worker (Task Scheduler: **End** then **Run**). It runs fine before step 2.
+2. Supabase **SQL Editor**: paste and run `supabase/migrations/007_reel_themes.sql` (safe to run again; it also sets older reels to Knitted Doll).
+3. Push to GitHub so Vercel redeploys the website.
+4. **Settings > Theme > Make all previews**: your PC makes one preview picture per theme (~1 min each).
+5. **Settings > Narrator & music > Make samples**: re-records the voice samples with the tighter delivery (the old ones show as out of date).
+6. Pick a default theme. Each reel can use another theme on its review page (before you approve it).
+
 ## When something is wrong
 - Header dot red, "PC offline": turn on the PC. The worker starts at login. **Generate** is disabled (the button says why) until the PC is back.
 - Amber dot, "ComfyUI closed": open ComfyUI Desktop. **Generate** stays disabled until then; text edits and Re-stamp still work.
