@@ -391,7 +391,9 @@ end $$;
 -- ---------------------------------------------------------------- worker: reel claim + stuck recovery
 -- The next step of one reel: {step, scene_id} or null when it can't move on right now. Shared by
 -- claim_next_reel_step (which claims it) and claim_next_voice_sample (samples only run when no reel step can).
-create or replace function public.reel_next_step(p_reel public.reels, p_no_comfy boolean) returns jsonb language plpgsql stable as $$
+-- p_music: the worker can make music (an older worker passes nothing: no music step at all, never waits for one).
+drop function if exists public.reel_next_step(public.reels, boolean);  -- the first 006 draft: keep one signature
+create or replace function public.reel_next_step(p_reel public.reels, p_no_comfy boolean, p_music boolean) returns jsonb language plpgsql stable as $$
 declare v_id uuid; v_open int; v_done int; v_music boolean;
 begin
   if p_reel.voice_path is null then
@@ -400,7 +402,7 @@ begin
   end if;
   if p_reel.words is null then return jsonb_build_object('step', 'timing', 'scene_id', null); end if;
   select coalesce(reel_music, true) into v_music from public.settings where id = 1;
-  if coalesce(v_music, true) and p_reel.music_path is null and p_reel.preview_path is null then
+  if p_music and coalesce(v_music, true) and p_reel.music_path is null and p_reel.preview_path is null then
     if not p_no_comfy then return jsonb_build_object('step', 'music', 'scene_id', null); end if;
     return null;  -- wait for ComfyUI: never render without the bed when music is on
   end if;
@@ -420,7 +422,8 @@ end $$;
 -- Nothing while a card is waiting or being made (a card claim younger than requeue_stuck_cards' 5 minutes).
 -- Oldest reel first; a reel whose next step can't run (a scene failed 3 times, scenes still pending,
 -- every image skipped) is passed over. Render only runs when at least one scene is done.
--- Music (006): after timing, before the images, while settings.reel_music is on and reels.music_path is null.
+-- Music (006): after timing, before the images, while settings.reel_music is on and reels.music_path is null, and
+-- only for a worker that passes p_music = true (the 006 worker does; an older worker never sees a music step).
 -- It runs under the existing 'voicing' status (no new status: the app shows it as part of the audio).
 -- WORKER CONTRACT:
 --   * after each step, save its result version-guarded AND clear reels.claimed_at (and the scene's claimed_at);
@@ -434,7 +437,8 @@ end $$;
 -- p_no_comfy: ComfyUI is closed on the PC, so only the steps that don't need it (timing, render) are handed out;
 -- a reel waiting for its music waits for ComfyUI.
 drop function if exists public.claim_next_reel_step();  -- the first 005 draft had no argument: keep one signature
-create or replace function public.claim_next_reel_step(p_no_comfy boolean default false) returns jsonb language plpgsql as $$
+drop function if exists public.claim_next_reel_step(boolean);  -- 005's signature: 006 adds p_music
+create or replace function public.claim_next_reel_step(p_no_comfy boolean default false, p_music boolean default false) returns jsonb language plpgsql as $$
 declare v_reel public.reels%rowtype; v_next jsonb; v_scene jsonb; v_step text; v_id uuid;
 begin
   perform 1 from public.cards
@@ -449,7 +453,7 @@ begin
     order by created_at, id
     for update skip locked
   loop
-    v_next := public.reel_next_step(v_reel, p_no_comfy);
+    v_next := public.reel_next_step(v_reel, p_no_comfy, p_music);
     continue when v_next is null;
     v_step := v_next ->> 'step';
     v_id := (v_next ->> 'scene_id')::uuid;
@@ -494,7 +498,7 @@ begin
   for v_reel in
     select * from public.reels where claimed_at is null and status in ('queued', 'voicing', 'imaging', 'rendering')
   loop
-    if public.reel_next_step(v_reel, false) is not null then return null; end if;
+    if public.reel_next_step(v_reel, false, true) is not null then return null; end if;
   end loop;
 
   select * into v_voice from public.reel_voices
@@ -595,12 +599,12 @@ revoke execute on function public.claim_next_card(boolean) from public, anon, au
 revoke execute on function public.requeue_stuck_cards() from public, anon, authenticated;
 grant execute on function public.claim_next_card(boolean) to service_role;
 grant execute on function public.requeue_stuck_cards() to service_role;
-revoke execute on function public.reel_next_step(public.reels, boolean) from public, anon, authenticated;
-revoke execute on function public.claim_next_reel_step(boolean) from public, anon, authenticated;
+revoke execute on function public.reel_next_step(public.reels, boolean, boolean) from public, anon, authenticated;
+revoke execute on function public.claim_next_reel_step(boolean, boolean) from public, anon, authenticated;
 revoke execute on function public.claim_next_voice_sample() from public, anon, authenticated;
 revoke execute on function public.requeue_stuck_reels() from public, anon, authenticated;
-grant execute on function public.reel_next_step(public.reels, boolean) to service_role;
-grant execute on function public.claim_next_reel_step(boolean) to service_role;
+grant execute on function public.reel_next_step(public.reels, boolean, boolean) to service_role;
+grant execute on function public.claim_next_reel_step(boolean, boolean) to service_role;
 grant execute on function public.claim_next_voice_sample() to service_role;
 grant execute on function public.requeue_stuck_reels() to service_role;
 revoke execute on function public.create_post(jsonb) from public, anon;

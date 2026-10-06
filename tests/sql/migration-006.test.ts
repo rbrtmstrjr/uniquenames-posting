@@ -42,7 +42,9 @@ async function migratedDb() {
 type Json = Record<string, unknown>;
 type Step = { step: string; reel: Json & { id: string; status: string }; scene: (Json & { id: string; position: number }) | null } | null;
 type Sample = { voice: Json & { id: string; sample_status: string; claimed_at: string | null; version: number } } | null;
-const claimStep = async (db: PGlite, noComfy = false) => (await one<{ r: Step }>(db, `select claim_next_reel_step($1) r`, [noComfy])).r;
+// the 006 worker passes p_music: true
+const claimStep = async (db: PGlite, noComfy = false, music = true) =>
+  (await one<{ r: Step }>(db, `select claim_next_reel_step($1, $2) r`, [noComfy, music])).r;
 const claimSample = async (db: PGlite) => (await one<{ r: Sample }>(db, `select claim_next_voice_sample() r`)).r;
 const requeue = async (db: PGlite) => (await one<{ n: number }>(db, `select requeue_stuck_reels() n`)).n;
 const release = (db: PGlite, reel: string) => db.query(`update reels set claimed_at=null where id=$1`, [reel]);
@@ -113,17 +115,18 @@ describe("006_reel_voices.sql on the live schema (v1 + 002..005)", () => {
     expect((await claimStep(db))?.step).toBe("voice");
   });
 
-  it("has exactly one signature per function after running 006 twice", async () => {
+  it("has exactly one signature per function after running 006 twice (005's and the first draft's are dropped)", async () => {
     const db = await liveDb();
+    await db.exec(`create function public.reel_next_step(p_reel public.reels, p_no_comfy boolean) returns jsonb language sql as $$ select null::jsonb $$`);
     await db.exec(m006);
     await db.exec(m006);
     const sigs = (await db.query<{ proname: string; s: string }>(`select p.proname, pg_get_function_identity_arguments(p.oid) s from pg_proc p
       join pg_namespace n on n.oid = p.pronamespace where n.nspname='public'
       and p.proname in ('claim_next_reel_step','claim_next_voice_sample','requeue_stuck_reels','reel_next_step') order by 1`)).rows;
     expect(sigs).toEqual([
-      { proname: "claim_next_reel_step", s: "p_no_comfy boolean" },
+      { proname: "claim_next_reel_step", s: "p_no_comfy boolean, p_music boolean" },
       { proname: "claim_next_voice_sample", s: "" },
-      { proname: "reel_next_step", s: "p_reel reels, p_no_comfy boolean" },
+      { proname: "reel_next_step", s: "p_reel reels, p_no_comfy boolean, p_music boolean" },
       { proname: "requeue_stuck_reels", s: "" },
     ]);
   });
@@ -156,6 +159,20 @@ describe("claim_next_reel_step with music", () => {
     await db.query(`update reel_scenes set status='done', claimed_at=null where reel_id=$1`, [reel]);
     await release(db, reel);
     expect(await claimStep(db)).toMatchObject({ step: "render" });
+  });
+
+  it("a worker without music (p_music false or omitted, e.g. the 005 worker) never gets or waits for a music step", async () => {
+    const db = await migratedDb();
+    const reel = await addReel(db, 1);
+    await db.query(`update reels set voice_path='v', words='[]' where id=$1`, [reel]);
+    const old = await one<{ r: Step }>(db, `select claim_next_reel_step(false) r`);
+    expect(old.r).toMatchObject({ step: "image" });
+    await db.query(`update reel_scenes set status='done', claimed_at=null where reel_id=$1`, [reel]);
+    await release(db, reel);
+    expect(await claimStep(db, true, false)).toMatchObject({ step: "render" }); // no waiting for music
+    await release(db, reel);
+    expect((await one<{ r: Step }>(db, `select claim_next_reel_step() r`)).r).toMatchObject({ step: "render" });
+    expect(await one(db, `select music_path from reels where id=$1`, [reel])).toEqual({ music_path: null });
   });
 
   it("music off: no music step", async () => {
@@ -310,8 +327,8 @@ describe("006 Supabase-only block", () => {
     await db.exec(security(m006raw));
     const can = async (role: string, fn: string) =>
       (await one<{ ok: boolean }>(db, `select has_function_privilege($1, $2, 'execute') ok`, [role, fn])).ok;
-    for (const fn of ["public.claim_next_reel_step(boolean)", "public.requeue_stuck_reels()", "public.claim_next_voice_sample()",
-      "public.reel_next_step(public.reels, boolean)"]) {
+    for (const fn of ["public.claim_next_reel_step(boolean, boolean)", "public.requeue_stuck_reels()", "public.claim_next_voice_sample()",
+      "public.reel_next_step(public.reels, boolean, boolean)"]) {
       expect(await can("service_role", fn), fn).toBe(true);
       expect(await can("authenticated", fn), fn).toBe(false);
       expect(await can("anon", fn), fn).toBe(false);
@@ -329,7 +346,9 @@ describe("006 Supabase-only block", () => {
       expect(sql).toMatch(/create policy reels_voice_refs_insert on storage\.objects for insert to authenticated\s+with check \(bucket_id = 'reels' and name ~ '\^voices\/\[a-z\]\+\/ref\\\.wav\$'\);/);
       expect(sql).toMatch(/alter table public\.reel_voices replica identity full;/);
       expect(sql).toMatch(/grant execute on function public\.claim_next_voice_sample\(\) to service_role;/);
-      expect(sql).toMatch(/grant execute on function public\.reel_next_step\(public\.reels, boolean\) to service_role;/);
+      expect(sql).toMatch(/grant execute on function public\.reel_next_step\(public\.reels, boolean, boolean\) to service_role;/);
+      expect(sql).toMatch(/grant execute on function public\.claim_next_reel_step\(boolean, boolean\) to service_role;/);
+      expect(sql).not.toMatch(/function public\.claim_next_reel_step\(boolean\) to/);
     }
     expect(m006raw).toMatch(/alter publication supabase_realtime add table public\.reel_voices/);
     expect(schema).toMatch(/array\[[^\]]*'reel_voices'\][\s\S]*supabase_realtime/);

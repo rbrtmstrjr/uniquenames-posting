@@ -320,9 +320,10 @@ describe("fresh schema.sql matches v1 + 002..005 (+ 006)", () => {
     expect(await shape(await freshDb())).toEqual(want);
   });
 
-  it("005 is also safe on a fresh schema.sql project", async () => {
+  it("005 is also safe on a fresh schema.sql project (followed by 006, which drops 005's one-argument claim again)", async () => {
     const db = await freshDb();
     await db.exec(m005);
+    await db.exec(m006);
     await addReel(db, 1);
     expect((await claimStep(db))?.step).toBe("voice");
   });
@@ -361,9 +362,11 @@ describe("005 Supabase-only block", () => {
       expect(sql).toMatch(/create policy reels_delete on storage\.objects for delete to authenticated using \(bucket_id = 'reels'\);/);
       expect(sql).toMatch(/alter table public\.reels replica identity full;/);
       expect(sql).toMatch(/alter table public\.reel_scenes replica identity full;/);
-      expect(sql).toMatch(/grant execute on function public\.claim_next_reel_step\(boolean\) to service_role;/);
       expect(sql).toMatch(/grant execute on function public\.requeue_stuck_reels\(\) to service_role;/);
     }
+    // schema.sql has 006's two-argument claim (p_no_comfy, p_music)
+    expect(m005raw).toMatch(/grant execute on function public\.claim_next_reel_step\(boolean\) to service_role;/);
+    expect(schema).toMatch(/grant execute on function public\.claim_next_reel_step\(boolean, boolean\) to service_role;/);
     expect(m005raw).toMatch(/array\['reels', 'reel_scenes'\][\s\S]*supabase_realtime/);
     expect(schema).toMatch(/array\[[^\]]*'reels', 'reel_scenes'[^\]]*\][\s\S]*supabase_realtime/);
   });
