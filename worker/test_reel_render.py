@@ -57,11 +57,14 @@ class CaptionTest(unittest.TestCase):
         events = [l for l in ass.splitlines() if l.startswith("Dialogue:")]
         self.assertEqual(len(events), 5)                                           # one per spoken word
         # "close," ends the first group (comma); the gap to "every" (0.2 s) is bridged
-        self.assertEqual(events[0], "Dialogue: 0,0:00:00.00,0:00:00.30,Cap,,0,0,0,,{\\1c&H0000E6FF&}HOLD{\\1c&H00FFFFFF&} THEM CLOSE")
+        # the spoken word is yellow and pops (80% -> 110% -> 100%), then the rest of the group is reset
+        pop, reset = rr.POP, "{\\1c&H00FFFFFF&\\fscx100\\fscy100}"
+        self.assertEqual(events[0], "Dialogue: 0,0:00:00.00,0:00:00.30,Cap,,0,0,0,,{\\1c&H0000E6FF&}" + pop + "HOLD"
+                         + reset + " THEM CLOSE")
         self.assertTrue(events[2].startswith("Dialogue: 0,0:00:00.60,0:00:01.20,"))
-        self.assertTrue(events[2].endswith("HOLD THEM {\\1c&H0000E6FF&}CLOSE{\\1c&H00FFFFFF&}"))
+        self.assertTrue(events[2].endswith("HOLD THEM {\\1c&H0000E6FF&}" + pop + "CLOSE" + reset))
         self.assertTrue(events[4].startswith("Dialogue: 0,0:00:01.50,0:00:02.00,"))
-        self.assertTrue(events[4].endswith("EVERY {\\1c&H0000E6FF&}DAY{\\1c&H00FFFFFF&}"))
+        self.assertTrue(events[4].endswith("EVERY {\\1c&H0000E6FF&}" + pop + "DAY" + reset))
 
     def test_groups_hold_at_most_three_words_and_long_text_splits(self):
         words = [{"word": w, "start": i * 0.3, "end": i * 0.3 + 0.3} for i, w in
@@ -114,9 +117,11 @@ class ArgsTest(unittest.TestCase):
                               "voice.wav", "C:\\tmp\\captions.ass", "out.mp4", fontsdir="fonts")
         graph = args[args.index("-filter_complex") + 1]
         self.assertIn("scale=2160:3840", graph)
-        self.assertIn("z='1+0.0400*on/59'", graph)                # 2 s: zooms in 4% (2% a second)
-        self.assertIn("z='1.0300-0.0300*on/44'", graph)           # 1.5 s: zooms out 3%
-        self.assertIn("z='1+0.0800*on/179'", graph)               # 6 s: capped at 8%
+        # no motion given (a database without 007): the rotation, never the same move twice in a row
+        self.assertIn("zoompan=z='1+0.100*(on/59)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=60", graph)  # push_in
+        self.assertIn("zoompan=z='1.150':x='(iw-iw/zoom)*((on/44)*(on/44)*(3-2*(on/44)))'", graph)        # pan_right
+        self.assertIn("zoompan=z='1.100-0.100*(on/179)'", graph)                                          # pull_out
+        self.assertNotIn("fade", graph)                                                # the first frame is instant
         self.assertIn(":d=60:s=1080x1920:fps=30", graph)
         self.assertIn(":d=45:s=1080x1920:fps=30", graph)
         self.assertIn("concat=n=3:v=1:a=0", graph)

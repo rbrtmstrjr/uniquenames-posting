@@ -17,6 +17,7 @@ GENERATE_EXTRA_SECONDS = 8.0  # ACE-Step writes a song that ENDS (decays to sile
                               # generate longer and cut it, so the music is still playing at the last word
 MAX_SECONDS = 240.0          # a reel never needs more (and ACE-Step time grows with it)
 COMFY_CLOSED = "ComfyUI is closed. Open ComfyUI Desktop on your PC, then press Retry."
+FADE_IN_SECONDS = 0.05       # the bed is there from the first frame (007): just enough fade to avoid a click
 POLL_SECONDS = 1.5
 BEAT_SECONDS = 20.0
 
@@ -107,7 +108,8 @@ def clamp_volume(pct):
 
 
 def mix_filter(voice_in, music_in, volume, duration):
-    """filter_complex part: the bed (loudness-normalised, at `volume` 0..1, fade in 1 s / out 2 s) ducked under
+    """filter_complex part: the bed (loudness-normalised, at `volume` 0..1, full from t=0 (007: only a 50 ms
+    de-click fade in, was 1 s), fade out 2 s) ducked under
     the voice (sidechain, voice as key) and mixed with it into [aout], exactly `duration` s long.
     The voice and the key are padded (apad) so the compressor and amix never stop when the voice does; the bed
     is padded then trimmed so a short bed can never cut the video. The fades are on the bed only: the video
@@ -117,7 +119,7 @@ def mix_filter(voice_in, music_in, volume, duration):
     return ";\n".join([
         "[%s]%s,apad,asplit=2[voice][key]" % (voice_in, fmt),
         "[%s]%s,apad,atrim=0:%.3f,asetpts=PTS-STARTPTS,loudnorm=I=-16:TP=-1.5:LRA=7,aresample=48000,volume=%.2f,"
-        "afade=t=in:st=0:d=1,afade=t=out:st=%.3f:d=2[bed]" % (music_in, fmt, d, float(volume), max(0.0, d - 2)),
+        "afade=t=in:st=0:d=%.2f,afade=t=out:st=%.3f:d=2[bed]" % (music_in, fmt, d, float(volume), FADE_IN_SECONDS, max(0.0, d - 2)),
         "[bed][key]sidechaincompress=threshold=0.02:ratio=8:attack=20:release=400:makeup=1[ducked]",
         "[voice][ducked]amix=inputs=2:duration=shortest:normalize=0,atrim=0:%.3f[aout]" % d,
     ])

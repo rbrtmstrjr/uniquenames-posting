@@ -17,7 +17,16 @@ NODE = "FL_ChatterboxTTS"
 RATE = 24000                 # Chatterbox output: 24 kHz mono
 WORDS_PER_SECOND = 4.0       # measured in the spike
 CHUNK_SECONDS = 25.0         # well under Chatterbox's ~40 s cap
-PAUSE_SECONDS = 0.35         # between chunks, like a breath between sentences
+PAUSE_SECONDS = 0.10         # between chunks (007: was 0.35): no dead air between sentences
+# Tightening (007), on each chunk before the chunks are joined and sped up: leading/trailing silence is trimmed
+# (EDGE_PAD kept so soft consonants are never clipped) and pauses longer than MAX_PAUSE shrink to SHORT_PAUSE.
+FRAME_SECONDS = 0.01         # silence is judged on 10 ms frames (RMS)
+EDGE_PAD = 0.02
+MAX_PAUSE = 0.35
+SHORT_PAUSE = 0.25
+SILENCE_REL = 0.05           # a frame is silent below 5% (-26 dB) of the chunk's loud speech (95th-percentile RMS) ...
+SILENCE_MIN = 58.0           # ... but never below -55 dBFS (a near-silent chunk) ...
+SILENCE_MAX = 583.0          # ... nor above -35 dBFS (a very loud chunk), in 16-bit sample units
 NEEDS_RESTART = "Restart ComfyUI so it loads the Chatterbox voice node."
 COMFY_CLOSED = "ComfyUI is closed. Open ComfyUI Desktop on your PC, then press Retry."
 # Calm delivery (006): less acting, steadier pace than Chatterbox's defaults (0.5 / 0.8 / 0.5).
@@ -218,6 +227,51 @@ def wav_pcm(wav_bytes):
         if (w.getnchannels(), w.getsampwidth(), w.getframerate()) != (1, 2, RATE):
             raise JobError("The voice came back in an unexpected format.")
         return w.readframes(w.getnframes())
+
+
+def silence_threshold(rms):
+    """The RMS (16-bit units) below which a 10 ms frame counts as silence."""
+    import numpy as np
+    loud = float(np.percentile(rms, 95)) if len(rms) else 0.0
+    return min(SILENCE_MAX, max(SILENCE_MIN, SILENCE_REL * loud))
+
+
+def tighten_pcm(pcm, rate=RATE):
+    """16-bit mono PCM with the silence before the first and after the last word trimmed (EDGE_PAD kept) and
+    every inner pause longer than MAX_PAUSE shortened to SHORT_PAUSE (its two edges kept, the middle cut out).
+    Audio with no speech at all is returned unchanged (nothing to measure against)."""
+    import numpy as np
+    x = np.frombuffer(pcm[: len(pcm) // 2 * 2], dtype="<i2").astype(np.float32)
+    win = max(1, int(round(rate * FRAME_SECONDS)))
+    n = len(x) // win
+    if n == 0:
+        return pcm
+    rms = np.sqrt(np.mean(x[: n * win].reshape(n, win) ** 2, axis=1))
+    voiced = rms > silence_threshold(rms)
+    idx = np.flatnonzero(voiced)
+    if len(idx) == 0:
+        return pcm
+    pad = int(round(rate * EDGE_PAD))
+    start = max(0, idx[0] * win - pad)
+    end = min(len(x), (idx[-1] + 1) * win + pad)
+    keep_half = int(round(rate * SHORT_PAUSE / 2))
+    pieces, cur = [], start
+    # inner silent runs: between consecutive voiced frames
+    gaps = np.flatnonzero(np.diff(idx) > 1)
+    for g in gaps:
+        a = (idx[g] + 1) * win          # first silent sample
+        b = idx[g + 1] * win            # first voiced sample after the run
+        if (b - a) / float(rate) > MAX_PAUSE:
+            pieces.append((cur, a + keep_half))
+            cur = b - keep_half
+    pieces.append((cur, end))
+    out = np.concatenate([x[p:q] for p, q in pieces]).astype("<i2")
+    return out.tobytes()
+
+
+def tighten(wav_bytes):
+    """A 24 kHz mono WAV with its silences tightened (tighten_pcm)."""
+    return pcm_to_wav(tighten_pcm(wav_pcm(wav_bytes)))
 
 
 def concat_wavs(wavs, pause_s=PAUSE_SECONDS):

@@ -1,6 +1,7 @@
-# The reel's video on the PC: every finished scene picture gets a slow Ken Burns zoom for its narration
-# line, the voice goes under it, and the words appear as they are spoken (3 at a time, the spoken one in
-# yellow). ffmpeg comes from imageio-ffmpeg. Nothing here needs ComfyUI.
+# The reel's video on the PC: every finished scene picture gets a camera move for its narration line
+# (reel_scenes.motion, 007: push in / pull out / pan / tilt / punch; never the same twice in a row), the voice
+# goes under it from the very first frame, and the words pop in as they are spoken (3 at a time, the spoken one
+# in yellow with a small scale bounce). ffmpeg comes from imageio-ffmpeg. Nothing here needs ComfyUI.
 #   full MP4 (1080x1920)  -> Pictures\Unique Names\Reels\<date> <title>.mp4  (written as .part, then renamed)
 #   preview MP4 (720x1280) -> storage reels/<id>/preview-v<version>.mp4     (<= ~15 MB, 45 MB hard cap)
 import datetime
@@ -19,8 +20,15 @@ import timing
 
 FPS = 30
 WIDTH, HEIGHT = 1080, 1920
-ZOOM_PER_S = 0.02              # Ken Burns: 2% per second ...
-ZOOM_MAX = 0.08                # ... and at most 1.00 -> 1.08 over a scene (short scenes zoom less, not faster)
+# Camera moves (docs/reference/reel-themes-motion-spike.md section 2), on a 2x pre-scaled picture
+MOVES = ("push_in", "pull_out", "pan_left", "pan_right", "tilt_up", "tilt_down", "punch")
+ROTATION = ("push_in", "pan_right", "pull_out", "tilt_up", "pan_left", "tilt_down")  # when a scene has no motion
+PUSH = 0.10                    # push_in / pull_out zoom travel over the scene
+PAN_Z = 1.15                   # pans and tilts hold this zoom and travel the spare margin
+PUNCH_PEAK, PUNCH_SET = 0.18, 0.12   # punch: snap to +18% in 0.3 s, settle to +12% in 0.3 s, then a slow creep
+PUNCH_CREEP = 0.02
+# The spoken word pops: 80% -> 110% in 70 ms -> 100% at 120 ms (times from the word's own event start)
+POP = "{\\fscx80\\fscy80\\t(0,70,\\fscx110\\fscy110)\\t(70,120,\\fscx100\\fscy100)}"
 MIN_SCENE_S = 0.8              # a picture is never on screen for less than this
 RENDER_TIMEOUT = 900
 PREVIEW_TIMEOUT = 300
@@ -74,8 +82,9 @@ def group_words(words, max_words=3, max_chars=20):
 
 
 def ass_captions(words, width=WIDTH, height=HEIGHT, linger=0.6):
-    """An ASS file: one event per spoken word showing its whole group, that word in yellow.
-    A group stays up until the next group starts (if that is within `linger` s), so it doesn't flicker."""
+    """An ASS file: one event per spoken word showing its whole group, that word in yellow and popping in
+    (POP: a scale bounce that starts as the word is spoken). A group stays up until the next group starts (if
+    that is within `linger` s), so it doesn't flicker."""
     c = CAPTION_STYLE
     size = int(round(height * c["size"]))
     lr = int(width * c["margin_lr"])
@@ -99,7 +108,8 @@ def ass_captions(words, width=WIDTH, height=HEIGHT, linger=0.6):
             end = g[j + 1]["start"] if j + 1 < len(g) else g_end
             if end <= start:
                 end = start + 0.05
-            parts = [("{\\1c%s}%s{\\1c&H00FFFFFF&}" % (YELLOW, o["text"])) if k == j else o["text"]
+            parts = [("{\\1c%s}%s%s{\\1c&H00FFFFFF&\\fscx100\\fscy100}" % (YELLOW, POP, o["text"])) if k == j
+                     else o["text"]
                      for k, o in enumerate(g)]
             out.append("Dialogue: 0,%s,%s,Cap,,0,0,0,,%s" % (ass_time(start), ass_time(end), " ".join(parts)))
     return head + "\n".join(out) + "\n"
@@ -159,6 +169,56 @@ def frame_counts(durations, fps=FPS):
     return out
 
 
+# ---------------------------------------------------------------- camera moves
+def scene_moves(scenes):
+    """The camera move per shown scene: its `motion` (007) when valid, else 'punch' for a key moment, else the
+    next move of ROTATION; never the same move twice in a row (a repeat takes the next rotation move instead)."""
+    out, k = [], 0
+    for s in scenes:
+        s = s or {}
+        m = s.get("motion")
+        if m not in MOVES:
+            m = "punch" if s.get("key_moment") else None
+        prev = out[-1] if out else None
+        if m is None or m == prev:
+            while ROTATION[k % len(ROTATION)] == prev:
+                k += 1
+            m = ROTATION[k % len(ROTATION)]
+            k += 1
+        out.append(m)
+    return out
+
+
+def move_expr(move, n, fps=FPS):
+    """(z, x, y) zoompan expressions for a move over `n` output frames (iw/ih = the 2x pre-scaled picture).
+    p runs 0 -> 1 over the scene; pans and tilts ease in and out (smoothstep). Frame 0 is the move's start: the
+    picture is on screen from the first frame, no fade."""
+    last = max(1, int(n) - 1)
+    p = "(on/%d)" % last
+    ease = "(%s*%s*(3-2*%s))" % (p, p, p)
+    cx, cy = "iw/2-(iw/zoom/2)", "ih/2-(ih/zoom/2)"
+    if move == "push_in":
+        return "1+%.3f*%s" % (PUSH, p), cx, cy
+    if move == "pull_out":
+        return "%.3f-%.3f*%s" % (1 + PUSH, PUSH, p), cx, cy
+    if move == "pan_left":      # the view travels left: from the right edge to the left edge
+        return "%.3f" % PAN_Z, "(iw-iw/zoom)*(1-%s)" % ease, cy
+    if move == "pan_right":
+        return "%.3f" % PAN_Z, "(iw-iw/zoom)*%s" % ease, cy
+    if move == "tilt_up":       # the view travels up: from the bottom to the top
+        return "%.3f" % PAN_Z, cx, "(ih-ih/zoom)*(1-%s)" % ease
+    if move == "tilt_down":
+        return "%.3f" % PAN_Z, cx, "(ih-ih/zoom)*%s" % ease
+    if move == "punch":         # ease-out snap, settle, then a slow creep to the end
+        f = max(1, int(round(0.3 * fps)))
+        a, b = "(on/%d)" % f, "((on-%d)/%d)" % (f, f)
+        z = ("if(lt(on,%d),1+%.3f*%s*(2-%s),if(lt(on,%d),%.3f-%.3f*%s,%.3f+%.3f*(on-%d)/%d))"
+             % (f, PUNCH_PEAK, a, a, 2 * f, 1 + PUNCH_PEAK, PUNCH_PEAK - PUNCH_SET, b, 1 + PUNCH_SET, PUNCH_CREEP,
+                2 * f, max(1, last - 2 * f)))
+        return z, cx, cy
+    raise ValueError("unknown camera move: %r" % (move,))
+
+
 # ---------------------------------------------------------------- ffmpeg
 def filter_path(p):
     """A path as a filter-graph option value (Windows drive colons and backslashes escaped)."""
@@ -167,8 +227,9 @@ def filter_path(p):
 
 def ffmpeg_args(ffmpeg, scenes, voice_wav, ass_path, out_path, width=WIDTH, height=HEIGHT, fps=FPS, fontsdir=None,
                 music=None, music_volume=0.18):
-    """scenes: [{"image": path, "duration": seconds}]. One input per picture (a single frame that zoompan
-    turns into the scene's frames), zoom in / out alternately, concat, captions, H.264 + AAC.
+    """scenes: [{"image": path, "duration": seconds, "motion"?: move, "key_moment"?: bool}]. One input per picture
+    (a single frame that zoompan turns into the scene's frames) with its camera move (scene_moves), concat,
+    captions, H.264 + AAC.
     music: a bed to duck under the voice (music.mix_filter) at music_volume (0..1); None = the voice only."""
     frames = frame_counts([s["duration"] for s in scenes], fps)
     args = [ffmpeg, "-y", "-nostdin", "-hide_banner", "-v", "error"]
@@ -178,15 +239,13 @@ def ffmpeg_args(ffmpeg, scenes, voice_wav, ass_path, out_path, width=WIDTH, heig
     if music:
         args += ["-i", music]
     parts = []
-    for i, n in enumerate(frames):
-        last = max(1, n - 1)
-        amt = min(ZOOM_MAX, ZOOM_PER_S * n / float(fps))
-        z = ("1+%.4f*on/%d" % (amt, last)) if i % 2 == 0 else ("%.4f-%.4f*on/%d" % (1 + amt, amt, last))
-        # 2x up first: zoompan crops in whole pixels, so a bigger source keeps the slow zoom smooth
+    for i, (n, move) in enumerate(zip(frames, scene_moves(scenes))):
+        z, x, y = move_expr(move, n, fps)
+        # 2x up first: zoompan crops in whole pixels, so a bigger source keeps the slow moves smooth
         parts.append(
             "[%d:v]scale=%d:%d:force_original_aspect_ratio=increase:flags=lanczos,crop=%d:%d,setsar=1,"
-            "zoompan=z='%s':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=%d:s=%dx%d:fps=%d,setsar=1,format=yuv420p[v%d]"
-            % (i, 2 * width, 2 * height, 2 * width, 2 * height, z, n, width, height, fps, i))
+            "zoompan=z='%s':x='%s':y='%s':d=%d:s=%dx%d:fps=%d,setsar=1,format=yuv420p[v%d]"
+            % (i, 2 * width, 2 * height, 2 * width, 2 * height, z, x, y, n, width, height, fps, i))
     parts.append("".join("[v%d]" % i for i in range(len(frames))) + "concat=n=%d:v=1:a=0[vcat]" % len(frames))
     subs = "subtitles=filename=%s" % filter_path(ass_path)
     if fontsdir:
@@ -377,10 +436,10 @@ def render_reel(runner, reel, scenes):
             name = "img_%02d.jpg" % k
             with open(os.path.join(work, name), "wb") as fh:
                 fh.write(fetch(s["photo_path"], JobError("Picture %s is missing from storage. Redo that picture." % s.get("position"))))
-            items.append({"image": name, "duration": secs})
+            items.append({"image": name, "duration": secs, "motion": s.get("motion"), "key_moment": s.get("key_moment")})
         bed, volume = fetch_music(runner, reel, work, BUCKET, is_http_4xx)
         if bed and items:
-            # the music rings out after the last word: hold the last picture (its zoom goes on) for the bed's extra time
+            # the music rings out after the last word: hold the last picture (its move goes on) for the bed's extra time
             items[-1]["duration"] += music_mod.EXTRA_SECONDS
         beat()
 

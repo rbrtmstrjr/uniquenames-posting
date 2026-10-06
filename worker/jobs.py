@@ -15,7 +15,7 @@ from PIL import Image
 from render import JobError, slugify, text_style
 from supa import SupaError
 
-VERSION = "2.1.0"
+VERSION = "2.2.0"
 BUCKET = "cards"
 COMFY_CLOSED = "ComfyUI is closed. Open ComfyUI Desktop on your PC, then press Retry."
 NO_NET_SAVE = "Couldn't reach the internet to save this card. Press Retry."
@@ -150,6 +150,8 @@ class Runner:
         self.reels_missing_logged = False
         self.music_off_until = 0.0     # the 006 functions are missing: claim without music, no voice samples
         self.music_state = None        # None = not known yet, True = 006 there, False = 006 missing
+        self.themes_off_until = 0.0    # claim_next_theme_preview is missing (007 not run): re-check later
+        self.themes_state = None       # None = not known yet, True = 007 there, False = 007 missing
         self.next_preview_sweep = 0.0
 
     # ------------------------------------------------------------ heartbeat
@@ -217,8 +219,11 @@ class Runner:
             self.reels_off_until = time.time() + REELS_RECHECK_SECONDS
             return False
         if not step:
-            # Voice samples only when no reel step can run, and only with ComfyUI up (Chatterbox).
-            return self._sample_tick() if comfy_ok else False
+            # Voice samples, then theme previews, only when no reel step can run and only with ComfyUI up
+            # (Chatterbox / Z-Image).
+            if not comfy_ok:
+                return False
+            return self._sample_tick() or self._preview_tick()
         reel = step.get("reel") or {}
         scene = step.get("scene") or {}
         self.log("reel %s: %s%s (%s)" % (step.get("step"), reel.get("title"),
@@ -267,6 +272,30 @@ class Runner:
             return False
         self.log("voice sample: %s" % (job["voice"].get("id")))
         self.reels.run_sample(job)
+        return True
+
+    def _preview_tick(self):
+        """One theme preview (007). A database without 007 has no claim_next_theme_preview: previews are off,
+        logged once, re-checked every REELS_RECHECK_SECONDS (also off while 006 is missing: 007 needs it)."""
+        if time.time() < max(self.themes_off_until, self.music_off_until) or not hasattr(self.reels, "run_theme_preview"):
+            return False
+        try:
+            job = self.supa.rpc("claim_next_theme_preview")
+        except SupaError as e:
+            if not is_missing_function(e):
+                raise
+            self.themes_off_until = time.time() + REELS_RECHECK_SECONDS
+            if self.themes_state is not False:
+                self.log("theme previews are off until supabase/migrations/007_reel_themes.sql is run")
+            self.themes_state = False
+            return False
+        if self.themes_state is False:
+            self.log("theme previews are on (007 found)")
+        self.themes_state = True
+        if not isinstance(job, dict) or not job.get("theme"):
+            return False
+        self.log("theme preview: %s" % job["theme"].get("id"))
+        self.reels.run_theme_preview(job)
         return True
 
     def _settings(self):

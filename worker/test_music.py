@@ -122,7 +122,7 @@ class MixTest(unittest.TestCase):
         self.assertIn(",apad,asplit=2[voice][key]", chains[0])                  # voice + key never end early
         self.assertTrue(chains[1].startswith("[4:a]aformat="))
         self.assertIn("apad,atrim=0:20.000,asetpts=PTS-STARTPTS,loudnorm=I=-16:TP=-1.5:LRA=7,aresample=48000,volume=0.18", chains[1])
-        self.assertIn("afade=t=in:st=0:d=1,afade=t=out:st=18.000:d=2[bed]", chains[1])
+        self.assertIn("afade=t=in:st=0:d=0.05,afade=t=out:st=18.000:d=2[bed]", chains[1])
         self.assertEqual(chains[2], "[bed][key]sidechaincompress=threshold=0.02:ratio=8:attack=20:release=400:makeup=1[ducked]")
         self.assertEqual(chains[3], "[voice][ducked]amix=inputs=2:duration=shortest:normalize=0,atrim=0:20.000[aout]")
         self.assertIn("afade=t=out:st=0.000", music.mix_filter("0:a", "1:a", 0.1, 1.0))  # a very short reel

@@ -546,6 +546,9 @@ class RunnerReelTickTest(unittest.TestCase):
         self.run_ = jobs.Runner(self.supa, FakeRenderer(), os.path.join(self.root, "out"), os.path.join(self.root, "c"),
                                 log=self.logs.append, reels=self.reels)
 
+    def last_claim(self):
+        return [a for f, a in zip(self.supa.rpcs, self.supa.rpc_args) if f == "claim_next_reel_step"][-1]
+
     def test_reel_step_only_after_no_card(self):
         step = {"step": "image", "reel": make_reel(), "scene": make_scene(1)}
         self.supa.reel_steps.append(step)
@@ -564,8 +567,9 @@ class RunnerReelTickTest(unittest.TestCase):
         self.assertNotIn("claim_next_voice_sample", self.supa.rpcs)        # no samples without ComfyUI
         self.run_.renderer = FakeRenderer()
         self.run_.tick()
-        self.assertEqual(self.supa.rpc_args[-2], {"p_no_comfy": False, "p_music": True})
-        self.assertEqual(self.supa.rpcs[-1], "claim_next_voice_sample")    # nothing for the reels: a sample
+        self.assertEqual(self.last_claim(), {"p_no_comfy": False, "p_music": True})
+        # nothing for the reels: a voice sample, then (none waiting) a theme preview
+        self.assertEqual(self.supa.rpcs[-2:], ["claim_next_voice_sample", "claim_next_theme_preview"])
 
     def test_missing_rpc_is_skipped_quietly_and_rechecked_later(self):
         self.supa.rpc_error = SupaError('POST /rest/v1/rpc/requeue_stuck_reels -> HTTP 404 {"code":"PGRST202"}')
@@ -635,7 +639,7 @@ class RunnerReelTickTest(unittest.TestCase):
         self.run_.music_off_until = 0                                         # the owner ran 006
         self.supa.music_rpc_error = None
         self.assertFalse(self.run_.tick())
-        self.assertEqual(self.supa.rpc_args[-2], {"p_no_comfy": False, "p_music": True})
+        self.assertEqual(self.last_claim(), {"p_no_comfy": False, "p_music": True})
         self.assertEqual(len([m for m in self.logs if "are on (006 found)" in m]), 1)
         self.assertFalse(self.run_.tick())
         self.assertEqual(len([m for m in self.logs if "are on (006 found)" in m]), 1)
