@@ -1,4 +1,9 @@
-# Reels themes + motion PC spike (Task 1): PARTIAL, stopped on an AMD GPU fault
+# Reels themes + motion PC spike (Task 1)
+
+> **Outcome (owner decision, 2026-10-06): NO AI motion this round. LTX is dropped.** Every line gets a camera
+> move (section 2); `p_clips` / the `clip` step stays off. The 8 theme previews and the emotion check were
+> rendered after the owner restarted ComfyUI (section 5). Section 1 and the verdict table below record the
+> first attempt as it happened.
 
 Run on 2026-10-06 on the owner's PC (Windows 11, AMD Radeon RX 9060 XT 16 GB, ComfyUI Desktop 0.38.2 on :8188,
 `torch 2.12.0+rocm7.14.0`). Before the GPU job the spike checked (read-only, service key) that no card was
@@ -10,13 +15,13 @@ was `queued|making`, and ComfyUI's `/queue` was empty (`busy.py` printed `IDLE`)
 | Step | Result |
 |---|---|
 | 1. LTX-Video image→video | **BLOCKED on this GPU.** Sampling works and is fast (544x960, 97 frames, 8 steps in **21 s**). But the LTX video-VAE decode crashed with `hipErrorLaunchFailure` ("CUDA error: unspecified launch failure"). That error is sticky: it **broke the live ComfyUI's GPU context**. `GET /system_stats` now returns 500 with the same error, and every GPU job on :8188 fails until ComfyUI is restarted. |
-| 2. 8 theme previews | **Not rendered** (needs the GPU). The 8 positive-only style blocks are written (section 5). |
-| 3. Emotion contrast | **Not rendered** (needs the GPU). The prompts are ready (`themes.py emotion`). |
+| 2. 8 theme previews | **Done after the restart.** All 8 pass: 5 in round 1, papercraft in round 2, sketch only with a grayscale post-pass, knitted with the generic moment (section 5). |
+| 3. Emotion contrast | **Pass.** In 3D Animated, laughing, teary and surprised give three clearly different faces on the same cast (section 5). |
 | 4. Camera moves + caption pop | **Done.** 7 zoompan presets and the ASS pop work in ffmpeg 7.1. The 10 s test MP4 was checked frame by frame. |
 
-**Owner action (blocking):** restart ComfyUI Desktop (instance "ZImage": Restart ComfyUI, or close and reopen the
-app) while no card is generating. Until then, cards, reel images, voices and music on this PC will fail. After the
-restart, steps 2–3 can be re-run: `python themes.py preview r1` and `python themes.py emotion r1`, about 1 minute per image.
+The owner restarted ComfyUI Desktop after the LTX fault. `/system_stats` returned 200 again and Z-Image worked
+normally for the previews. **Never run LTX in the live ComfyUI.** The two LTX model files (11.5 GB) are still in
+`ComfyUI-Shared\models\{checkpoints,text_encoders}`; the owner may delete them.
 
 ## 1. LTX-Video (native ComfyUI nodes)
 
@@ -297,15 +302,45 @@ It cycles push_in, pull_out, pan_left, pan_right, tilt_up, tilt_down and punch (
 the three round-3 knitted spike images. Pop captions name each move. Frame sheets:
 `.superpowers/themes-spike/frames/motion-sheet.jpg` and `.superpowers/themes-spike/frames/pop-sheet.jpg`.
 
-## 5. Theme style blocks (positive-only, never "camera"; previews NOT yet rendered)
+## 5. Themes: final style blocks, previews, emotion
 
 Rules held, checked by the asserts in `mkstyles.py`:
 - no "camera"
 - no "avoid", "no X" or "not a"
 - no studio or brand names
 
-`knitted` is `KNIT_STYLE` from `lib/reels/prompt.ts`, verbatim. The other seven are untested drafts. They still
-need the preview pass (up to 2 rounds each) once ComfyUI is restarted.
+`knitted` is `KNIT_STYLE` from `lib/reels/prompt.ts`, verbatim. Every preview: Z-Image Turbo at 1088x1920,
+seed 1234, ~50 s each, looked at by eye.
+
+### Verdict per theme
+
+| Theme | Verdict | Final preview (`.superpowers/themes-spike/previews/`) | Notes |
+|---|---|---|---|
+| `knitted` | pass | `knitted-r1.png` | Style perfect, but the dolls stand together instead of lifting. Doll wording for the lift ("the mom doll … holding the baby doll up", r2/r3, seeds 1234 and 99) **always added a second baby doll**. So keep the generic moment for knitted; the planner should not ask dolls for a lift. |
+| `animated3d` | pass | `animated3d-r1.png` | Polished family-film 3D, big readable faces, warm window light. |
+| `watercolor` | pass | `watercolor-r1.png` | Real wash/bloom texture, ink lines, ivory paper. |
+| `clay` | pass | `clay-r1.png` | Matte clay with fingerprints, miniature set. |
+| `papercraft` | pass (r2) | `papercraft-r2.png` | r1 read as flat vector art. r2 ("photographed up close as a real tabletop paper model, thick cardstock, white paper cores") gives paper curtains and layered depth. |
+| `anime` | pass | `anime-r1.png` | Clean cel shading, soft bloom, sunlit window. |
+| `sketch` | pass with grayscale post | `sketch-r3-mono.png` (from `sketch-r3.png`) | In all 3 rounds Z-Image coloured the cardigan and romper from the cast text, even with "pure greyscale" wording. **Worker rule:** themes with `mono` (sketch) get `ImageOps.grayscale(img).convert("RGB")` after Z-Image. That is deterministic and costs nothing. |
+| `cinematic` | pass | `cinematic-r1.png` | Real people, golden-hour backlight, film grain. |
+
+Contact sheets (JPG, git-ignored):
+- `.superpowers/themes-spike/frames/themes-final.jpg`: all 8 finals, labelled
+- `frames/r1-a.jpg`, `frames/r1-b.jpg`, `frames/r2.jpg`, `frames/r3.jpg`, `frames/r3b.jpg`: earlier rounds
+
+### Emotion contrast (3D Animated, seed 777)
+
+Same cast, same sofa, three lines → `previews/emotion-{laughing,teary,surprised}-r1.png`; sheet
+`.superpowers/themes-spike/frames/emotions.jpg`. **Pass:** the faces differ clearly.
+- laughing: eyes squeezed into crescents, wide open mouths, the baby's arms up
+- teary: lifted inner brows, a visible tear, a downturned soft mouth; the baby is held close and looks worried
+- surprised: high brows, wide eyes, a round "oh" mouth, hand on cheek; the baby points up
+
+The cast (bun, mustard cardigan, rust romper) is identical in all three. The `Emotion: … Body language: …` line
+right after the moment works as planned.
+
+### Final style blocks (verbatim, `styles.json`)
 
 ### `knitted`
 
