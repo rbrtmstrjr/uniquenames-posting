@@ -78,13 +78,33 @@ const clean = (s: string) => s.replace(/\s+/g, " ").trim().replace(/[\s.;,]+$/, 
  */
 export function undoll(s: string): string {
   return s
-    .replace(/\b(?:crocheted|crochet|amigurumi|knitted|handmade|stitched)\s+(?=[a-z])/gi, "")
+    .replace(/\b(?:crocheted|crochet|amigurumi|knitted|handmade|stitched|embroidered)\s+(?=[a-z])/gi, "")
+    .replace(/\bbead eyes\b/gi, "eyes")
     .replace(/\b(?:yarn|wool|woollen|woolen)\s+(?=(?:hair|skin|tufts?|curls?|strands?|braids?|ponytails?|eyebrows?|lashes|fringe)\b)/gi, "")
     .replace(/\b(the|both|two|these|those) dolls\b/gi, (_, w: string) => `${w} ${w.toLowerCase() === "the" ? "characters" : "of them"}`)
     .replace(/(\w) doll(?:'s|’s)/gi, "$1's")
     .replace(/(\w) dolls?\b/gi, "$1")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+/** A cast written as dolls (a Knitted Doll script): only then does another theme turn it into people. */
+export const isDollCast = (cast: ReelCast) => /\b(?:dolls?|crochet(?:ed)?|amigurumi|yarn)\b/i.test(`${cast.adult} ${cast.child}`);
+
+const NEGATION = /\b(?:no|not|never|without|avoid|don't|doesn't|isn't|aren't|nobody|nothing)\b/i;
+/** Knitted Doll: a lifted / raised / tossed / held-up baby doll comes out as two babies (spike). */
+const LIFT = /\b(?:lift(?:s|ed|ing)?|rais(?:e|es|ed|ing)|toss(?:es|ed|ing)?|hoist(?:s|ed|ing)?|up in the air|overhead|held up|holds? (?:\w+ ){0,3}up|holding (?:\w+ ){0,3}up)\b/i;
+
+/**
+ * Z-Image at cfg 1 draws whatever is named, so free text from the script (idea, action, cast) loses every clause that
+ * names something absent ("no tears, smiling" → "smiling"); a leftover "camera" becomes "viewer". For Knitted Doll
+ * (`dolls`) clauses that lift, raise, toss or hold the child up are dropped too. Clauses split on , ; and sentence ends.
+ */
+export function positiveOnly(s: string, dolls = false): string {
+  const t = s.replace(/[’]/g, "'").replace(/\s+/g, " ").trim();
+  if (!t) return "";
+  const kept = t.split(/(?<=[,;.!?])\s+/).filter((c) => !NEGATION.test(c) && !(dolls && LIFT.test(c)));
+  return clean(kept.join(" ").replace(/\bcamera\b/gi, "viewer"));
 }
 
 /**
@@ -94,12 +114,16 @@ export function undoll(s: string): string {
  */
 export function scenePrompt(theme: ReelTheme, cast: ReelCast, scene: PromptScene, index: number): string {
   const dolls = isDollTheme(theme);
-  const fix = (s: string | null | undefined) => clean(dolls ? (s ?? "") : undoll(s ?? ""));
+  // Doll wording becomes people wording only when the cast was written as dolls (a Knitted Doll script).
+  const people = !dolls && isDollCast(cast);
+  const fix = (s: string | null | undefined, lift = dolls) => positiveOnly(people ? undoll(s ?? "") : (s ?? ""), lift);
   const who = dolls ? "dolls" : "characters";
   const hook = index === 0;
   const moment = hook ? "one striking, high-emotion moment" : "one tender moment";
   const emotion = emotionOf(scene.emotion);
   const action = fix(scene.action);
+  // An idea with nothing left (every clause named something absent, or a knitted lift) falls back to a calm moment.
+  const idea = fix(scene.idea) || (dolls ? "the two dolls cuddle close together" : "the two of them share a quiet, close moment");
   const feeling = !emotion ? "" : theme.faces
     ? ` Emotion: ${EMOTION_FACE[emotion]}.`
     : ` Feeling: ${emotion}, shown through pose: ${EMOTION_POSE[emotion]}.`;
@@ -110,8 +134,8 @@ export function scenePrompt(theme: ReelTheme, cast: ReelCast, scene: PromptScene
   const characters = dolls ? "the same two dolls in every picture" : "the same two people in every picture";
   const set = dolls ? "the handmade set" : "the scene";
   return [
-    `A single full-bleed vertical 9:16 picture of ${moment}. Moment: ${fix(scene.idea)}.${feeling}${body} Lens: ${lens}.`,
-    `${theme.style} Characters (${characters}): ${fix(cast.adult)}; ${fix(cast.child)}.${dolls ? ` ${KNIT_POSE}` : ""}`,
+    `A single full-bleed vertical 9:16 picture of ${moment}. Moment: ${idea}.${feeling}${body} Lens: ${lens}.`,
+    `${theme.style} Characters (${characters}): ${fix(cast.adult, false)}; ${fix(cast.child, false)}.${dolls ? ` ${KNIT_POSE}` : ""}`,
     `Composition: ${set} fills the whole frame edge to edge; the ${who} and their action sit in the upper and middle part of the frame, and the band just below the middle is calm and uncluttered — a soft, simple, evenly lit stretch of the scene's own floor, blanket or background.`,
     NO_TEXT,
   ].join("\n");

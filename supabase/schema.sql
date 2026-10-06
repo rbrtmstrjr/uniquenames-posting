@@ -210,7 +210,7 @@ create table if not exists public.reels (
   -- 006: the narrator (null = settings.reel_voice_id); music: null = not made yet, '' = the music step failed (voice only)
   voice_id text references public.reel_voices (id) on delete set null,
   music_path text,
-  -- 007: the visual theme (null = settings.reel_theme_id)
+  -- 007: the visual theme; the app pins it on every new reel (null = legacy / theme deleted -> knitted)
   theme_id text references public.reel_themes (id) on delete set null,
   duration_s numeric,
   version int not null default 1,

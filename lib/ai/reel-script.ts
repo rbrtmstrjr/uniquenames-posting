@@ -142,7 +142,7 @@ export function reelScriptPrompt({ topic, maxScenes, alreadyMade, speed, theme }
     "",
     "EMOTION, ACTION, SHOT AND KEY for each scene (they make every picture feel different):",
     `- "emotion": exactly one of ${REEL_EMOTIONS.join("|")} — the feeling of that moment. Follow the story's wave and VARY it: never the same emotion on more than 2 lines in a row.`,
-    "- \"action\": the body language and what the hands do, in one short phrase (e.g. 'kneels and cups the toddler's cheeks in both hands', 'leans back laughing, arms wrapped around the baby').",
+    "- \"action\": the body language and what the hands do, in one short phrase (e.g. 'kneels and cups the toddler's cheeks in both hands', 'leans back laughing, arms wrapped around the baby'). Describe only what the body IS doing; never mention what is absent.",
     feelingRule(dolls, th.faces),
     `- "shot": exactly one of ${REEL_SHOTS.join("|")}. NEVER the same shot on two lines in a row; mostly medium, wide and eye-level, with low-angle, over-the-shoulder and hands-detail as accents.`,
     "- \"key\": true on AT MOST 3 lines — the biggest emotional turns or payoffs later in the story (they get a punchy zoom; line 1 already has one, so never line 1); false on every other line.",
@@ -235,9 +235,9 @@ export function validateReelScript(raw: unknown, maxScenes: number, speed = 1): 
   if (scenes.length < budget.minScenes) return { ok: false, error: `Script too short: ${scenes.length} scenes (needs at least ${budget.minScenes}).` };
   const total = scenes.reduce((n, x) => n + words(x.narration), 0);
   if (total < budget.minWords) return { ok: false, error: `Script too short: ${total} words (needs at least ${budget.minWords}).` };
-  // Never the same shot twice in a row; at most 3 key lines after line 1 (the first ones marked).
+  // Never the same shot twice in a row; at most 3 key lines outside the hook (the first ones marked).
   const shots = fixShots(raws.map((o) => o.shot));
-  const keys = capKeys(raws.map((o, i) => ({ key: i > 0 && o.key === true })));   // line 1 punches anyway
+  const keys = capKeys(raws.map((o, i) => ({ beat: scenes[i].beat, key: o.key === true })));   // hook lines punch anyway
   return { ok: true, script: { title, stage, cast, scenes: scenes.map((x, i) => ({ ...x, shot: shots[i], key: keys[i] })) } };
 }
 

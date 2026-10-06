@@ -75,7 +75,8 @@ describe("007_reel_themes.sql on the live schema (v1 + 002..006)", () => {
     await db.exec(m007);
     expect(await one(db, `select reel_voice_id, reel_max_images, reel_theme_id from settings`))
       .toEqual({ reel_voice_id: "kore", reel_max_images: 12, reel_theme_id: "knitted" });
-    expect(await one(db, `select status, theme_id from reels where id=$1`, [reel])).toEqual({ status: "queued", theme_id: null });
+    // reels made before 007 were Knitted Doll: backfilled (idempotent)
+    expect(await one(db, `select status, theme_id from reels where id=$1`, [reel])).toEqual({ status: "queued", theme_id: "knitted" });
     expect((await db.query(`select emotion, action, shot, key_moment, motion from reel_scenes where reel_id=$1 order by position`, [reel])).rows)
       .toEqual([1, 2].map(() => ({ emotion: null, action: null, shot: null, key_moment: false, motion: null })));
     expect(await one(db, `select count(*)::int n from reel_themes`)).toEqual({ n: 8 });

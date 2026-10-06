@@ -18,7 +18,7 @@ Owner feedback: images all share one emotion and feel boring; reels must feel li
 
 - `reel_themes`: `id text pk` (`knitted`, `animated3d`, `watercolor`, `clay`, `papercraft`, `anime`, `sketch`, `cinematic`), `label`, `emoji`, `blurb`, `style text` (the positive-only style block), `faces boolean` (expressive faces), `sort int`, `preview_path text null` (`themes/<id>/preview-v<n>.jpg` in bucket `reels`), `preview_status text` (`missing|queued|making|ready|failed`), `error`, `version`, `claimed_at`, timestamps. Seed 8 rows (style blocks from the Task 1 spike).
 - `settings.reel_theme_id text not null default 'knitted' references reel_themes`.
-- `reels.theme_id text null references reel_themes on delete set null` (null = settings default).
+- `reels.theme_id text null references reel_themes on delete set null` (null = legacy / theme deleted → knitted; new reels always pin the theme they were written with; 007 backfills existing reels to `knitted`).
 - `reel_scenes`: `emotion text null`, `action text null`, `shot text null`, `key_moment boolean default false`, `motion text null` (`push_in|pull_out|pan_left|pan_right|tilt_up|tilt_down|punch`). (No AI clips this round — see decision 5.)
 - `reel_themes.grayscale boolean` (true for sketch: the worker converts sketch images to grayscale after Z-Image).
 - `claim_next_theme_preview()` (service role): claimed only when no card, no runnable reel step and no voice sample waiting/in progress.

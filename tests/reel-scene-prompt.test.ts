@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { NO_TEXT } from "@/lib/planner/prompt";
 import { REEL_THEME_IDS } from "@/lib/db/types";
-import { EMOTION_FACE, EMOTION_POSE, KNIT_POSE, KNIT_STYLE, SHOT_LENS, scenePrompt, undoll } from "@/lib/reels/prompt";
+import { EMOTION_FACE, EMOTION_POSE, isDollCast, KNIT_POSE, KNIT_STYLE, positiveOnly, SHOT_LENS, scenePrompt, undoll } from "@/lib/reels/prompt";
 import { REEL_EMOTIONS, REEL_SHOTS } from "@/lib/reels/motion";
 import { DEFAULT_THEME_ID, STATIC_THEMES, staticTheme, themeOf } from "@/lib/reels/themes";
 
@@ -116,5 +116,53 @@ describe("scenePrompt(theme, cast, scene, index)", () => {
         }
       }
     }
+  });
+});
+
+describe("positiveOnly (free text from the script)", () => {
+  it("drops every clause that names something absent; a leftover camera becomes viewer", () => {
+    expect(positiveOnly("no tears, smiling")).toBe("smiling");
+    expect(positiveOnly("She smiles; nobody else is there. The baby giggles")).toBe("She smiles; The baby giggles");
+    expect(positiveOnly("hugs him without words, eyes closed")).toBe("eyes closed");
+    expect(positiveOnly("he doesn't cry, she isn't worried")).toBe("");
+    expect(positiveOnly("waves at the camera, never letting go")).toBe("waves at the viewer");
+    expect(positiveOnly("cuddles close, nose to nose")).toBe("cuddles close, nose to nose");
+    expect(positiveOnly("")).toBe("");
+  });
+
+  it("Knitted Doll: lift / raise / toss / hold-up clauses are dropped (people themes keep them)", () => {
+    expect(positiveOnly("the mom doll lifts the baby doll high, both laughing", true)).toBe("both laughing");
+    expect(positiveOnly("holds the baby doll up to the window, smiling", true)).toBe("smiling");
+    expect(positiveOnly("tosses him in the air; raises her arms", true)).toBe("");
+    expect(positiveOnly("the mom lifts the baby high, both laughing")).toBe("the mom lifts the baby high, both laughing");
+  });
+
+  it("scenePrompt applies it to idea, action and cast on every theme", () => {
+    const dirty = { ...line, idea: "The mom doll lifts the baby doll high, no tears, both laughing.", action: "raises him overhead, not crying, cheeks pressed together" };
+    const cast = { adult: `${DOLLS.adult}, no shoes`, child: DOLLS.child };
+    const k = scenePrompt(STATIC_THEMES.knitted, cast, dirty, 2);
+    expect(k).not.toMatch(/lift|raise|overhead|no tears|not crying|no shoes/i);
+    expect(k).toContain("Moment: both laughing.");
+    expect(k).toContain("Body language: cheeks pressed together.");
+    // a knitted idea that was only a lift falls back to a calm, grounded moment
+    expect(scenePrompt(STATIC_THEMES.knitted, DOLLS, { ...line, idea: "The mom doll lifts the baby doll up." }, 2)).toContain("Moment: the two dolls cuddle close together.");
+    const c = scenePrompt(STATIC_THEMES.cinematic, cast, dirty, 2);
+    expect(c).toContain("Moment: The mom lifts the baby high, both laughing.");
+    expect(c).not.toMatch(/no tears|not crying|no shoes/);
+  });
+});
+
+describe("undoll only for a doll-written cast", () => {
+  it("detects a doll cast; a people cast keeps its words (a rag doll stays a doll)", () => {
+    expect(isDollCast(DOLLS)).toBe(true);
+    expect(isDollCast(PEOPLE)).toBe(false);
+    const p = scenePrompt(STATIC_THEMES.anime, PEOPLE, { ...line, idea: "The toddler hugs her knitted rag doll on the sofa." }, 2);
+    expect(p).toContain("The toddler hugs her knitted rag doll on the sofa");
+    const d = scenePrompt(STATIC_THEMES.anime, DOLLS, { ...line, idea: "The mom doll hugs the baby doll." }, 2);
+    expect(d).toContain("The mom hugs the baby");
+  });
+
+  it("maps bead eyes to eyes and drops embroidered", () => {
+    expect(undoll("a crocheted baby doll with glossy bead eyes and a small embroidered smile")).toBe("a baby with glossy eyes and a small smile");
   });
 });

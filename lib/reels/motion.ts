@@ -63,10 +63,13 @@ export interface MotionScene { beat?: string | null; emotion?: string | null; ke
 /** A hook line: the first line always; lines 2-3 when the script marks them as the hook beat. */
 export const isHookLine = (scene: MotionScene, index: number) => index === 0 || (index < HOOK_MAX && scene.beat === "hook");
 
-/** Which lines are key: the first KEY_MAX lines marked key (the rest are ignored). */
+/**
+ * Which lines are key: the first KEY_MAX lines marked key outside the hook (hook lines punch anyway, so a key mark
+ * there is dropped and never uses up one of the 3).
+ */
 export function capKeys<T extends MotionScene>(scenes: readonly T[]): boolean[] {
   let n = 0;
-  return scenes.map((s) => (s.key === true && n < KEY_MAX ? (n++, true) : false));
+  return scenes.map((s, i) => (s.key === true && !isHookLine(s, i) && n < KEY_MAX ? (n++, true) : false));
 }
 
 /** Camera moves matched to a feeling, best first. */

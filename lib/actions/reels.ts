@@ -196,7 +196,8 @@ export async function rewriteReelScriptAction(reelId: string): Promise<ActionRes
   if (error) return dbFail(error);
   if (!reel) return fail(NOT_FOUND);
   if (reel.status !== "script") return fail("This reel was already approved, so its script can't change.");
-  const d = await draftScript(sb, reel.topic ?? undefined, reel.theme_id);
+  // The reel keeps its theme; null = a legacy reel or a deleted theme: Knitted Doll.
+  const d = await draftScript(sb, reel.topic ?? undefined, "theme_id" in reel ? (reel.theme_id ?? DEFAULT_THEME_ID) : undefined);
   if (!d.ok) return d;
   const s = d.script;
   const { data, error: ue } = await sb.from("reels")
@@ -295,7 +296,8 @@ export async function saveReelScriptAction(reelId: string, edit: ReelScriptEdit)
   let theme: ReelTheme | null = null;
   if (next.some((n) => n.edited && needsPrompt(n))) {
     const set = await scriptSettings(sb);
-    theme = await loadTheme(sb, reel.theme_id ?? set.themeId, set.has007);
+    // null = a legacy reel or a deleted theme: Knitted Doll (new reels always pin their theme)
+    theme = await loadTheme(sb, reel.theme_id ?? DEFAULT_THEME_ID, set.has007);
   }
 
   const { data, error: ue } = await sb.from("reels").update({ title, version: reel.version + 1 })

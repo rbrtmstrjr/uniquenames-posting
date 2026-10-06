@@ -55,6 +55,8 @@ create trigger touch before update on public.reel_themes for each row execute fu
 -- the default theme (a real foreign key: a typo can't be saved); reels.theme_id null = this default
 alter table public.settings add column if not exists reel_theme_id text not null default 'knitted' references public.reel_themes (id);
 alter table public.reels add column if not exists theme_id text references public.reel_themes (id) on delete set null;
+-- reels made before 007 were all Knitted Doll: pin them (the app pins every new reel; null = legacy / theme deleted -> knitted)
+update public.reels set theme_id = 'knitted' where theme_id is null;
 -- per line (filled by the script engine): the feeling, the body language + hands, the framing, a key moment
 -- (gets the 'punch' emphasis) and the camera move the render uses (null = the render picks one)
 alter table public.reel_scenes add column if not exists emotion text;

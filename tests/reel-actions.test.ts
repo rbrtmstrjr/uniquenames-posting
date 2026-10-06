@@ -731,3 +731,47 @@ describe("themes + emotion + motion (007)", () => {
     expect(await A.setReelThemeAction(REEL, "clay")).toEqual({ ok: false, error: expect.stringMatching(/some lines just changed/) });
   });
 });
+
+describe("007 review fixes", () => {
+  const scene007 = (id: string, position: number, o: Partial<ReelSceneRow> = {}) => sceneRow(id, position, {
+    emotion: "tender", action: "rocks gently", shot: "medium", key_moment: false, motion: null, ...o,
+  });
+  const by = (id: string) => qs("reel_scenes", "update").find((q) => q.ops.some((o) => o[0] === "eq" && o[1] === "id" && o[2] === id));
+
+  it("save: a reel with no theme (legacy / theme deleted) is Knitted Doll, not the Settings default", async () => {
+    world({ themeId: "anime", reel: reelRow({ theme_id: null }), scenes: [scene007(S1, 1), scene007(S2, 2)] });
+    expect(await A.saveReelScriptAction(REEL, { title: "Old Title", lines: [{ id: S2, narration: "narration 2", idea: "The mom doll hugs the baby doll." }] })).toEqual({ ok: true });
+    const p = patchOf(by(S2)!).image_prompt as string;
+    expect(p).toContain(STATIC_THEMES.knitted.style);
+    expect(p).not.toContain(STATIC_THEMES.anime.style);
+  });
+
+  it("rewrite: a reel with no theme is rewritten as Knitted Doll", async () => {
+    world({ themeId: "anime", reel: reelRow({ theme_id: null }) });
+    writeMock.mockResolvedValueOnce(ok(script("Another Title", 2)));
+    expect(await A.rewriteReelScriptAction(REEL)).toEqual({ ok: true });
+    expect(writeMock.mock.calls[0][0].theme).toEqual({ id: "knitted", faces: false });
+  });
+
+  it("save + theme switch: negated clauses and knitted lifts never reach the image prompt", async () => {
+    world({ themeId: "knitted", reel: reelRow({ theme_id: "knitted" }), scenes: [scene007(S1, 1), scene007(S2, 2)] });
+    const lines = [{ id: S2, narration: "narration 2", idea: "The mom doll lifts the baby doll up, no tears, both smiling.", action: "not crying, rocking slowly" }];
+    expect(await A.saveReelScriptAction(REEL, { title: "Old Title", lines })).toEqual({ ok: true });
+    const saved = patchOf(by(S2)!).image_prompt as string;
+    expect(saved).toContain("Moment: both smiling.");
+    expect(saved).toContain("Body language: rocking slowly.");
+    expect(saved).not.toMatch(/lifts|no tears|not crying/);
+
+    const dirty = [scene07(S1, 1, "The mom doll tosses the baby doll in the air, giggling."), scene07(S2, 2, "Nothing is on the table; the mom doll smiles.")];
+    world({ themeId: "knitted", reel: reelRow({ theme_id: "cinematic" }), scenes: dirty });
+    expect(await A.setReelThemeAction(REEL, "knitted")).toEqual({ ok: true });
+    const a = patchOf(by(S1)!).image_prompt as string;
+    const b = patchOf(by(S2)!).image_prompt as string;
+    expect(a).toContain("Moment: giggling.");
+    expect(a).not.toMatch(/toss|in the air/);
+    expect(b).toContain("Moment: the mom doll smiles.");
+    expect(b).not.toMatch(/Nothing/);
+  });
+
+  function scene07(id: string, position: number, idea: string) { return scene007(id, position, { idea }); }
+});

@@ -42,6 +42,10 @@ describe("assignMotion", () => {
     // line 2 is key but follows the opening punch → push_in; line 3 → punch; line 5 → punch; line 6's key is over the cap
     expect(assignMotion(keys)).toEqual(["punch", "push_in", "punch", "pan_right", "punch", "tilt_down", "push_in"]);
     expect(capKeys(keys)).toEqual([false, true, true, false, true, false, false]);
+    // hook lines punch anyway: their key marks are dropped and never count toward the 3
+    const hooks = [line("x", { beat: "hook", key: true }), line("x", { beat: "hook", key: true }), line("tender", { key: true }),
+      line("proud", { key: true }), line("teary", { key: true }), line("worried", { key: true })];
+    expect(capKeys(hooks)).toEqual([false, false, true, true, true, false]);
   });
 
   it("is deterministic, uses only the 7 presets and never repeats across every feeling pair", () => {

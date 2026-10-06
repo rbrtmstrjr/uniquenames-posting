@@ -73,9 +73,9 @@ describe("reelScriptPrompt", () => {
 });
 
 describe("scenePrompt", () => {
-  const p = scenePrompt(KNIT, cast, { idea: "The mom doll lifts the baby doll high in a sunny felt garden.", beat: "build" }, 3);
+  const p = scenePrompt(KNIT, cast, { idea: "The mom doll sits with the baby doll in a sunny felt garden.", beat: "build" }, 3);
   it("carries the idea, the cast, the style and the no-text line", () => {
-    expect(p).toContain("lifts the baby doll high");
+    expect(p).toContain("sits with the baby doll");
     expect(p).toContain(cast.adult);
     expect(p).toContain(cast.child);
     expect(p).toContain(KNIT_STYLE);
@@ -257,6 +257,7 @@ describe("ad-style script: emotion, action, shot, key + hook / mini-hook / loop 
     expect(prompt).toContain(`exactly one of ${REEL_SHOTS.join("|")}`);
     expect(prompt).toMatch(/NEVER the same shot on two lines in a row/);
     expect(prompt).toMatch(/AT MOST 3 lines/);
+    expect(prompt).toMatch(/"action".*never mention what is absent/);
     expect(REEL_EMOTIONS.length).toBe(12);
     expect(REEL_SHOTS.length).toBe(6);
   });
@@ -364,5 +365,10 @@ describe("ad-style script: emotion, action, shot, key + hook / mini-hook / loop 
     generateJson.mockResolvedValueOnce({ ok: true, data: s });
     const r2 = await writeReelScript(input10);
     expect(r2.ok && r2.script.scenes.map((x) => x.key).slice(0, 5)).toEqual([false, true, true, true, false]);
+    // a key mark on a hook line (line 2 with the hook beat) is dropped and does not use up a slot either
+    s.scenes = s.scenes.map((x, i) => ({ ...x, beat: i < 2 ? "hook" : "build", key: i < 6 }));
+    generateJson.mockResolvedValueOnce({ ok: true, data: s });
+    const r3 = await writeReelScript(input10);
+    expect(r3.ok && r3.script.scenes.map((x) => x.key).slice(0, 6)).toEqual([false, false, true, true, true, false]);
   });
 });
