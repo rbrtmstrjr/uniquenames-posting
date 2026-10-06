@@ -31,11 +31,12 @@ export function speedOf(v: unknown): number {
 export const speedLabel = (v: number) => `${roundSpeed(v).toFixed(2)}×`;
 
 /**
- * The settings a sample is made with, e.g. "e0.35-t0.7-c0.5-s1.12". The PC worker writes this exact
+ * The settings a sample is made with, e.g. "e0.35-t0.7-c0.5-s1.12-g1". The PC worker writes this exact
  * string to reel_voices.sample_key when it saves a sample; a different key = the sample is stale.
+ * "-g1" = the tightened voice (silence trims, short gaps; worker 2.2): samples made before it are stale.
  */
 export const sampleKey = (speed: number) =>
-  `e${CALM.exaggeration}-t${CALM.temperature}-c${CALM.cfg_weight}-s${roundSpeed(speed).toFixed(2)}`;
+  `e${CALM.exaggeration}-t${CALM.temperature}-c${CALM.cfg_weight}-s${roundSpeed(speed).toFixed(2)}-g1`;
 
 /** The reference clip path in the reels bucket (the storage policy allows exactly this shape). */
 export const refPath = (id: string) => `voices/${id}/ref.wav`;

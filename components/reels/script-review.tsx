@@ -3,7 +3,7 @@ import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Clapperboard, RotateCcw, Shuffle, Trash2 } from "lucide-react";
 import { toast } from "sonner";
-import type { ReelRow, ReelSceneRow } from "@/lib/db/types";
+import type { ReelRow, ReelSceneRow, ReelThemeId } from "@/lib/db/types";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Disclosure } from "@/components/ui/disclosure";
@@ -18,7 +18,12 @@ import { callAction } from "@/lib/actions/call";
 import { useNow } from "@/lib/realtime/hooks";
 import { LINE_MAX_WORDS, TITLE_MAX, clock, estimateSeconds, wordCount, wordTarget } from "@/lib/reels/status";
 import type { Narrator } from "@/lib/data/voices";
+import type { ThemeChoice } from "@/lib/data/reel-themes";
+import { lineMood } from "@/lib/reels/labels";
+import { undoll } from "@/lib/reels/prompt";
+import { isThemeId, THEME_LABEL } from "@/lib/reels/themes";
 import { VoicePicker } from "./voice-picker";
+import { ThemePicker } from "./theme-picker";
 import { cn } from "@/lib/utils/cn";
 
 type Text = { narration: string; idea: string };
@@ -52,7 +57,25 @@ function firstProblem(title: string, lines: (Text & { position: number })[]): st
  * live word count, the picture idea in a disclosure), totals at the top, and one action bar —
  * sticky above the tab bar on phones, in the side panel on desktop.
  */
-export function ScriptReview({ reel, scenes, onApproved, narrator = null }: { reel: ReelRow; scenes: ReelSceneRow[]; onApproved?: () => void; narrator?: Narrator | null }) {
+/** A line's feeling (chip) + framing and camera move (subtle text); read-only, set by the script engine. */
+function LineMood({ scene }: { scene: ReelSceneRow }) {
+  const m = lineMood(scene);
+  if (!m) return null;
+  const extra = [m.shot, m.motion].filter(Boolean).join(" · ");
+  return (
+    <div data-testid={`mood-${scene.position}`} className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+      <span className="inline-flex items-center gap-1 rounded-full bg-accent-soft px-2 py-0.5 font-semibold text-accent">
+        <span aria-hidden>{m.emoji}</span> {m.emotion}
+      </span>
+      {m.key && <span className="rounded-full bg-warn/15 px-2 py-0.5 font-semibold text-warn-text">Key moment</span>}
+      {extra && <span className="min-w-0 text-muted">{extra}</span>}
+    </div>
+  );
+}
+
+export function ScriptReview({ reel, scenes, onApproved, narrator = null, themes = null }: {
+  reel: ReelRow; scenes: ReelSceneRow[]; onApproved?: () => void; narrator?: Narrator | null; themes?: ThemeChoice | null;
+}) {
   const router = useRouter();
   const { health } = useWorkerContext();
   const gen = canGenerate(health);
@@ -134,6 +157,11 @@ export function ScriptReview({ reel, scenes, onApproved, narrator = null }: { re
   };
 
   const locked = busy === "rewrite" || busy === "approve" || busy === "delete";
+  // The reel's look: the pinned theme (007), else the Settings default, else knitted (dolls).
+  const [themeSaved, setThemeSaved] = useState<ReelThemeId | null>(null);
+  const themeId: ReelThemeId = themeSaved ?? (isThemeId(reel.theme_id) ? reel.theme_id : themes?.defaultId ?? "knitted");
+  const dolls = themeId === "knitted";
+  const cast = dolls ? reel.doll_cast : { adult: undoll(reel.doll_cast.adult), child: undoll(reel.doll_cast.child) };
 
   return (
     <div className="pb-40 md:pb-28 lg:pb-0">
@@ -147,7 +175,7 @@ export function ScriptReview({ reel, scenes, onApproved, narrator = null }: { re
       </div>
 
       <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
-        <aside className="space-y-4 lg:sticky lg:top-20 lg:order-2">
+        <aside className="min-w-0 space-y-4 lg:sticky lg:top-20 lg:order-2">
           <Panel title="Script">
             <div data-testid="script-totals" className="grid grid-cols-3 gap-2 text-center">
               {[
@@ -164,14 +192,20 @@ export function ScriptReview({ reel, scenes, onApproved, narrator = null }: { re
             <p className={cn("mt-2 text-xs", lengthOk ? "text-muted" : "text-warn-text")}>
               {lengthOk ? `Good length (aim ${TARGET.lo}–${TARGET.hi} words).` : `Aim for ${TARGET.lo}–${TARGET.hi} words (about 1:30–2:00).`}
             </p>
+            {themes && reel.theme_id !== undefined && (
+              <div className="mt-3 border-t border-line pt-3" data-testid="theme">
+                <ThemePicker reelId={reel.id} value={themeId} defaultId={themes.defaultId} themes={themes.themes} disabled={locked || busy === "save"}
+                  onSaved={setThemeSaved} />
+              </div>
+            )}
             {narrator && (
               <div className="mt-3 border-t border-line pt-3" data-testid="narrator">
                 <VoicePicker reelId={reel.id} value={reel.voice_id ?? null} defaultId={narrator.defaultId} voices={narrator.voices} disabled={locked} />
               </div>
             )}
             <div className="mt-3 hidden space-y-1 border-t border-line pt-3 text-xs text-muted lg:block">
-              <div><span className="font-semibold text-ink">Grown-up doll:</span> {reel.doll_cast.adult}</div>
-              <div><span className="font-semibold text-ink">Child doll:</span> {reel.doll_cast.child}</div>
+              <div><span className="font-semibold text-ink">{dolls ? "Grown-up doll" : "Grown-up"}:</span> {cast.adult}</div>
+              <div><span className="font-semibold text-ink">{dolls ? "Child doll" : "Child"}:</span> {cast.child}</div>
             </div>
 
             {/* Phones: fixed above the tab bar. Desktop: part of this panel. */}
@@ -227,11 +261,12 @@ export function ScriptReview({ reel, scenes, onApproved, narrator = null }: { re
                         aria-invalid={long || !oneLine(l.narration) || undefined}
                         onChange={(e) => edit(l.id, { narration: e.target.value })}
                         className="min-h-11 resize-none px-3 py-2 text-base leading-snug md:text-[15px]" />
+                      <LineMood scene={l} />
                       <Disclosure triggerClassName="min-h-11 text-xs font-normal text-muted"
                         summary={<span className="flex min-w-0 gap-1.5"><span className="shrink-0 font-semibold text-ink">Picture idea</span><span className="line-clamp-1 break-all">{l.idea}</span></span>}>
                         <Textarea aria-label={`Line ${l.position} picture idea`} value={l.idea} disabled={locked}
                           onChange={(e) => edit(l.id, { idea: e.target.value })} className="mb-1 min-h-16 text-sm" />
-                        <p className="text-xs text-muted">Changing the idea changes this line&apos;s picture. The two dolls and the knitted style are added for you.</p>
+                        <p className="text-xs text-muted">Changing the idea changes this line&apos;s picture. {dolls ? "The two dolls and the knitted style are added for you." : `The two characters and the ${THEME_LABEL[themeId].label} style are added for you.`}</p>
                       </Disclosure>
                     </div>
                   </div>

@@ -22,8 +22,8 @@ beforeEach(() => { fake = fakeSupabase((q) => respond(q)); respond = () => undef
 
 describe("pure voice helpers", () => {
   it("sample key = calm params + speed (2 decimals)", () => {
-    expect(sampleKey(1.12)).toBe("e0.35-t0.7-c0.5-s1.12");
-    expect(sampleKey(1)).toBe("e0.35-t0.7-c0.5-s1.00");
+    expect(sampleKey(1.12)).toBe("e0.35-t0.7-c0.5-s1.12-g1");
+    expect(sampleKey(1)).toBe("e0.35-t0.7-c0.5-s1.00-g1");
     expect(sampleKey(1.1300000000000001)).toBe(sampleKey(1.13));
   });
   it("speed: numeric strings, out of range and junk fall back to 1.12; label shows ×", () => {

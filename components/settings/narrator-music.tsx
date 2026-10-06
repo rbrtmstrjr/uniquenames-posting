@@ -35,7 +35,7 @@ export function NarratorMusic({ voices, value, savedSpeed, onChange }: {
   if (!voices || !value) {
     return (
       <p className="rounded-xl bg-surface-2 p-3 text-sm text-muted">
-        Narrator voices and background music need the database update first (run <span className="font-semibold text-ink">supabase/migrations/006_reel_voices.sql</span>).
+        Narrator voices and background music need the database update first (run <span className="font-semibold text-ink [overflow-wrap:anywhere]">supabase/migrations/006_reel_voices.sql</span>).
         Until then reels use the built-in voice with no music.
       </p>
     );

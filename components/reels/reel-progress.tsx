@@ -17,6 +17,7 @@ import { deleteReelAction, redoReelSceneAction, rerenderReelAction, retryReelAct
 import { callAction } from "@/lib/actions/call";
 import type { ActionResult } from "@/lib/actions/result";
 import { IMAGE_TRIES, SCENE_LABEL, canRedoScene, canRerender, canSkipScene, clock, imageCounts, isWorking, reelProgress, reelSteps, type StepState } from "@/lib/reels/status";
+import { themeName } from "@/lib/reels/themes";
 import { cn } from "@/lib/utils/cn";
 
 const STEP_ICON: Record<StepState, React.ReactNode> = {
@@ -114,6 +115,7 @@ export function ReelProgress({ reel, scenes, onPatchScene, onPatchReel, music = 
           <h1 className="font-display text-2xl text-ink sm:text-3xl">{reel.title}</h1>
           <p className="mt-1 text-sm text-muted">
             {created} · {counts.total} images{reel.duration_s ? ` · ${clock(reel.duration_s)}` : ""}{reel.stage ? ` · ${reel.stage[0].toUpperCase()}${reel.stage.slice(1)}` : ""}
+            {reel.theme_id !== undefined && <span data-testid="reel-theme"> · {themeName(reel.theme_id)}</span>}
           </p>
         </div>
         <span data-testid="reel-status" aria-live="polite"><Badge tone={progress.tone} pulse={working && reel.status !== "queued"}>{progress.label}</Badge></span>

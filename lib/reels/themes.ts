@@ -1,4 +1,4 @@
-import { REEL_THEME_IDS, type ReelThemeId, type ReelThemeRow } from "@/lib/db/types";
+import { REEL_THEME_IDS, type ReelThemeId, type ReelThemeRow, type ThemePreviewStatus } from "@/lib/db/types";
 
 // The 8 visual themes (migration 007). The database row is the source of truth (re-running 007 refreshes its
 // wording); this static map mirrors the seed so prompts can be built before 007 runs and in tests.
@@ -72,3 +72,39 @@ export function themeOf(row: unknown, id?: string | null): ReelTheme {
 
 /** Knitted Doll draws every character as a crocheted doll: the cast and ideas are written as dolls. */
 export const isDollTheme = (t: Pick<ReelTheme, "id">) => t.id === "knitted";
+
+// ---------------------------------------------------------------- UI helpers (Settings grid + review picker)
+
+/** Name + emoji per theme (mirrors the 007 seed; the DB row wins when the page has it). */
+export const THEME_LABEL: Record<ReelThemeId, { label: string; emoji: string }> = {
+  knitted: { label: "Knitted Doll", emoji: "🧶" },
+  animated3d: { label: "3D Animated", emoji: "🎬" },
+  watercolor: { label: "Storybook Watercolor", emoji: "🎨" },
+  clay: { label: "Clay Stop-motion", emoji: "🏺" },
+  papercraft: { label: "Paper Craft", emoji: "✂️" },
+  anime: { label: "Soft Anime", emoji: "🌸" },
+  sketch: { label: "Pencil Sketch (B&W)", emoji: "✏️" },
+  cinematic: { label: "Cinematic Real", emoji: "📷" },
+};
+/** "🎬 3D Animated" for any id (unknown / null -> the default theme). */
+export const themeName = (id?: string | null) => {
+  const t = THEME_LABEL[isThemeId(id) ? id : DEFAULT_THEME_ID];
+  return `${t.emoji} ${t.label}`;
+};
+
+/** Badge text + tone per preview status (ready shows the picture instead). */
+export const PREVIEW_LABEL: Record<ThemePreviewStatus, { label: string; tone: "ok" | "muted" | "accent" | "bad" }> = {
+  missing: { label: "No preview", tone: "muted" },
+  queued: { label: "In line", tone: "muted" },
+  making: { label: "Making…", tone: "accent" },
+  ready: { label: "Ready", tone: "ok" },
+  failed: { label: "Failed", tone: "bad" },
+};
+/** "Make all previews" queues these: no preview yet, or the last one failed. */
+export const needsPreview = (t: Pick<ReelThemeRow, "preview_status">) => t.preview_status === "missing" || t.preview_status === "failed";
+/** In line or being made: "Make preview" waits. */
+export const previewBusy = (t: Pick<ReelThemeRow, "preview_status">) => t.preview_status === "queued" || t.preview_status === "making";
+/** The picture to show: only a ready preview with a path. */
+export const previewPath = (t: Pick<ReelThemeRow, "preview_status" | "preview_path">) => (t.preview_status === "ready" && t.preview_path) || null;
+/** Display order (the seed's sort, then id). */
+export const byThemeOrder = (a: Pick<ReelThemeRow, "sort" | "id">, b: Pick<ReelThemeRow, "sort" | "id">) => a.sort - b.sort || a.id.localeCompare(b.id);

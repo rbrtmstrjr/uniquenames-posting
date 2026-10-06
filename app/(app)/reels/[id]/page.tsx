@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { getReel } from "@/lib/data/reels";
 import { getNarrator, musicOn } from "@/lib/data/voices";
+import { getThemeChoice } from "@/lib/data/reel-themes";
 import { ReelDetail } from "@/components/reels/reel-detail";
 import { ReelsSetup } from "@/components/reels/reel-list";
 import { PageHeader } from "@/components/ui/page-header";
@@ -14,9 +15,11 @@ export default async function ReelPage({ params }: { params: Promise<{ id: strin
   if (!data) notFound();
   if (data.setup) return <><PageHeader title="Reels" /><ReelsSetup /></>;
   // The narrator picker and the speed-aware length only matter while the script is reviewed.
-  const [narrator, music] = await Promise.all([
-    data.reel.status === "script" ? getNarrator().catch(() => null) : null,
+  const review = data.reel.status === "script";
+  const [narrator, themes, music] = await Promise.all([
+    review ? getNarrator().catch(() => null) : null,
+    review ? getThemeChoice().catch(() => null) : null,
     musicOn().catch(() => false),
   ]);
-  return <ReelDetail key={id} reel={data.reel} scenes={data.scenes} narrator={narrator} music={music} />;
+  return <ReelDetail key={id} reel={data.reel} scenes={data.scenes} narrator={narrator} themes={themes} music={music} />;
 }

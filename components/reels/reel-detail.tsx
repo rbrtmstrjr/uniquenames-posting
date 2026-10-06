@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import type { ReelRow, ReelSceneRow } from "@/lib/db/types";
 import type { Narrator } from "@/lib/data/voices";
+import type { ThemeChoice } from "@/lib/data/reel-themes";
 import { createClient } from "@/lib/supabase/client";
 import { useRealtimeRows } from "@/lib/realtime/use-table";
 import { ScriptReview } from "./script-review";
@@ -13,7 +14,9 @@ import { ReelProgress } from "./reel-progress";
 const byPosition = (a: ReelSceneRow, b: ReelSceneRow) => a.position - b.position;
 
 /** /reels/[id]: the reel and its images stay live; `script` shows the review, anything later the progress. */
-export function ReelDetail({ reel: initialReel, scenes: initialScenes, narrator = null, music = false }: { reel: ReelRow; scenes: ReelSceneRow[]; narrator?: Narrator | null; music?: boolean }) {
+export function ReelDetail({ reel: initialReel, scenes: initialScenes, narrator = null, music = false, themes = null }: {
+  reel: ReelRow; scenes: ReelSceneRow[]; narrator?: Narrator | null; music?: boolean; themes?: ThemeChoice | null;
+}) {
   const id = initialReel.id;
   const reelSeed = useMemo(() => [initialReel], [initialReel]);
   const refetchReel = useCallback(async () => {
@@ -39,7 +42,7 @@ export function ReelDetail({ reel: initialReel, scenes: initialScenes, narrator 
     <div className="space-y-2">
       <Link href="/reels" className="inline-flex min-h-11 items-center gap-1.5 text-sm font-semibold text-muted hover:text-ink"><ArrowLeft className="size-4" /> Reels</Link>
       {reel.status === "script"
-        ? <ScriptReview reel={reel} scenes={scenes} narrator={narrator}
+        ? <ScriptReview reel={reel} scenes={scenes} narrator={narrator} themes={themes}
             onApproved={() => { patchReel({ status: "queued" }); setScenes((prev) => prev.map((s) => (s.status === "pending" ? { ...s, status: "queued" } : s))); }} />
         : <ReelProgress reel={reel} scenes={scenes} music={music} onPatchReel={patchReel} onPatchScene={patchScene} />}
     </div>

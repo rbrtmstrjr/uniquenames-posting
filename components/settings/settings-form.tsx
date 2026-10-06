@@ -3,7 +3,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Bell, LogOut } from "lucide-react";
-import { TEXT_SETTINGS_DEFAULTS, type ReelVoiceRow, type SettingsRow } from "@/lib/db/types";
+import { TEXT_SETTINGS_DEFAULTS, type ReelThemeId, type ReelThemeRow, type ReelVoiceRow, type SettingsRow } from "@/lib/db/types";
 import { Panel } from "@/components/ui/panel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/shadcn/input";
@@ -19,6 +19,8 @@ import { createClient } from "@/lib/supabase/client";
 import { REEL_IMAGES_DEFAULT, REEL_IMAGES_MAX, REEL_IMAGES_MIN, TEXT_SETTING_KEYS, type TextSettings } from "@/lib/actions/validate";
 import { CardTextSettings, type PreviewSample } from "./card-text";
 import { NarratorMusic, type NarratorValue } from "./narrator-music";
+import { ThemeGrid } from "./theme-grid";
+import { DEFAULT_THEME_ID, isThemeId } from "@/lib/reels/themes";
 import { MUSIC_DEFAULT, speedOf, VOICE_DEFAULT, VOLUME_DEFAULT } from "@/lib/reels/voices";
 
 // Card counts are picked on sliders, so a value is always a whole number in range;
@@ -38,7 +40,13 @@ const narratorOf = (row: Partial<SettingsRow>): NarratorValue | null => row.reel
   reel_music: row.reel_music ?? MUSIC_DEFAULT, reel_music_volume: row.reel_music_volume ?? VOLUME_DEFAULT,
 };
 
-export function SettingsForm({ initial, sample = DEFAULT_SAMPLE, voices = null }: { initial: SettingsRow; sample?: PreviewSample; voices?: ReelVoiceRow[] | null }) {
+/** The default visual theme; absent until migration 007 runs (the form then never sends it). */
+const themeIdOf = (row: Partial<SettingsRow>): { reel_theme_id?: ReelThemeId } =>
+  row.reel_theme_id === undefined ? {} : { reel_theme_id: isThemeId(row.reel_theme_id) ? row.reel_theme_id : DEFAULT_THEME_ID };
+
+export function SettingsForm({ initial, sample = DEFAULT_SAMPLE, voices = null, themes = null }: {
+  initial: SettingsRow; sample?: PreviewSample; voices?: ReelVoiceRow[] | null; themes?: ReelThemeRow[] | null;
+}) {
   const router = useRouter();
   const [s, setS] = useState({ caption_template: initial.caption_template, hashtags: initial.hashtags, handle: initial.handle, min_images: initial.min_images, max_images: initial.max_images, sound_on: initial.sound_on,
     // undefined until migration 002 runs: the column default (on) is what the app uses then.
@@ -46,7 +54,9 @@ export function SettingsForm({ initial, sample = DEFAULT_SAMPLE, voices = null }
     // undefined until migration 005 runs: the column default (40) is what the app uses then.
     reel_max_images: initial.reel_max_images ?? REEL_IMAGES_DEFAULT,
     // undefined until migration 006 runs: not sent then.
-    ...narratorOf(initial) });
+    ...narratorOf(initial),
+    // undefined until migration 007 runs: not sent then.
+    ...themeIdOf(initial) });
   // The speed the saved samples are compared with (Make samples uses the saved one).
   const [savedSpeed, setSavedSpeed] = useState(speedOf(initial.reel_speed));
   const [busy, setBusy] = useState(false);
@@ -106,6 +116,9 @@ export function SettingsForm({ initial, sample = DEFAULT_SAMPLE, voices = null }
         <p className="mt-2 text-xs text-muted">{initial.reel_max_images === undefined
           ? "Reels need the database update first (run supabase/migrations/005_reels.sql); until then 40 is used."
           : "The most pictures a new script can have. Fewer images make a reel faster on your PC."}</p>
+      </Panel>
+      <Panel title="Theme">
+        <ThemeGrid themes={themes} value={s.reel_theme_id ?? null} onChange={(id) => setS({ ...s, reel_theme_id: id })} />
       </Panel>
       <Panel title="Narrator & music">
         <NarratorMusic voices={voices} value={narratorOf(s)} savedSpeed={savedSpeed} onChange={(p) => setS({ ...s, ...p })} />

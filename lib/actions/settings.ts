@@ -11,6 +11,8 @@ import { roundSpeed } from "@/lib/reels/voices";
 const V2_COLUMNS = ["caption_ai", ...TEXT_SETTING_KEYS] as const;
 /** The narrator + music columns added by migration 006. */
 const V6_COLUMNS = ["reel_voice_id", "reel_speed", "reel_music", "reel_music_volume"] as const;
+/** The default visual theme (migration 007). */
+const V7_COLUMN = "reel_theme_id";
 const SAVED_TEXT_KEYS = TEXT_SETTING_KEYS.filter((k) => !(FONT_KEYS as readonly string[]).includes(k));
 const NEEDS_MIGRATION = (what: string) =>
   `Saved, except ${what}: the database needs the v2 update first (run supabase/migrations/002_v2.sql). The defaults stay in use until then.`;
@@ -33,15 +35,21 @@ export async function saveSettingsAction(s: SettingsInput): Promise<ActionResult
   // Narrator + music (migration 006): only the fields the form has (it leaves them out before 006).
   const v6: Record<string, unknown> = Object.fromEntries(V6_COLUMNS.filter((k) => s[k] !== undefined)
     .map((k) => [k, k === "reel_speed" ? roundSpeed(s.reel_speed!) : s[k]]));
-  let v2Missing = false, reelMissing = false, v6Missing = false;
+  // Default theme (migration 007): only when the form has it.
+  const v7: Record<string, unknown> = s.reel_theme_id === undefined ? {} : { [V7_COLUMN]: s.reel_theme_id };
+  let v2Missing = false, reelMissing = false, v6Missing = false, v7Missing = false;
   for (;;) {
-    const { error } = await sb.from("settings").update({ ...base, ...(v2Missing ? {} : v2), ...(reelMissing ? {} : reel), ...(v6Missing ? {} : v6) }).eq("id", 1);
+    const { error } = await sb.from("settings").update({ ...base, ...(v2Missing ? {} : v2), ...(reelMissing ? {} : reel), ...(v6Missing ? {} : v6), ...(v7Missing ? {} : v7) }).eq("id", 1);
     if (!error) break;
-    // A narrator id that isn't in reel_voices (foreign key).
-    if (error.code === "23503" && "reel_voice_id" in v6) return fail("Pick a narrator voice from the list.");
+    // A narrator or theme id that isn't in its table (foreign key).
+    if (error.code === "23503") {
+      if (V7_COLUMN in v7 && !v7Missing && /theme/i.test(`${error.message} ${(error as { details?: string }).details ?? ""}`)) return fail("Pick a theme from the list.");
+      if ("reel_voice_id" in v6) return fail("Pick a narrator voice from the list.");
+    }
     // A database without the 002 / 005 columns refuses an update naming them: drop that group
     // and save everything else so the owner's other changes are not lost, then say what did not stick.
     const missing = error.code === "PGRST204" || /schema cache/i.test(error.message);
+    if (missing && !v7Missing && V7_COLUMN in v7 && error.message.includes(V7_COLUMN)) { v7Missing = true; continue; }
     if (missing && !v6Missing && V6_COLUMNS.some((c) => c in v6 && error.message.includes(c))) { v6Missing = true; continue; }
     if (missing && !reelMissing && "reel_max_images" in reel && error.message.includes("reel_max_images")) { reelMissing = true; continue; }
     if (missing && !v2Missing && V2_COLUMNS.some((c) => error.message.includes(c))) { v2Missing = true; continue; }
@@ -60,5 +68,7 @@ export async function saveSettingsAction(s: SettingsInput): Promise<ActionResult
     notes.push(`Saved, except images per reel: the database needs the Reels update first (run supabase/migrations/005_reels.sql). ${REEL_IMAGES_DEFAULT} stays in use until then.`);
   if (v6Missing)
     notes.push("Saved, except the narrator and music settings: the database needs the voices update first (run supabase/migrations/006_reel_voices.sql).");
+  if (v7Missing)
+    notes.push("Saved, except the default theme: the database needs the themes update first (run supabase/migrations/007_reel_themes.sql).");
   return notes.length ? fail(notes.join(" ")) : { ok: true };
 }
