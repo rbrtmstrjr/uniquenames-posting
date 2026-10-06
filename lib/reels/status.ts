@@ -27,8 +27,14 @@ export function clock(seconds: number): string {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 }
 
-/** Spoken length of a script, from its word count. */
-export const estimateSeconds = (words: number) => words / WORDS_PER_SECOND;
+/** Spoken length of a script, from its word count (the voice is sped up by `speed`). */
+export const estimateSeconds = (words: number, speed = 1) => words / (WORDS_PER_SECOND * (speed > 0 ? speed : 1));
+
+/** The script length the prompt aims for: 330–420 words at 1×, more when the voice is sped up (lib/ai/reel-script). */
+export const wordTarget = (speed = 1) => {
+  const x = speed > 0 ? speed : 1;
+  return { lo: Math.round(330 * x), hi: Math.round(420 * x) };
+};
 
 export function imageCounts(scenes: SceneLike[]) {
   const n = (st: ReelSceneStatus) => scenes.filter((s) => s.status === st).length;
@@ -55,7 +61,8 @@ export function reelProgress(reel: ReelLike, scenes: SceneLike[]): { label: stri
   switch (reel.status) {
     case "script": return { label: "Script ready", pct, tone: "accent" };
     case "queued": return { label: "Waiting for your PC", pct, tone: "muted" };
-    case "voicing": return { label: reel.voice_path ? "Timing captions…" : "Voice…", pct, tone: "accent" };
+    // The music bed (migration 006) is made under 'voicing', after the timing.
+    case "voicing": return { label: reel.words ? "Music…" : reel.voice_path ? "Timing captions…" : "Voice…", pct, tone: "accent" };
     case "imaging": return { label: `Images ${finished}/${total}`, pct, tone: "accent" };
     case "rendering": return { label: "Making video…", pct, tone: "accent" };
     case "ready": return { label: "Ready", pct, tone: "ok" };

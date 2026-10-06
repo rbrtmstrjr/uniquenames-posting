@@ -18,7 +18,11 @@ export interface ReelScriptScene { beat: string; narration: string; idea: string
 export interface ReelScript { title: string; stage: ReelStage; cast: ReelCast; scenes: ReelScriptScene[] }
 /** An earlier reel, newest first, for the "already made" block. */
 export interface MadeReel { title: string; stage?: string | null }
-export interface ReelScriptInput { topic?: string; maxScenes: number; alreadyMade: MadeReel[]; timeoutMs?: number }
+export interface ReelScriptInput {
+  topic?: string; maxScenes: number; alreadyMade: MadeReel[]; timeoutMs?: number;
+  /** Narration speed (settings.reel_speed, 1.00–1.25; default 1 = unchanged): a faster voice fits more words in the same time. */
+  speed?: number;
+}
 export type ReelScriptResult = { ok: true; script: ReelScript } | { ok: false; error: string };
 
 const BEATS = ["hook", "build", "turn", "close"];
@@ -46,26 +50,31 @@ const AUTO_TOPIC = [
 const oneLine = (s: string) => s.replace(/\s+/g, " ").trim();
 
 /**
- * Spoken-word budget: 330-420 words (~90-120 s at Chatterbox's pace), shrunk when few images are allowed.
+ * Spoken-word budget: 330-420 words (~90-120 s at Chatterbox's pace) × the narration speed (the voice is
+ * sped up, so more words fit in the same time), shrunk when few images are allowed (lines stay 10-12 words).
  * A script is accepted with at least `minScenes` lines (75% of the max) and `minWords` (80% of `lo`).
  */
-export function reelWordBudget(maxScenes: number) {
-  const lo = Math.min(330, maxScenes * 10);
-  const hi = Math.min(420, maxScenes * 12);
+export function reelWordBudget(maxScenes: number, speed = 1) {
+  const x = Number.isFinite(speed) && speed > 0 ? speed : 1;
+  const lo = Math.min(Math.round(330 * x), maxScenes * 10);
+  const hi = Math.min(Math.round(420 * x), maxScenes * 12);
+  const rate = 3.5 * x;
   return {
     lo, hi, minScenes: Math.min(maxScenes, Math.ceil(0.75 * maxScenes)), minWords: Math.ceil(0.8 * lo),
-    secLo: Math.round(lo / 3.5), secHi: Math.round(hi / 3.5),
+    secLo: Math.round(lo / rate), secHi: Math.round(hi / rate),
+    /** Words per second the prompt quotes (3.5-4 at 1×). */
+    wpsLo: Math.round(3.5 * x * 10) / 10, wpsHi: Math.round(4 * x * 10) / 10,
   };
 }
 
 /** The ported storyboard prompt; `alreadyMade` is newest first. */
-export function reelScriptPrompt({ topic, maxScenes, alreadyMade }: ReelScriptInput): { system: string; prompt: string } {
+export function reelScriptPrompt({ topic, maxScenes, alreadyMade, speed }: ReelScriptInput): { system: string; prompt: string } {
   const t = oneLine(topic ?? "");
   const made = alreadyMade
     .map((m) => ({ title: oneLine(m.title ?? ""), stage: oneLine(m.stage ?? "") }))
     .filter((m) => m.title)
     .slice(0, ALREADY_MADE_CAP);
-  const b = reelWordBudget(maxScenes);
+  const b = reelWordBudget(maxScenes, speed);
   const prompt = [
     t ? `Topic: ${t}` : AUTO_TOPIC,
     "",
@@ -76,7 +85,7 @@ export function reelScriptPrompt({ topic, maxScenes, alreadyMade }: ReelScriptIn
     "",
     "RETENTION & UNSKIPPABILITY (bake these in): (1) The FIRST image must be visually dramatic — the opening scene's idea is a striking, high-emotion moment, NEVER a calm establishing view. (2) Open a CURIOSITY LOOP in the first lines and only pay it off near the END (tease 'the one thing most parents miss', 'wait for the last one', 'number 3 changed everything'). (3) If you list things, PROMISE the number up front ('here are 3...') and count them out loud so viewers stay for all of them. (4) NO dead weight — every single line must make them need the next one; cut anything skippable. (5) END with a satisfying payoff, then a short, casual call to action to follow the page for more (never salesy). (6) The very first line is a short, punchy hook. Only the first 1-2 lines are the 'hook' beat; then build, turn and close.",
     "",
-    `PACING & COUNT (CRITICAL): Write the COMPLETE narration for a ${b.secLo}-${b.secHi} second video. The voice speaks briskly (about 3.5-4 words per second), so the narration must be ${b.lo}-${b.hi} words in total. Break it into spoken lines of 8-12 words EACH (only the very first hook line may be shorter) — ONE image per line, so cuts stay fast with zero dead space. Never more than ${LINE_MAX_WORDS} words in a line. Write EXACTLY ${b.minScenes}-${maxScenes} scenes — never fewer than ${b.minScenes}, never more than ${maxScenes}. A script under ${b.lo} words is TOO SHORT and will be rejected. BEFORE ANSWERING, COUNT: count your scenes (must be ${b.minScenes}-${maxScenes}), count the words in every line (8-12 each) and add them up (must be ${b.lo}-${b.hi}); if it is short, add more lines to the story until it fits.`,
+    `PACING & COUNT (CRITICAL): Write the COMPLETE narration for a ${b.secLo}-${b.secHi} second video. The voice speaks briskly (about ${b.wpsLo}-${b.wpsHi} words per second), so the narration must be ${b.lo}-${b.hi} words in total. Break it into spoken lines of 8-12 words EACH (only the very first hook line may be shorter) — ONE image per line, so cuts stay fast with zero dead space. Never more than ${LINE_MAX_WORDS} words in a line. Write EXACTLY ${b.minScenes}-${maxScenes} scenes — never fewer than ${b.minScenes}, never more than ${maxScenes}. A script under ${b.lo} words is TOO SHORT and will be rejected. BEFORE ANSWERING, COUNT: count your scenes (must be ${b.minScenes}-${maxScenes}), count the words in every line (8-12 each) and add them up (must be ${b.lo}-${b.hi}); if it is short, add more lines to the story until it fits.`,
     "",
     "CRITICAL for visual consistency:",
     "- Define ONE recurring cast that FITS THIS TOPIC — a parent and a YOUNG child of the appropriate stage for the subject (e.g. a mother cradling her newborn, a father holding his baby, a mom and her toddler, a dad and his preschooler). The child MUST be a newborn, baby, toddler, or young child (age 0-5) — NEVER a tween or teenager. Vary the parent (mom or dad) and the child's stage to match the topic.",
@@ -132,7 +141,7 @@ const words = (s: string) => s.split(" ").filter(Boolean).length;
 export const lightClean = (s: string) => s.replace(/\b(?:at|into|towards?) (?:the |a )?camera\b/gi, "toward the viewer");
 
 /** Check and normalise Gemini's JSON into a script, or say what is wrong. */
-export function validateReelScript(raw: unknown, maxScenes: number): ReelScriptResult {
+export function validateReelScript(raw: unknown, maxScenes: number, speed = 1): ReelScriptResult {
   const d = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
   const title = str(d.title);
   if (!title) return { ok: false, error: "The script has no title." };
@@ -144,7 +153,7 @@ export function validateReelScript(raw: unknown, maxScenes: number): ReelScriptR
   if (!cast.adult || !cast.child) return { ok: false, error: "The script is missing the parent or child doll." };
   const list = Array.isArray(d.scenes) ? d.scenes.slice(0, maxScenes) : [];
   if (list.length < 2) return { ok: false, error: "The script needs at least 2 scenes." };
-  const budget = reelWordBudget(maxScenes);
+  const budget = reelWordBudget(maxScenes, speed);
   const scenes: ReelScriptScene[] = [];
   for (const [i, s] of list.entries()) {
     const o = (s && typeof s === "object" ? s : {}) as Record<string, unknown>;
@@ -172,7 +181,7 @@ export async function writeReelScript(input: ReelScriptInput): Promise<ReelScrip
       parse: (x) => (x && typeof x === "object" && !Array.isArray(x) ? (x as Record<string, unknown>) : null),
     });
     if (!r.ok) return { ok: false, error: r.error };
-    return validateReelScript(r.data, input.maxScenes);
+    return validateReelScript(r.data, input.maxScenes, input.speed);
   } catch (e) {
     return { ok: false, error: `Could not write the script (${e instanceof Error ? e.message.slice(0, 120) : "unknown error"}).` };
   }

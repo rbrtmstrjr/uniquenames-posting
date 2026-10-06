@@ -6,6 +6,10 @@ import { SettingsForm } from "@/components/settings/settings-form";
 import { WorkerCard } from "@/components/settings/worker-card";
 import { PageHeader } from "@/components/ui/page-header";
 import type { PreviewSample } from "@/components/settings/card-text";
+import { getVoices } from "@/lib/data/voices";
+
+// "Set up voices" (Gemini reference clips, up to ~270 s per call) runs from this page.
+export const maxDuration = 300;
 
 /** The latest finished card's clean photo + text for the text preview (the built-in sample if none). */
 async function previewSample(sb: Awaited<ReturnType<typeof createClient>>): Promise<PreviewSample | undefined> {
@@ -19,9 +23,10 @@ async function previewSample(sb: Awaited<ReturnType<typeof createClient>>): Prom
 
 export default async function SettingsPage() {
   const sb = await createClient();
-  const [{ data, error }, sample] = await Promise.all([
+  const [{ data, error }, sample, voices] = await Promise.all([
     sb.from("settings").select("*").eq("id", 1).single(),
     previewSample(sb).catch(() => undefined),
+    getVoices(sb).catch(() => null),
   ]);
   if (error || !data) throw new Error("Settings are missing. Run supabase/schema.sql.");
   return (
@@ -36,7 +41,7 @@ export default async function SettingsPage() {
         </Link>
       </nav>
       <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
-        <SettingsForm initial={data as SettingsRow} sample={sample} />
+        <SettingsForm initial={data as SettingsRow} sample={sample} voices={voices} />
         <div className="lg:sticky lg:top-20 lg:self-start"><WorkerCard /></div>
       </div>
     </>

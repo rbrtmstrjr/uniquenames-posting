@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import type { ReelRow, ReelSceneRow, ReelSceneStatus, ReelStatus, SettingsRow } from "@/lib/db/types";
 import { LINE_MAX_WORDS, lightClean, TITLE_MAX, writeReelScript, type MadeReel, type ReelScript } from "@/lib/ai/reel-script";
 import { scenePrompt } from "@/lib/reels/prompt";
+import { speedOf } from "@/lib/reels/voices";
 import { generateLockReason } from "./generate-guard";
 import { UUID_RE } from "./helpers";
 import { fail, requireOwner, type ActionResult } from "./result";
@@ -59,10 +60,13 @@ async function madeReels(sb: SB): Promise<{ rows: (MadeReel & { id?: string })[]
   }
 }
 
-async function maxImages(sb: SB): Promise<number> {
+/** Images per reel and the narration speed (1 before migration 006: the old worker never speeds the voice up). */
+async function scriptSettings(sb: SB): Promise<{ maxScenes: number; speed: number }> {
   const { data } = await sb.from("settings").select("*").eq("id", 1).maybeSingle();
-  const n = Number((data as SettingsRow | null)?.reel_max_images);
-  return Number.isInteger(n) ? Math.min(40, Math.max(10, n)) : 40;
+  const row = data as SettingsRow | null;
+  const n = Number(row?.reel_max_images);
+  const speed = row?.reel_speed === undefined || row?.reel_speed === null ? 1 : speedOf(row.reel_speed);
+  return { maxScenes: Number.isInteger(n) ? Math.min(40, Math.max(10, n)) : 40, speed };
 }
 
 /**
@@ -70,7 +74,7 @@ async function maxImages(sb: SB): Promise<number> {
  * validation is rewritten, up to 2 times, all within one 270 s budget (each call gets at most 120 s).
  */
 async function draftScript(sb: SB, topic: string | undefined): Promise<ActionResult<{ script: ReelScript }>> {
-  const [made, maxScenes] = await Promise.all([madeReels(sb), maxImages(sb)]);
+  const [made, { maxScenes, speed }] = await Promise.all([madeReels(sb), scriptSettings(sb)]);
   if (made.error) return dbFail(made.error);
   const taken = new Set(made.rows.map((m) => titleKey(m.title ?? "")));
   const alreadyMade = made.rows.map((m) => ({ title: m.title, stage: m.stage ?? null }));
@@ -79,7 +83,7 @@ async function draftScript(sb: SB, topic: string | undefined): Promise<ActionRes
   for (let i = 0; i < TRIES; i++) {
     const left = deadline - Date.now();
     if (left < CALL_MIN_MS) break;
-    const r = await writeReelScript({ topic, maxScenes, alreadyMade, timeoutMs: Math.min(CALL_MAX_MS, left) });
+    const r = await writeReelScript({ topic, maxScenes, alreadyMade, speed, timeoutMs: Math.min(CALL_MAX_MS, left) });
     if (!r.ok) { last = r.error; continue; }
     if (taken.has(titleKey(r.script.title))) {
       last = `Gemini kept picking a title you already made ("${r.script.title}"). Try again, or type a topic.`;
@@ -286,6 +290,8 @@ const WORKING: ReelStatus[] = [...MAKING, "rendering"];
 const REDOABLE: ReelSceneStatus[] = ["done", "failed", "skipped"];
 // pc_path stays: the worker replaces that file when the new video is made (no stray copies on the PC).
 const REQUEUE_REEL = { status: "queued", preview_path: null, error: null, claimed_at: null, finished_at: null };
+/** A music bed that failed ('') is tried again when the video is made again (null = not made yet). */
+const retryMusic = (reel: ReelRow) => (reel.music_path === "" ? { music_path: null } : {});
 
 /**
  * Tap an image → "New picture" (also Retry after needs_attention): the scene goes back in line with
@@ -309,7 +315,7 @@ export async function redoReelSceneAction(sceneId: string): Promise<ActionResult
   if (ue) return dbFail(ue);
   if (!data?.length) return fail("This image just changed. Reload the page and try again.");
   if (MAKING.includes(reel.status)) return done();
-  const { data: rd, error: re } = await sb.from("reels").update({ ...REQUEUE_REEL, version: reel.version + 1 })
+  const { data: rd, error: re } = await sb.from("reels").update({ ...REQUEUE_REEL, ...retryMusic(reel), version: reel.version + 1 })
     .eq("id", reel.id).eq("version", reel.version).select("id");
   if (re || !rd?.length) {
     // Put the scene back as it was: a queued image in a reel that isn't in line would wait forever.
@@ -363,7 +369,7 @@ export async function rerenderReelAction(reelId: string): Promise<ActionResult> 
   if (!scenes.some((s) => s.status === "done")) return fail("Every image was skipped, so there is nothing to show.");
   if (lock) return fail(lock);
   const { data, error: ue } = await sb.from("reels")
-    .update({ status: "queued", preview_path: null, error: null, claimed_at: null, finished_at: null, version: reel.version + 1 })
+    .update({ status: "queued", preview_path: null, error: null, claimed_at: null, finished_at: null, ...retryMusic(reel), version: reel.version + 1 })
     .eq("id", reelId).eq("version", reel.version).in("status", ["ready", "failed"]).select("id");
   if (ue) return dbFail(ue);
   if (!data?.length) return fail(STALE);
@@ -389,7 +395,7 @@ export async function retryReelAction(reelId: string): Promise<ActionResult> {
   if (lock) return fail(lock);
   // The reel first (version-guarded: one Try again wins), then its failed images get fresh attempts.
   const { data, error: ue } = await sb.from("reels")
-    .update({ status: "queued", error: null, claimed_at: null, finished_at: null, preview_path: null, version: reel.version + 1 })
+    .update({ status: "queued", error: null, claimed_at: null, finished_at: null, preview_path: null, ...retryMusic(reel), version: reel.version + 1 })
     .eq("id", reelId).eq("version", reel.version).eq("status", "failed").select("id");
   if (ue) return dbFail(ue);
   if (!data?.length) return fail(STALE);

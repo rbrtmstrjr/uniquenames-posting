@@ -3,7 +3,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Bell, LogOut } from "lucide-react";
-import { TEXT_SETTINGS_DEFAULTS, type SettingsRow } from "@/lib/db/types";
+import { TEXT_SETTINGS_DEFAULTS, type ReelVoiceRow, type SettingsRow } from "@/lib/db/types";
 import { Panel } from "@/components/ui/panel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/shadcn/input";
@@ -18,6 +18,8 @@ import { buildCaption } from "@/lib/planner";
 import { createClient } from "@/lib/supabase/client";
 import { REEL_IMAGES_DEFAULT, REEL_IMAGES_MAX, REEL_IMAGES_MIN, TEXT_SETTING_KEYS, type TextSettings } from "@/lib/actions/validate";
 import { CardTextSettings, type PreviewSample } from "./card-text";
+import { NarratorMusic, type NarratorValue } from "./narrator-music";
+import { MUSIC_DEFAULT, speedOf, VOICE_DEFAULT, VOLUME_DEFAULT } from "@/lib/reels/voices";
 
 // Card counts are picked on sliders, so a value is always a whole number in range;
 // validateSettings still rejects "fewest" above "most" with a clear message.
@@ -30,13 +32,23 @@ const DEFAULT_SAMPLE: PreviewSample = { photoUrl: null, name: "Arlo Zenith", mea
 const textOf = (row: Partial<SettingsRow>): TextSettings =>
   Object.fromEntries(TEXT_SETTING_KEYS.map((k) => [k, row[k] ?? TEXT_SETTINGS_DEFAULTS[k]])) as unknown as TextSettings;
 
-export function SettingsForm({ initial, sample = DEFAULT_SAMPLE }: { initial: SettingsRow; sample?: PreviewSample }) {
+/** The narrator + music settings; null until migration 006 runs (the form then never sends them). */
+const narratorOf = (row: Partial<SettingsRow>): NarratorValue | null => row.reel_voice_id === undefined ? null : {
+  reel_voice_id: row.reel_voice_id || VOICE_DEFAULT, reel_speed: speedOf(row.reel_speed),
+  reel_music: row.reel_music ?? MUSIC_DEFAULT, reel_music_volume: row.reel_music_volume ?? VOLUME_DEFAULT,
+};
+
+export function SettingsForm({ initial, sample = DEFAULT_SAMPLE, voices = null }: { initial: SettingsRow; sample?: PreviewSample; voices?: ReelVoiceRow[] | null }) {
   const router = useRouter();
   const [s, setS] = useState({ caption_template: initial.caption_template, hashtags: initial.hashtags, handle: initial.handle, min_images: initial.min_images, max_images: initial.max_images, sound_on: initial.sound_on,
     // undefined until migration 002 runs: the column default (on) is what the app uses then.
     caption_ai: initial.caption_ai ?? TEXT_SETTINGS_DEFAULTS.caption_ai, ...textOf(initial),
     // undefined until migration 005 runs: the column default (40) is what the app uses then.
-    reel_max_images: initial.reel_max_images ?? REEL_IMAGES_DEFAULT });
+    reel_max_images: initial.reel_max_images ?? REEL_IMAGES_DEFAULT,
+    // undefined until migration 006 runs: not sent then.
+    ...narratorOf(initial) });
+  // The speed the saved samples are compared with (Make samples uses the saved one).
+  const [savedSpeed, setSavedSpeed] = useState(speedOf(initial.reel_speed));
   const [busy, setBusy] = useState(false);
   const problem = validateSettings(s);
 
@@ -47,7 +59,7 @@ export function SettingsForm({ initial, sample = DEFAULT_SAMPLE }: { initial: Se
     // layout (chime setting) in the same response, so no extra router.refresh() round trip.
     const r = await callAction(() => saveSettingsAction(s));
     setBusy(false);
-    if (r.ok) toast.success("Settings saved"); else toast.error(r.error);
+    if (r.ok) { toast.success("Settings saved"); if (s.reel_speed !== undefined) setSavedSpeed(s.reel_speed); } else toast.error(r.error);
   };
   const enableNotifications = async () => {
     // Undefined on iOS Safari outside a home-screen app.
@@ -94,6 +106,9 @@ export function SettingsForm({ initial, sample = DEFAULT_SAMPLE }: { initial: Se
         <p className="mt-2 text-xs text-muted">{initial.reel_max_images === undefined
           ? "Reels need the database update first (run supabase/migrations/005_reels.sql); until then 40 is used."
           : "The most pictures a new script can have. Fewer images make a reel faster on your PC."}</p>
+      </Panel>
+      <Panel title="Narrator & music">
+        <NarratorMusic voices={voices} value={narratorOf(s)} savedSpeed={savedSpeed} onChange={(p) => setS({ ...s, ...p })} />
       </Panel>
       <Panel title="Card text">
         <CardTextSettings value={textOf(s)} onChange={(t) => setS({ ...s, ...t })} sample={sample}

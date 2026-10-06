@@ -203,3 +203,28 @@ describe("writeReelScript", () => {
     }
   });
 });
+
+describe("narration speed scales the word target", () => {
+  it("1× keeps the old budget; 1.12× asks for more words in the same 90-120 s", async () => {
+    const { reelWordBudget } = await import("@/lib/ai/reel-script");
+    expect(reelWordBudget(40)).toMatchObject({ lo: 330, hi: 420, secLo: 94, secHi: 120 });
+    const fast = reelWordBudget(40, 1.12);
+    expect(fast).toMatchObject({ lo: 370, hi: 470, minWords: 296, wpsLo: 3.9, wpsHi: 4.5 });
+    expect(fast.secLo).toBe(94);
+    expect(fast.secHi).toBe(120);
+    // few images: lines stay at most 10-12 words each, whatever the speed
+    expect(reelWordBudget(10, 1.25)).toMatchObject({ lo: 100, hi: 120 });
+  });
+
+  it("the prompt and the validation use the speed", async () => {
+    const { prompt } = reelScriptPrompt({ maxScenes: 40, alreadyMade: [], speed: 1.12 });
+    expect(prompt).toContain("370-470 words");
+    expect(prompt).toContain("about 3.9-4.5 words per second");
+    // 30 lines of 10 words = 300: enough at 1× (264) and at 1.12× (296)
+    generateJson.mockResolvedValueOnce({ ok: true, data: script(30) });
+    expect((await writeReelScript({ maxScenes: 40, alreadyMade: [], speed: 1.12 })).ok).toBe(true);
+    // 1.25×: lo = min(413, 40 × 10) = 400, needs 320
+    generateJson.mockResolvedValueOnce({ ok: true, data: script(30) });
+    expect(await writeReelScript({ maxScenes: 40, alreadyMade: [], speed: 1.25 })).toEqual({ ok: false, error: "Script too short: 300 words (needs at least 320)." });
+  });
+});

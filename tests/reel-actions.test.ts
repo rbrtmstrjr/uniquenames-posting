@@ -40,7 +40,7 @@ const sceneRow = (id: string, position: number, o: Partial<ReelSceneRow> = {}): 
 type Health = "ready" | "comfy-off";
 interface World {
   reel?: ReelRow | null; scenes?: ReelSceneRow[]; made?: { title: string; stage: string | null }[]; health?: Health;
-  maxImages?: number; reelUpdated?: boolean; sceneUpdated?: boolean; deleted?: boolean;
+  maxImages?: number; speed?: number; reelUpdated?: boolean; sceneUpdated?: boolean; deleted?: boolean;
   listError?: { message: string; code?: string }; sceneInsertError?: { message: string };
   files?: Record<string, { name: string; id: string | null }[]>;
   /** A scene whose guarded update matches nothing (changed in another tab). */
@@ -55,7 +55,7 @@ function world(o: World = {}) {
     const has = (m: string) => q.ops.some((x) => x[0] === m);
     const eqv = (col: string) => q.ops.find((x) => x[0] === "eq" && x[1] === col)?.[2];
     if (q.table === "worker_status") return { data: { id: 1, last_seen: new Date().toISOString(), comfyui_ok: w.health === "ready" } };
-    if (q.table === "settings") return { data: { id: 1, reel_max_images: w.maxImages } };
+    if (q.table === "settings") return { data: { id: 1, reel_max_images: w.maxImages, ...(w.speed === undefined ? {} : { reel_speed: w.speed }) } };
     if (q.table === "reels") {
       if (has("insert")) return { data: { id: NEW } };
       if (has("update")) return { data: w.reelUpdated ? [{ id: REEL }] : [] };
@@ -537,5 +537,40 @@ describe("deleteReelAction", () => {
     expect(fake.removed).toEqual([]);
     world({ deleted: false });
     expect(await A.deleteReelAction(REEL)).toEqual({ ok: false, error: "Reel not found." });
+  });
+});
+
+describe("voices + music (006)", () => {
+  it("the script's word target follows the saved narration speed (1 before 006)", async () => {
+    writeMock.mockResolvedValue(ok(script()));
+    world({ speed: 1.2 });
+    await A.writeReelScriptAction({});
+    expect(writeMock.mock.calls[0][0].speed).toBe(1.2);
+    world();
+    await A.writeReelScriptAction({});
+    expect(writeMock.mock.calls[1][0].speed).toBe(1);
+    world({ speed: 1.12 });
+    await A.rewriteReelScriptAction(REEL);
+    expect(writeMock.mock.calls[2][0].speed).toBe(1.12);
+  });
+
+  it("a music bed that failed ('') is tried again by Make video again / Try again / New picture; a made one is kept", async () => {
+    const finished = [sceneRow(S1, 1, { status: "done" })];
+    world({ reel: reelRow({ status: "ready", music_path: "" }), scenes: finished });
+    expect(await A.rerenderReelAction(REEL)).toEqual({ ok: true });
+    expect(patchOf(qs("reels", "update")[0])).toMatchObject({ music_path: null });
+    world({ reel: reelRow({ status: "failed", music_path: "" }), scenes: finished });
+    expect(await A.retryReelAction(REEL)).toEqual({ ok: true });
+    expect(patchOf(qs("reels", "update")[0])).toMatchObject({ music_path: null });
+    world({ reel: reelRow({ status: "ready", music_path: "" }), scenes: finished });
+    expect(await A.redoReelSceneAction(S1)).toEqual({ ok: true });
+    expect(patchOf(qs("reels", "update")[0])).toMatchObject({ music_path: null });
+    world({ reel: reelRow({ status: "ready", music_path: `${REEL}/music-v1.flac` }), scenes: finished });
+    expect(await A.rerenderReelAction(REEL)).toEqual({ ok: true });
+    expect(patchOf(qs("reels", "update")[0])).not.toHaveProperty("music_path");
+    // before 006 (no column on the row): never named in the update
+    world({ reel: reelRow({ status: "ready" }), scenes: finished });
+    expect(await A.rerenderReelAction(REEL)).toEqual({ ok: true });
+    expect(patchOf(qs("reels", "update")[0])).not.toHaveProperty("music_path");
   });
 });

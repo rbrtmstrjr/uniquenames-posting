@@ -16,14 +16,14 @@ import { canGenerate } from "@/lib/status/worker-health";
 import { approveReelAction, deleteReelAction, rewriteReelScriptAction, saveReelScriptAction } from "@/lib/actions/reels";
 import { callAction } from "@/lib/actions/call";
 import { useNow } from "@/lib/realtime/hooks";
-import { LINE_MAX_WORDS, TITLE_MAX, clock, estimateSeconds, wordCount } from "@/lib/reels/status";
+import { LINE_MAX_WORDS, TITLE_MAX, clock, estimateSeconds, wordCount, wordTarget } from "@/lib/reels/status";
+import type { Narrator } from "@/lib/data/voices";
+import { VoicePicker } from "./voice-picker";
 import { cn } from "@/lib/utils/cn";
 
 type Text = { narration: string; idea: string };
 const oneLine = (s: string) => s.replace(/\s+/g, " ").trim();
 const same = (a: Text, b: Text) => oneLine(a.narration) === oneLine(b.narration) && oneLine(a.idea) === oneLine(b.idea);
-/** The script length the prompt aims for (90–120 s of speech). */
-const TARGET = { lo: 330, hi: 420 };
 
 /** m:ss since `since`, ticking on its own (so the long list doesn't re-render every second). */
 function Elapsed({ since }: { since: number }) {
@@ -52,7 +52,7 @@ function firstProblem(title: string, lines: (Text & { position: number })[]): st
  * live word count, the picture idea in a disclosure), totals at the top, and one action bar —
  * sticky above the tab bar on phones, in the side panel on desktop.
  */
-export function ScriptReview({ reel, scenes, onApproved }: { reel: ReelRow; scenes: ReelSceneRow[]; onApproved?: () => void }) {
+export function ScriptReview({ reel, scenes, onApproved, narrator = null }: { reel: ReelRow; scenes: ReelSceneRow[]; onApproved?: () => void; narrator?: Narrator | null }) {
   const router = useRouter();
   const { health } = useWorkerContext();
   const gen = canGenerate(health);
@@ -76,7 +76,10 @@ export function ScriptReview({ reel, scenes, onApproved }: { reel: ReelRow; scen
   const dirty = titleDirty || dirtyLines.length > 0;
   const problem = firstProblem(title, lines);
   const totalWords = lines.reduce((n, l) => n + wordCount(l.narration), 0);
-  const secs = estimateSeconds(totalWords);
+  // The script length the prompt aims for (90–120 s of speech at the narration speed).
+  const speed = narrator?.speed ?? 1;
+  const TARGET = wordTarget(speed);
+  const secs = estimateSeconds(totalWords, speed);
   const lengthOk = totalWords >= TARGET.lo && totalWords <= TARGET.hi;
 
   const edit = (id: string, patch: Partial<Text>) => setEdits((prev) => {
@@ -161,6 +164,11 @@ export function ScriptReview({ reel, scenes, onApproved }: { reel: ReelRow; scen
             <p className={cn("mt-2 text-xs", lengthOk ? "text-muted" : "text-warn-text")}>
               {lengthOk ? `Good length (aim ${TARGET.lo}–${TARGET.hi} words).` : `Aim for ${TARGET.lo}–${TARGET.hi} words (about 1:30–2:00).`}
             </p>
+            {narrator && (
+              <div className="mt-3 border-t border-line pt-3" data-testid="narrator">
+                <VoicePicker reelId={reel.id} value={reel.voice_id ?? null} defaultId={narrator.defaultId} voices={narrator.voices} disabled={locked} />
+              </div>
+            )}
             <div className="mt-3 hidden space-y-1 border-t border-line pt-3 text-xs text-muted lg:block">
               <div><span className="font-semibold text-ink">Grown-up doll:</span> {reel.doll_cast.adult}</div>
               <div><span className="font-semibold text-ink">Child doll:</span> {reel.doll_cast.child}</div>
