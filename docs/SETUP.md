@@ -66,6 +66,16 @@ Do these in order (this order never leaves a reel failed):
 Optional: **Settings > Reels > Images per reel** (10–40, default 40); fewer images make a reel faster.
 Full videos land in `OneDrive\Pictures\Unique Names\Reels\`.
 
+## Adding narrator voices and music (existing install)
+Any order is safe; this one is the smoothest:
+1. Restart the worker (Task Scheduler: **End** then **Run** "Unique Names card worker"). The new worker runs fine before step 2.
+2. Supabase **SQL Editor**: paste and run `supabase/migrations/006_reel_voices.sql` (safe to run again).
+3. Push to GitHub so Vercel redeploys the website.
+4. **Settings > Narrator & music > Set up voices**: Gemini records a ~10 s clip of each of the 30 voices once (about $0.30 in total; voices already set up are skipped). Your PC then records a sample of each voice with Chatterbox; they appear one by one with a ▶ button.
+5. Pick the default narrator, speed (default 1.12×) and music volume (default 18 %). Each reel can use a different voice on its review page.
+
+Music: ACE-Step 1.5 in ComfyUI makes a new instrumental bed for every reel. Its model files (~10 GB, in ComfyUI's models folders: `diffusion_models/acestep_v1.5_turbo`, `text_encoders/qwen_0.6b_ace15` + `qwen_1.7b_ace15`, `vae/ace_1.5_vae`) are already installed on this PC; see `docs/reference/reel-voices-music-spike.md` to set up another PC. If music fails, the reel is still made with the voice only.
+
 ## When something is wrong
 - Header dot red, "PC offline": turn on the PC. The worker starts at login. **Generate** is disabled (the button says why) until the PC is back.
 - Amber dot, "ComfyUI closed": open ComfyUI Desktop. **Generate** stays disabled until then; text edits and Re-stamp still work.

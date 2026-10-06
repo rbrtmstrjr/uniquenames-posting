@@ -1,6 +1,7 @@
 -- Unique Names posting: Reels narrator voices, speed and background music. Paste the whole file into the Supabase SQL
 -- editor and run it. Safe to run more than once. Needs 005_reels.sql first. A fresh project gets all of this from
--- supabase/schema.sql already. Restart the PC worker right after running it (the old worker doesn't know the music step).
+-- supabase/schema.sql already. Any order with the worker restart is safe: only a worker that asks for music (p_music)
+-- is ever handed the music step, and the new worker runs fine before this file has been run.
 -- Voices: 30 Gemini voices cloned by Chatterbox from a reference clip (voices/<id>/ref.wav in the reels bucket)
 -- + Chatterbox's built-in voice. Music: one ACE-Step bed per reel (<reelId>/music-v<n>.flac), mixed under the voice.
 
