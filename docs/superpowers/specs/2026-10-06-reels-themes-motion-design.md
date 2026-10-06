@@ -25,15 +25,15 @@ Owner feedback: images all share one emotion and feel boring; reels must feel li
 
 ## Script (lib/ai/reel-script.ts)
 
-New per-scene fields `emotion`, `action`, `shot`, `key`; hook/mini-hook/loop rules; `idea` stays the visual moment. Server assigns `motion` with a pure function: lines 0..min(2, n-1) → `ai` when their line is a hook beat, plus up to 3 `key` lines → `ai`; the rest cycle through camera moves chosen by emotion with no repeats in a row. `scenePrompt(theme, cast, scene, index)` composes theme style + cast + idea + emotion + action + shot + composition + NO_TEXT (positive-only, never "camera").
+New per-scene fields `emotion`, `action`, `shot`, `key`; hook/mini-hook/loop rules; `idea` stays the visual moment. Server assigns `motion` with a pure function: every line gets one of the 7 camera moves, chosen by emotion with no repeats in a row; hook and `key` lines get punch / push-in emphasis (no AI motion this round — see decision 5). `scenePrompt(theme, cast, scene, index)` composes theme style + cast + idea + emotion + action + shot + composition + NO_TEXT (positive-only, never "camera").
 
 ## Worker
 
-- Theme preview job → Z-Image with the theme style + a fixed moment ("a mother gently lifting her laughing baby up toward the sunlight") → `themes/<id>/preview-v<n>.jpg`.
+- Theme preview job → Z-Image with the theme style + a fixed moment ("a mother gently lifting her laughing baby up toward the warm window light") → `themes/<id>/preview-v<n>.jpg`.
 - Voice tightening (silence trims, 0.10 s gaps) before atempo.
-- Clip step: LTX-Video image→video at a size the AMD GPU handles (from the spike), 3–4 s, then scaled to 1080×1920; upload `<reelId>/clips/<pos>-v<n>.mp4`; failure → `''`.
-- Render: per-scene motion presets (zoompan expressions per move), AI clips used as video segments (looped/trimmed to the line's span), instant first frame, caption pop (ASS `\t` scale animation), music from 0.
+- No clip step this round (no AI motion; see decision 5).
+- Render: per-scene motion presets (zoompan expressions per move; a line without `motion` falls back to punch on key moments, otherwise a rotation), instant first frame, caption pop (ASS `\t` scale animation), music from 0.
 
 ## Testing
 
-Unit tests for every pure piece (motion assignment, emotion/shot rotation, prompt composition per theme, voice tightening filter, zoompan expressions per move, caption pop ASS, claim order incl. clip + previews); PGlite for 007; jsdom for the theme grid + picker; real PC spike (LTX timing on AMD, 8 theme previews, emotion contrast in 3D Animated) and a 10-image test reel judged by the owner.
+Unit tests for every pure piece (motion assignment, emotion/shot rotation, prompt composition per theme, voice tightening filter, zoompan expressions per move, caption pop ASS, claim order incl. voice samples + theme previews); PGlite for 007; jsdom for the theme grid + picker; real PC spike (8 theme previews, emotion contrast in 3D Animated; no AI motion this round) and a 10-image test reel judged by the owner.

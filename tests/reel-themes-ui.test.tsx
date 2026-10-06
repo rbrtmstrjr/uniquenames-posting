@@ -116,6 +116,17 @@ describe("ThemeGrid (Settings)", () => {
     expect(screen.queryByRole("button", { name: /Make all previews/ })).toBeNull();
   });
 
+  it("Make again: the old picture stays with the In line / Making… badge", () => {
+    render(<ThemeGrid themes={[ready("clay", { preview_status: "queued" }), ready("anime", { preview_status: "making" })]} value="knitted" onChange={() => {}} />);
+    const clay = screen.getByTestId("theme-clay");
+    expect(clay.querySelector("img")?.getAttribute("src")).toBe("https://signed/themes/clay/preview-v2.jpg");
+    expect(within(clay).getAllByText("In line").length).toBeGreaterThan(0);
+    const anime = screen.getByTestId("theme-anime");
+    expect(anime.querySelector("img")?.getAttribute("src")).toBe("https://signed/themes/anime/preview-v2.jpg");
+    expect(within(anime).getAllByText("Making…").length).toBeGreaterThan(0);
+    expect(screen.getByTestId("theme-summary").textContent).toMatch(/0 of 2 previews ready · 2 being made/);
+  });
+
   it("realtime: a preview the PC saves appears live", () => {
     const { rerender } = render(<ThemeGrid themes={[theme("clay", { preview_status: "making" })]} value="clay" onChange={() => {}} />);
     expect(screen.getByTestId("theme-clay").querySelector("img")).toBeNull();
@@ -194,6 +205,39 @@ describe("ThemePicker (review page)", () => {
   });
 });
 
+describe("ThemePicker: partial save", () => {
+  const PARTIAL = "The theme was saved, but some lines just changed. Tap Retry to update every picture.";
+  it("keeps the new theme, offers Retry, and Retry (or the same thumbnail) re-applies it", async () => {
+    reelActions.setReelThemeAction.mockResolvedValueOnce({ ok: false, error: PARTIAL });
+    const onSaved = vi.fn();
+    render(<ThemePicker reelId={RID} value="knitted" defaultId="knitted" themes={[theme("knitted"), theme("clay")]} onSaved={onSaved} />);
+    expect(screen.queryByTestId("theme-retry")).toBeNull();
+    fireEvent.click(screen.getByRole("radio", { name: "Clay Stop-motion" }));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(PARTIAL));
+    expect(screen.getByRole("radio", { name: "Clay Stop-motion" }).getAttribute("aria-checked")).toBe("true");
+    expect(onSaved).toHaveBeenCalledWith("clay");
+    expect(refresh).toHaveBeenCalled();
+    reelActions.setReelThemeAction.mockResolvedValueOnce({ ok: true });
+    fireEvent.click(screen.getByTestId("theme-retry"));
+    await waitFor(() => expect(reelActions.setReelThemeAction).toHaveBeenCalledTimes(2));
+    expect(reelActions.setReelThemeAction).toHaveBeenLastCalledWith(RID, "clay");
+    await waitFor(() => expect(screen.queryByTestId("theme-retry")).toBeNull());
+    // Once fully applied, picking the same theme again does nothing.
+    fireEvent.click(screen.getByRole("radio", { name: "Clay Stop-motion" }));
+    expect(reelActions.setReelThemeAction).toHaveBeenCalledTimes(2);
+  });
+
+  it("after a partial save, tapping the same thumbnail re-applies it", async () => {
+    reelActions.setReelThemeAction.mockResolvedValueOnce({ ok: false, error: PARTIAL }).mockResolvedValueOnce({ ok: true });
+    render(<ThemePicker reelId={RID} value="knitted" defaultId="knitted" themes={[theme("knitted"), theme("clay")]} />);
+    fireEvent.click(screen.getByRole("radio", { name: "Clay Stop-motion" }));
+    await waitFor(() => expect(screen.getByTestId("theme-retry")).toBeTruthy());
+    fireEvent.click(screen.getByRole("radio", { name: "Clay Stop-motion" }));
+    await waitFor(() => expect(reelActions.setReelThemeAction).toHaveBeenCalledTimes(2));
+    expect(reelActions.setReelThemeAction).toHaveBeenLastCalledWith(RID, "clay");
+  });
+});
+
 describe("ScriptReview: theme + emotion chips", () => {
   const choice = { themes: [ready("knitted"), ready("animated3d")], defaultId: "knitted" as const };
 
@@ -220,6 +264,28 @@ describe("ScriptReview: theme + emotion chips", () => {
     expect(screen.getByRole("radio", { name: "3D Animated" }).getAttribute("aria-checked")).toBe("true");
     expect(screen.getByText("Grown-up:")).toBeTruthy();
     expect(screen.queryByText("Grown-up doll:")).toBeNull();
+  });
+
+  it("a null theme_id means Knitted Doll, not the Settings default (like the server and the worker)", () => {
+    render(<ScriptReview reel={reel({ theme_id: null })} scenes={[scene(1)]} themes={{ ...choice, defaultId: "animated3d" }} />);
+    expect(screen.getByRole("radio", { name: "Knitted Doll" }).getAttribute("aria-checked")).toBe("true");
+    expect(screen.getByText("Grown-up doll:")).toBeTruthy();
+  });
+
+  it("Save, Approve and New script wait while a theme save runs", async () => {
+    let resolve!: (v: { ok: true }) => void;
+    reelActions.setReelThemeAction.mockImplementationOnce(() => new Promise((r) => { resolve = r; }));
+    render(<ScriptReview reel={reel({ theme_id: "knitted" })} scenes={[scene(1)]} themes={choice} />);
+    const newScript = screen.getByRole("button", { name: /New script/ }) as HTMLButtonElement;
+    expect(newScript.disabled).toBe(false);
+    fireEvent.change(screen.getByLabelText("Line 1 narration"), { target: { value: "A changed line with several words in it" } });
+    const saveBtn = screen.getByRole("button", { name: "Save" }) as HTMLButtonElement;
+    expect(saveBtn.disabled).toBe(false);
+    fireEvent.click(screen.getByRole("radio", { name: "3D Animated" }));
+    await waitFor(() => expect((screen.getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(true));
+    expect((screen.getByRole("button", { name: /Approve and make reel/ }) as HTMLButtonElement).disabled).toBe(true);
+    resolve({ ok: true });
+    await waitFor(() => expect((screen.getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(false));
   });
 
   it("before 007 (no theme_id on the reel) or without themes: no picker", () => {

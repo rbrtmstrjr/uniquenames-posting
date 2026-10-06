@@ -2,43 +2,56 @@
 import Link from "next/link";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Check, Loader2 } from "lucide-react";
+import { Check, Loader2, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 import type { ReelThemeId, ReelThemeRow } from "@/lib/db/types";
 import { FadeImage } from "@/components/ui/fade-image";
 import { callAction } from "@/lib/actions/call";
 import { setReelThemeAction } from "@/lib/actions/reels";
 import { useSignedUrls } from "@/lib/realtime/signed-urls";
-import { previewPath } from "@/lib/reels/themes";
+import { isPartialThemeSave, previewShown } from "@/lib/reels/themes";
 import { cn } from "@/lib/utils/cn";
 
 /**
  * The review page's visual theme: a strip of preview thumbnails (wraps to a 4-column grid in the desktop side
  * panel). Saved right away (only while in script): the server rebuilds every line's picture prompt, then the
- * page refreshes. `value` is the reel's pinned theme.
+ * page refreshes. `value` is the reel's pinned theme. When the theme was saved but some lines changed meanwhile
+ * (partial save), Retry re-applies the same theme. `onBusyChange` tells the page a save is running (it holds Save).
  */
-export function ThemePicker({ reelId, value, defaultId, themes, disabled, onSaved }: {
+export function ThemePicker({ reelId, value, defaultId, themes, disabled, onSaved, onBusyChange }: {
   reelId: string; value: ReelThemeId; defaultId: ReelThemeId; themes: ReelThemeRow[]; disabled?: boolean;
-  onSaved?: (id: ReelThemeId) => void;
+  onSaved?: (id: ReelThemeId) => void; onBusyChange?: (busy: boolean) => void;
 }) {
   const router = useRouter();
   const [chosen, setChosen] = useState<ReelThemeId>(value);
   const [saving, setSaving] = useState<ReelThemeId | null>(null);
+  // The theme a partial save left half-applied: picking it again (or Retry) re-applies it.
+  const [retry, setRetry] = useState<ReelThemeId | null>(null);
   // A newer value from the server (realtime / refresh) wins while nothing is being saved.
   const [seen, setSeen] = useState(value);
   if (seen !== value) { setSeen(value); if (!saving) setChosen(value); }
-  const signed = useSignedUrls(themes.map(previewPath), "reels");
+  const signed = useSignedUrls(themes.map(previewShown), "reels");
   const current = themes.find((t) => t.id === chosen);
-  const anyPreview = themes.some((t) => previewPath(t));
+  const anyPreview = themes.some((t) => previewShown(t));
+  const retryTheme = retry && retry === chosen ? themes.find((t) => t.id === retry) : undefined;
 
   const pick = async (t: ReelThemeRow) => {
-    if (t.id === chosen || saving) return;
+    if ((t.id === chosen && t.id !== retry) || saving) return;
     const before = chosen;
     setChosen(t.id);
     setSaving(t.id);
+    onBusyChange?.(true);
     const r = await callAction(() => setReelThemeAction(reelId, t.id));
     setSaving(null);
-    if (!r.ok) { setChosen(before); toast.error(r.error); return; }
+    onBusyChange?.(false);
+    if (!r.ok) {
+      toast.error(r.error);
+      // Saved on the reel, but not every line's picture prompt: keep it chosen and offer Retry.
+      if (isPartialThemeSave(r.error)) { setRetry(t.id); onSaved?.(t.id); router.refresh(); }
+      else setChosen(before);
+      return;
+    }
+    setRetry(null);
     toast.success(`Theme: ${t.emoji} ${t.label}. Every picture will use it.`);
     onSaved?.(t.id);
     router.refresh();
@@ -56,7 +69,7 @@ export function ThemePicker({ reelId, value, defaultId, themes, disabled, onSave
         className="-mx-1 flex snap-x gap-2 overflow-x-auto px-1 pt-0.5 pb-2 [scrollbar-width:thin] lg:mx-0 lg:grid lg:grid-cols-4 lg:overflow-visible lg:px-0 lg:pb-0">
         {themes.map((t) => {
           const selected = t.id === chosen;
-          const path = previewPath(t);
+          const path = previewShown(t);
           return (
             <button key={t.id} type="button" role="radio" aria-checked={selected} aria-label={t.label} data-testid={`pick-${t.id}`}
               disabled={disabled || (!!saving && saving !== t.id)} onClick={() => void pick(t)}
@@ -80,6 +93,15 @@ export function ThemePicker({ reelId, value, defaultId, themes, disabled, onSave
           );
         })}
       </div>
+      {retryTheme && !saving && (
+        <p role="status" className="mt-1 flex items-center justify-between gap-2 text-xs text-warn-text">
+          <span className="min-w-0">Some pictures still use the old theme.</span>
+          <button type="button" data-testid="theme-retry" disabled={disabled} onClick={() => void pick(retryTheme)}
+            className="inline-flex shrink-0 items-center gap-1 font-semibold text-accent underline-offset-2 hover:underline disabled:cursor-not-allowed disabled:opacity-60">
+            <RotateCcw className="size-3" aria-hidden /> Retry
+          </button>
+        </p>
+      )}
       {!anyPreview && (
         <p className="mt-1 text-xs text-muted">
           <Link href="/settings" className="font-semibold text-accent underline-offset-2 hover:underline">Make theme previews in Settings</Link> to see each look.

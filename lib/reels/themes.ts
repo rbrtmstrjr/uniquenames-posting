@@ -47,7 +47,7 @@ export const STATIC_THEMES: Record<ReelThemeId, ReelTheme> = {
   },
   sketch: {
     id: "sketch", faces: true,
-    style: "Black-and-white grayscale pencil drawing, a colourless graphite study made by hand on white sketchbook paper: the whole picture is pure greyscale, drawn entirely in shades of pencil grey, so every garment, skin tone, hair colour and object reads only as a lighter or darker graphite grey, from soft silver to deep charcoal black, on white paper. Confident graphite line work, expressive loose strokes, soft cross-hatching and smudged tonal shading, visible paper texture, the brightest highlights left as bare white paper, the drawing filling the whole page. Faces drawn with care and clear, readable expressions. Gentle light from the window rendered with soft shading. Intimate, artistic and timeless, a classic monochrome pencil study.",
+    style: "Black-and-white grayscale pencil drawing, a pure black-and-white graphite study made by hand on white sketchbook paper: the whole picture is pure greyscale, drawn entirely in shades of pencil grey, so every garment, skin tone, hair colour and object reads only as a lighter or darker graphite grey, from soft silver to deep charcoal black, on white paper. Confident graphite line work, expressive loose strokes, soft cross-hatching and smudged tonal shading, visible paper texture, the brightest highlights left as bare white paper, the drawing filling the whole page. Faces drawn with care and clear, readable expressions. Gentle light from the window rendered with soft shading. Intimate, artistic and timeless, a classic monochrome pencil study.",
   },
   cinematic: {
     id: "cinematic", faces: true,
@@ -104,7 +104,15 @@ export const PREVIEW_LABEL: Record<ThemePreviewStatus, { label: string; tone: "o
 export const needsPreview = (t: Pick<ReelThemeRow, "preview_status">) => t.preview_status === "missing" || t.preview_status === "failed";
 /** In line or being made: "Make preview" waits. */
 export const previewBusy = (t: Pick<ReelThemeRow, "preview_status">) => t.preview_status === "queued" || t.preview_status === "making";
-/** The picture to show: only a ready preview with a path. */
+/** A ready preview with a path (counts as made; the review picker shows these). */
 export const previewPath = (t: Pick<ReelThemeRow, "preview_status" | "preview_path">) => (t.preview_status === "ready" && t.preview_path) || null;
+/** The picture a card shows: the ready preview, or the old one while "Make again" waits in line / is being made
+ *  (queueing keeps preview_path; the worker swaps it only when the new picture is saved). */
+export const previewShown = (t: Pick<ReelThemeRow, "preview_status" | "preview_path">) =>
+  previewPath(t) ?? ((previewBusy(t) && t.preview_path) || null);
+/** setReelThemeAction's "saved, but not every picture prompt was rebuilt" messages start with this: the picker
+ *  then offers Retry (re-applying the same theme), which a normal pick of the current theme would skip. */
+export const THEME_PARTIAL = "The theme was saved, but";
+export const isPartialThemeSave = (error: string) => error.startsWith(THEME_PARTIAL);
 /** Display order (the seed's sort, then id). */
 export const byThemeOrder = (a: Pick<ReelThemeRow, "sort" | "id">, b: Pick<ReelThemeRow, "sort" | "id">) => a.sort - b.sort || a.id.localeCompare(b.id);

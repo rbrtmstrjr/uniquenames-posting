@@ -277,7 +277,8 @@ def is_gray(jpeg_bytes):
 class ThemeHelpersTest(unittest.TestCase):
     def test_theme_resolution(self):
         self.assertIsNone(themes.theme_id_for({"id": "r"}, {"id": 1}))                       # before 007
-        self.assertEqual(themes.theme_id_for({"theme_id": None}, {"reel_theme_id": "sketch"}), "sketch")
+        self.assertEqual(themes.theme_id_for({"theme_id": None}, {"reel_theme_id": "sketch"}), "knitted")  # null = knitted, like the web
+        self.assertEqual(themes.theme_id_for({"id": "r"}, {"reel_theme_id": "sketch"}), "sketch")         # no column: settings
         self.assertEqual(themes.theme_id_for({"theme_id": "clay"}, {"reel_theme_id": "sketch"}), "clay")
         self.assertEqual(themes.theme_id_for({"theme_id": None}, {}), "knitted")
         self.assertEqual(themes.theme_id_for({"theme_id": "x&id=eq.y"}, {}), "knitted")      # never a query injection
@@ -378,8 +379,9 @@ class GrayscaleSceneTest(unittest.TestCase):
     def test_sketch_reel_pictures_turn_grey(self):
         self.assertTrue(is_gray(self.image(make_reel(theme_id="sketch"), {"id": 1, "reel_theme_id": "knitted"})))
 
-    def test_default_theme_from_settings(self):
-        self.assertTrue(is_gray(self.image(make_reel(theme_id=None), {"id": 1, "reel_theme_id": "sketch"})))
+    def test_null_theme_is_knitted_not_the_settings_default(self):
+        # Like the web server (loadTheme): a reel with theme_id null is knitted, even when Settings says sketch.
+        self.assertFalse(is_gray(self.image(make_reel(theme_id=None), {"id": 1, "reel_theme_id": "sketch"})))
         self.assertFalse(is_gray(self.image(make_reel(theme_id=None), {"id": 1, "reel_theme_id": "knitted"})))
 
     def test_before_007_nothing_is_looked_up(self):

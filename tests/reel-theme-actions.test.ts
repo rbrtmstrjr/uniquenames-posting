@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { TEXT_SETTINGS_DEFAULTS, type ReelThemeRow } from "@/lib/db/types";
 import { validateSettings } from "@/lib/actions/validate";
-import { byThemeOrder, needsPreview, previewBusy, previewPath, THEME_LABEL, themeName } from "@/lib/reels/themes";
+import { byThemeOrder, needsPreview, previewBusy, previewPath, previewShown, THEME_LABEL, themeName } from "@/lib/reels/themes";
 import { lineMood } from "@/lib/reels/labels";
 import { fakeSupabase, isUpdate, op, type Query, type Respond } from "./helpers/fake-supabase";
 
@@ -134,6 +134,12 @@ describe("theme + line label helpers", () => {
     expect(previewPath(t("ready", "themes/a/preview-v2.jpg"))).toBe("themes/a/preview-v2.jpg");
     expect(previewPath(t("ready"))).toBeNull();
     expect(previewPath(t("making", "themes/a/preview-v1.jpg"))).toBeNull();
+    // "Make again": the old picture stays on the card while the new one waits / is made.
+    expect(previewShown(t("queued", "themes/a/preview-v1.jpg"))).toBe("themes/a/preview-v1.jpg");
+    expect(previewShown(t("making", "themes/a/preview-v1.jpg"))).toBe("themes/a/preview-v1.jpg");
+    expect(previewShown(t("ready", "themes/a/preview-v2.jpg"))).toBe("themes/a/preview-v2.jpg");
+    expect(previewShown(t("making"))).toBeNull();
+    expect(previewShown(t("failed", "themes/a/preview-v1.jpg"))).toBeNull();
   });
   it("THEME_LABEL mirrors migration 007's seed (label + emoji, in order)", () => {
     const sql = readFileSync(join(process.cwd(), "supabase", "migrations", "007_reel_themes.sql"), "utf8");

@@ -361,7 +361,7 @@ class ReelRunner:
         self._tidy("themes/%s" % tid, r"preview-v\d+\.jpg$", path)
 
     def _grayscale(self, reel):
-        """True if the reel's theme (reels.theme_id -> settings.reel_theme_id -> knitted) turns pictures grey;
+        """True if the reel's theme (reels.theme_id, null = knitted; see themes.theme_id_for) turns pictures grey;
         False on a database without 007. Raises ThemeUnread if the settings or the theme can't be read (the image
         goes back in line without using an attempt, rather than coming out in the wrong colours)."""
         try:

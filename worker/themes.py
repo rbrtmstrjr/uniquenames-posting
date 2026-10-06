@@ -26,7 +26,9 @@ COMPOSITION = ("Composition: the scene fills the whole frame edge to edge; the c
 
 def preview_prompt(theme):
     """The Z-Image prompt for a theme's preview: the fixed moment, the theme's style block and a simple cast
-    (dolls for knitted: the spike showed a doll 'lift' adds a second baby, so knitted keeps this generic moment)."""
+    (dolls for knitted). The same moment is used for every theme, knitted included: the spike's no-lift rule is
+    for script lines (a doll lift there added a second baby), and this one preview moment passed for knitted in
+    spike r1, so it is kept as is."""
     dolls = (theme or {}).get("id") == "knitted"
     who = "the same two dolls in every picture" if dolls else "the same two people in every picture"
     style = str((theme or {}).get("style") or "").strip()
@@ -44,12 +46,17 @@ def preview_path(theme_id, version):
 
 
 def theme_id_for(reel, settings):
-    """The reel's theme: reels.theme_id -> settings.reel_theme_id -> knitted. None on a database without 007
+    """The reel's theme, matching the web server: a reel row with the theme_id column uses it, and null there
+    means knitted (a reel written before the theme was pinned), never the Settings default. Only a reel row
+    without the column falls back to settings.reel_theme_id -> knitted. None on a database without 007
     (neither column exists), so nothing theme-related is looked up there."""
     reel, settings = reel or {}, settings or {}
     if "theme_id" not in reel and "reel_theme_id" not in settings:
         return None
-    tid = str(reel.get("theme_id") or settings.get("reel_theme_id") or DEFAULT_THEME).strip().lower()
+    if "theme_id" in reel:
+        tid = str(reel.get("theme_id") or DEFAULT_THEME).strip().lower()
+    else:
+        tid = str(settings.get("reel_theme_id") or DEFAULT_THEME).strip().lower()
     return tid if THEME_ID.match(tid) else DEFAULT_THEME
 
 

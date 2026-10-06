@@ -157,9 +157,13 @@ export function ScriptReview({ reel, scenes, onApproved, narrator = null, themes
   };
 
   const locked = busy === "rewrite" || busy === "approve" || busy === "delete";
-  // The reel's look: the pinned theme (007), else the Settings default, else knitted (dolls).
+  // The reel's look: the pinned theme (007); null (or before 007) means knitted dolls, like the server's loadTheme
+  // and the worker, never the Settings default. A theme just saved here shows until the reel row catches up.
   const [themeSaved, setThemeSaved] = useState<ReelThemeId | null>(null);
-  const themeId: ReelThemeId = themeSaved ?? (isThemeId(reel.theme_id) ? reel.theme_id : themes?.defaultId ?? "knitted");
+  const [seenTheme, setSeenTheme] = useState(reel.theme_id);
+  if (seenTheme !== reel.theme_id) { setSeenTheme(reel.theme_id); setThemeSaved(null); }
+  const [themeBusy, setThemeBusy] = useState(false);
+  const themeId: ReelThemeId = themeSaved ?? (isThemeId(reel.theme_id) ? reel.theme_id : "knitted");
   const dolls = themeId === "knitted";
   const cast = dolls ? reel.doll_cast : { adult: undoll(reel.doll_cast.adult), child: undoll(reel.doll_cast.child) };
 
@@ -195,7 +199,7 @@ export function ScriptReview({ reel, scenes, onApproved, narrator = null, themes
             {themes && reel.theme_id !== undefined && (
               <div className="mt-3 border-t border-line pt-3" data-testid="theme">
                 <ThemePicker reelId={reel.id} value={themeId} defaultId={themes.defaultId} themes={themes.themes} disabled={locked || busy === "save"}
-                  onSaved={setThemeSaved} />
+                  onSaved={setThemeSaved} onBusyChange={setThemeBusy} />
               </div>
             )}
             {narrator && (
@@ -216,16 +220,16 @@ export function ScriptReview({ reel, scenes, onApproved, narrator = null, themes
               {!problem && gen.ok && dirty && <p className="text-xs text-muted lg:text-center">Unsaved changes — Approve saves them first.</p>}
               <div className="flex flex-wrap items-center gap-2">
                 <Button className="min-w-0 flex-1 lg:order-first lg:basis-full" size="md" loading={busy === "approve"}
-                  disabled={!gen.ok || !!problem || (locked && busy !== "approve") || busy === "save"} onClick={() => void approve()}>
+                  disabled={!gen.ok || !!problem || (locked && busy !== "approve") || busy === "save" || themeBusy} onClick={() => void approve()}>
                   {busy !== "approve" && <Clapperboard className="size-4" aria-hidden />} Approve and make reel
                 </Button>
                 {dirty ? (
                   <>
-                    <Button variant="subtle" loading={busy === "save"} disabled={!!problem || locked} onClick={() => void onSave()}>Save</Button>
+                    <Button variant="subtle" loading={busy === "save"} disabled={!!problem || locked || themeBusy} onClick={() => void onSave()}>Save</Button>
                     <Button variant="ghost" size="icon" aria-label="Discard changes" disabled={locked || busy === "save"} onClick={discard}><RotateCcw className="size-4" /></Button>
                   </>
                 ) : (
-                  <Button variant="subtle" loading={busy === "rewrite"} disabled={locked && busy !== "rewrite"} onClick={() => setConfirm("rewrite")}>
+                  <Button variant="subtle" loading={busy === "rewrite"} disabled={(locked && busy !== "rewrite") || themeBusy} onClick={() => setConfirm("rewrite")}>
                     {busy !== "rewrite" && <Shuffle className="size-4" aria-hidden />} New script
                   </Button>
                 )}

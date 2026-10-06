@@ -5,7 +5,7 @@ import type { ReelRow, ReelSceneRow, ReelSceneStatus, ReelStatus, SettingsRow } 
 import { ACTION_MAX, LINE_MAX_WORDS, lightClean, TITLE_MAX, writeReelScript, type MadeReel, type ReelScript } from "@/lib/ai/reel-script";
 import { assignMotion, emotionOf, shotOf } from "@/lib/reels/motion";
 import { scenePrompt } from "@/lib/reels/prompt";
-import { DEFAULT_THEME_ID, isThemeId, staticTheme, themeOf, type ReelTheme } from "@/lib/reels/themes";
+import { DEFAULT_THEME_ID, isThemeId, staticTheme, THEME_PARTIAL, themeOf, type ReelTheme } from "@/lib/reels/themes";
 import { speedOf } from "@/lib/reels/voices";
 import { generateLockReason } from "./generate-guard";
 import { UUID_RE } from "./helpers";
@@ -355,8 +355,8 @@ export async function setReelThemeAction(reelId: string, themeId: string): Promi
     .update({ image_prompt: scenePrompt(theme, reel.doll_cast, s, s.position - 1), version: s.version + 1 })
     .eq("id", s.id).eq("version", s.version).eq("status", "pending").select("id")));
   const failed = results.find((r) => r.error)?.error;
-  if (failed) return fail(`The theme was saved, but some pictures were not updated: ${failed.message}`);
-  if (results.some((r) => !r.data?.length)) return fail("The theme was saved, but some lines just changed. Pick the theme again.");
+  if (failed) return fail(`${THEME_PARTIAL} some pictures were not updated (${failed.message}). Tap Retry.`);
+  if (results.some((r) => !r.data?.length)) return fail(`${THEME_PARTIAL} some lines just changed. Tap Retry to update every picture.`);
   return done();
 }
 

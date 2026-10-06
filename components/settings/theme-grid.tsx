@@ -12,7 +12,7 @@ import { queueAllThemePreviewsAction, queueThemePreviewAction } from "@/lib/acti
 import { createClient } from "@/lib/supabase/client";
 import { useRealtimeRows } from "@/lib/realtime/use-table";
 import { useSignedUrls } from "@/lib/realtime/signed-urls";
-import { byThemeOrder, needsPreview, PREVIEW_LABEL, previewBusy, previewPath } from "@/lib/reels/themes";
+import { byThemeOrder, needsPreview, PREVIEW_LABEL, previewBusy, previewPath, previewShown } from "@/lib/reels/themes";
 import { cn } from "@/lib/utils/cn";
 
 /**
@@ -41,7 +41,7 @@ function ThemeGridReady({ initial, value, onChange }: { initial: ReelThemeRow[];
     return error ? null : ((data ?? []) as ReelThemeRow[]);
   }, []);
   const [themes, setThemes] = useRealtimeRows<ReelThemeRow>("reel_themes", initial, { key: "settings-themes", sort: byThemeOrder, refetch });
-  const signed = useSignedUrls(themes.map(previewPath), "reels");
+  const signed = useSignedUrls(themes.map(previewShown), "reels");
   const [busy, setBusy] = useState<string | null>(null);
   const [openId, setOpenId] = useState<ReelThemeId | null>(null);
 
@@ -91,7 +91,7 @@ function ThemeGridReady({ initial, value, onChange }: { initial: ReelThemeRow[];
       <div role="radiogroup" aria-label="Default theme" className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-4">
         {themes.map((t) => {
           const selected = t.id === value;
-          const path = previewPath(t);
+          const path = previewShown(t);
           const url = path ? signed(path) : undefined;
           const status = PREVIEW_LABEL[t.preview_status];
           const waiting = previewBusy(t);
@@ -157,7 +157,7 @@ function ThemeGridReady({ initial, value, onChange }: { initial: ReelThemeRow[];
         {open && (
           <div className="space-y-3">
             <div className="relative mx-auto aspect-[9/16] w-full max-w-[min(100%,calc(62dvh*9/16))] overflow-hidden rounded-2xl bg-surface-2">
-              <FadeImage src={signed(previewPath(open))} alt={`${open.label} preview`} loading="eager" />
+              <FadeImage src={signed(previewShown(open))} alt={`${open.label} preview`} loading="eager" />
             </div>
             <div className="flex justify-end gap-2">
               <Button variant="ghost" onClick={() => setOpenId(null)}>Close</Button>
