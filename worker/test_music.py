@@ -58,9 +58,11 @@ class AceStepGraphTest(unittest.TestCase):
         self.assertEqual((g["10"]["inputs"]["audio"], g["10"]["inputs"]["format"]), (["9", 0], "flac"))
 
     def test_bed_length_and_seed(self):
-        self.assertEqual(music.music_seconds(10.0), 12.0)
-        self.assertEqual(music.music_seconds(41.234), 43.23)
+        self.assertEqual(music.music_seconds(10.0), 18.0)                      # asked for voice + 8 s ...
+        self.assertEqual(music.music_seconds(41.234), 49.23)
+        self.assertEqual(music.music_seconds(235.0), music.MAX_SECONDS)        # ... at most 240 s
         self.assertEqual(music.music_seconds(999), music.MAX_SECONDS)
+        self.assertEqual(music.EXTRA_SECONDS, 2.0)                             # ... the reel keeps voice + 2 s
         seeds = {music.random_seed() for _ in range(20)}
         self.assertGreater(len(seeds), 15)
         self.assertTrue(all(0 <= s < 2 ** 32 for s in seeds))

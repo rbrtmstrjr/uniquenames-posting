@@ -37,7 +37,7 @@ Steps, in order: voice → timing → music → images → render.
   `settings.reel_voice_path` is still cloned when set. If ComfyUI has not loaded the node the reel fails with
   "Restart ComfyUI so it loads the Chatterbox voice node."
 - **Music** (`music.py`, 006, while `settings.reel_music` is on): ACE-Step 1.5 through ComfyUI's native nodes (models
-  in `docs/reference/reel-voices-music-spike.md`) makes one instrumental bed, voice length + 2 s, random seed, FLAC →
+  in `docs/reference/reel-voices-music-spike.md`) makes one instrumental bed, voice length + 8 s (ACE-Step songs decay to silence near their end, so the render keeps only voice + 2 s), random seed, FLAC →
   `reels/<id>/music-v<version>.flac` → `reels.music_path` (~20 s for a 60 s bed). It runs under status `voicing`. Any
   failure sets `music_path = ''` (the reel goes on with the voice only, not retried); ComfyUI closed just hands the
   step back (like images).

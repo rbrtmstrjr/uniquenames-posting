@@ -297,11 +297,11 @@ class ReelRunnerTest(unittest.TestCase):
             self.rr.run_step({"step": "music", "reel": reel, "scene": None})
         return mk
 
-    def test_music_makes_a_bed_two_seconds_longer_than_the_voice(self):
+    def test_music_asks_ace_step_for_eight_seconds_more_than_the_voice(self):
         self.supa.listing = {RID: [{"name": "music-v2.flac", "id": "a"}, {"name": "voice-v3.wav", "id": "b"}]}
-        mk = self.run_music(self.music_reel())
+        mk = self.run_music(self.music_reel())                                # a 10 s voice
         url, secs, seed, timeout = mk.call_args[0][:4]
-        self.assertEqual((url, secs, seed, timeout), ("http://comfy", 12.0, 77, 300))
+        self.assertEqual((url, secs, seed, timeout), ("http://comfy", 18.0, 77, 300))
         path = "%s/music-v3.flac" % RID
         self.assertEqual(self.supa.uploads[path], ("reels", b"fLaC-bed", "audio/flac"))
         _t, match, v = self.supa.of("reels")[-1]

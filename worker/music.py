@@ -1,6 +1,7 @@
 # A reel's background music: ACE-Step 1.5 through ComfyUI's native nodes (models in Comfy Desktop's shared
 # models folder, see docs/reference/reel-voices-music-spike.md) makes one unique instrumental bed per reel,
-# voice length + 2 s, as a 48 kHz stereo FLAC. The render (reel_render.py) mixes it under the voice.
+# generated voice length + 8 s, as a 48 kHz stereo FLAC. The render (reel_render.py) mixes it under the voice and
+# trims it to voice + 2 s with a 2 s fade-out.
 import json
 import random
 import time
@@ -11,7 +12,9 @@ import urllib.request
 from render import JobError, http_json
 
 TAGS = "heartwarming, soft piano, gentle strings, warm lullaby, slow, instrumental, no vocals"
-EXTRA_SECONDS = 2.0          # the bed outlasts the voice
+EXTRA_SECONDS = 2.0          # the reel (and the music in it) outlasts the voice by this: the music rings out
+GENERATE_EXTRA_SECONDS = 8.0  # ACE-Step writes a song that ENDS (decays to silence ~3-4 s before its length):
+                              # generate longer and cut it, so the music is still playing at the last word
 MAX_SECONDS = 240.0          # a reel never needs more (and ACE-Step time grows with it)
 COMFY_CLOSED = "ComfyUI is closed. Open ComfyUI Desktop on your PC, then press Retry."
 POLL_SECONDS = 1.5
@@ -19,7 +22,8 @@ BEAT_SECONDS = 20.0
 
 
 def music_seconds(voice_seconds):
-    return round(min(MAX_SECONDS, max(1.0, float(voice_seconds)) + EXTRA_SECONDS), 2)
+    """The length to ask ACE-Step for: voice + 8 s (the render keeps voice + 2 s of it), at most MAX_SECONDS."""
+    return round(min(MAX_SECONDS, max(1.0, float(voice_seconds)) + GENERATE_EXTRA_SECONDS), 2)
 
 
 def random_seed():

@@ -212,7 +212,7 @@ class ReelRunner:
 
     # ------------------------------------------------------------ music (006)
     def _music(self, reel):
-        """One ACE-Step bed, voice length + 2 s. Any failure leaves music_path '' (the reel goes on with the
+        """One ACE-Step bed, voice length + 8 s (the render keeps voice + 2 s). Any failure leaves music_path '' (the reel goes on with the
         voice only and the step is not retried); ComfyUI being closed just hands the step back."""
         if not self.renderer.health()["ok"]:
             self.log("ComfyUI is closed: the music waits")
