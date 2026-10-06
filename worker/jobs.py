@@ -149,7 +149,7 @@ class Runner:
         self.reels_off_until = 0.0     # the reel functions are missing (migration 005 not run): re-check later
         self.reels_missing_logged = False
         self.music_off_until = 0.0     # the 006 functions are missing: claim without music, no voice samples
-        self.music_missing_logged = False
+        self.music_state = None        # None = not known yet, True = 006 there, False = 006 missing
         self.next_preview_sweep = 0.0
 
     # ------------------------------------------------------------ heartbeat
@@ -228,18 +228,30 @@ class Runner:
 
     def _claim_reel_step(self, comfy_ok):
         """claim_next_reel_step with the music step (006: p_music). A database without 006 has only 005's
-        one-argument function: then ask without music (logged once, re-checked every REELS_RECHECK_SECONDS)."""
+        one-argument function (PostgREST answers PGRST202): then ask without music, re-checked every
+        REELS_RECHECK_SECONDS. Each switch (off, and back on once 006 is run) is logged once."""
         if time.time() >= self.music_off_until:
             try:
-                return self.supa.rpc("claim_next_reel_step", {"p_no_comfy": not comfy_ok, "p_music": True})
+                step = self.supa.rpc("claim_next_reel_step", {"p_no_comfy": not comfy_ok, "p_music": True})
             except SupaError as e:
-                if not is_missing_function(e):
+                if "PGRST202" not in str(e):
                     raise
-                if not self.music_missing_logged:
-                    self.log("reel music and voices are off until supabase/migrations/006_reel_voices.sql is run")
-                    self.music_missing_logged = True
-                self.music_off_until = time.time() + REELS_RECHECK_SECONDS
+                self._music_off()
+            else:
+                self._music_on()
+                return step
         return self.supa.rpc("claim_next_reel_step", {"p_no_comfy": not comfy_ok})
+
+    def _music_off(self):
+        self.music_off_until = time.time() + REELS_RECHECK_SECONDS
+        if self.music_state is not False:
+            self.log("reel music and voices are off until supabase/migrations/006_reel_voices.sql is run")
+        self.music_state = False
+
+    def _music_on(self):
+        if self.music_state is False:
+            self.log("reel music and voices are on (006 found)")
+        self.music_state = True
 
     def _sample_tick(self):
         if time.time() < self.music_off_until or not hasattr(self.reels, "run_sample"):
@@ -247,9 +259,9 @@ class Runner:
         try:
             job = self.supa.rpc("claim_next_voice_sample")
         except SupaError as e:
-            if not is_missing_function(e):
+            if "PGRST202" not in str(e):
                 raise
-            self.music_off_until = time.time() + REELS_RECHECK_SECONDS
+            self._music_off()
             return False
         if not isinstance(job, dict) or not job.get("voice"):
             return False

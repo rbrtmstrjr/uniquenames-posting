@@ -379,6 +379,9 @@ def render_reel(runner, reel, scenes):
                 fh.write(fetch(s["photo_path"], JobError("Picture %s is missing from storage. Redo that picture." % s.get("position"))))
             items.append({"image": name, "duration": secs})
         bed, volume = fetch_music(runner, reel, work, BUCKET, is_http_4xx)
+        if bed and items:
+            # the music rings out after the last word: hold the last picture (its zoom goes on) for the bed's extra time
+            items[-1]["duration"] += music_mod.EXTRA_SECONDS
         beat()
 
         with open(os.path.join(work, "captions.ass"), "w", encoding="utf-8") as fh:

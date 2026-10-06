@@ -170,6 +170,12 @@ class ReelRunner:
         name = voice.upload_input(self.renderer.comfy, voice.input_name(path, version), data)
         with self._refs_lock:
             self._refs[key] = name
+        try:
+            gone = voice.prune_inputs(self.renderer.comfy, name)  # this clip's older versions in ComfyUI's input folder
+            if gone:
+                self.log("removed %d older voice clip(s) from ComfyUI's input folder" % gone)
+        except Exception as e:
+            self.log("could not tidy ComfyUI's input folder: %s" % e)
         return name
 
     # ------------------------------------------------------------ timing
@@ -228,6 +234,14 @@ class ReelRunner:
             if not self.renderer.health()["ok"]:
                 self.log("ComfyUI closed while making the music: it waits")
                 self._release(reel)
+                return
+            if isinstance(e, SupaError) and not is_http_4xx(e):
+                # the internet, not the music: hand the step back and make the bed again later
+                self.log("reel music: no internet (%s), trying again later" % str(e)[:160])
+                try:
+                    self._release(reel)
+                except Exception as e2:
+                    self.log("could not release the reel: %s" % e2)  # requeue_stuck_reels frees it in 10 minutes
                 return
             if not isinstance(e, JobError):
                 self.log(traceback.format_exc())
@@ -365,9 +379,14 @@ class ReelRunner:
             return
         body = {"status": "failed", "error": self._message(e)[:600], "claimed_at": None, "finished_at": now_iso()}
         body.update(extra or {})
+        redo = "voice_path" in body and body["voice_path"] is None
+        if redo and "music_path" in reel:
+            body["music_path"] = None  # a new voice gets a new bed (its length follows the voice); 006 only
         rows = self._retry(lambda: self.supa.update("reels", _match(reel), body, returning=True))
-        if rows and "voice_path" in body and body["voice_path"] is None and reel.get("voice_path"):
-            self._remove([reel["voice_path"]])  # the voice will be made again
+        if rows and redo:
+            old = [p for p in (reel.get("voice_path"), reel.get("music_path")) if p]
+            if old:
+                self._remove(old)  # the voice (and its music) will be made again
 
     @staticmethod
     def _message(e):

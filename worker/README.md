@@ -56,7 +56,11 @@ Steps, in order: voice → timing → music → images → render.
   non-empty `music_path`, the bed is loudness-normalised, set to `reel_music_volume` % (5–40, default 18), faded in
   1 s / out 2 s, ducked under the voice (`sidechaincompress`, voice as key) and mixed in, cut to the video's length
   (the voice is padded so the music never stops early; the fades are on the bed only, so the last words never fade).
-  Music off, failed (`''`) or missing from storage → the voice only.
+  With music the last picture is held 2 s longer (its zoom goes on), so the reel is voice + 2 s and the music fades
+  out after the last word. Music off, failed (`''`) or missing from storage → the voice only, as long as the voice.
+  A redone voice clears `music_path` too (a new bed is made for the new length); no internet during the music step
+  hands the step back instead of skipping the music. Older versions of a voice's reference clip are deleted from
+  ComfyUI's input folder (found via `--input-directory` in `/system_stats`).
 - **Versioned storage paths** (bucket `reels`), so a late result never overwrites a newer one:
   `<id>/voice-v<reel version>.wav`, `<id>/music-v<reel version>.flac`, `<id>/scenes/<NN>-v<scene version>.jpg`,
   `<id>/preview-v<reel version>.mp4`, `voices/<id>/sample-v<voice version>.wav`.

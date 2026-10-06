@@ -328,18 +328,20 @@ class RealRenderTest(unittest.TestCase):
             self.store[RID + "/music-v4.flac"] = fh.read()
         self.reel["music_path"] = RID + "/music-v4.flac"
         self.supa.select = lambda table, q: [{"id": 1, "reel_music": True, "reel_music_volume": 18}]
+        last = lambda: [u for u in self.supa.updates if "status" in u[2]][-1][2]["duration_s"]  # noqa: E731
         self.render()
         self.assertTrue(any("music at 18%" in m for m in self.logs))
-        v = [u for u in self.supa.updates if "status" in u[2]][-1][2]
-        self.assertAlmostEqual(v["duration_s"], 3.0, delta=0.15)              # the bed never makes it longer
+        self.assertAlmostEqual(last(), 3.0 + rr.music_mod.EXTRA_SECONDS, delta=0.15)   # voice + the music ringing out
         self.logs.clear()
         self.supa.select = lambda table, q: [{"id": 1, "reel_music": False}]
         self.render()
         self.assertFalse(any("music at" in m for m in self.logs))
+        self.assertAlmostEqual(last(), 3.0, delta=0.15)                        # music off: as long as the voice
         del self.store[RID + "/music-v4.flac"]                                # gone from storage: voice only
         self.supa.select = lambda table, q: [{"id": 1, "reel_music": True, "reel_music_volume": 18}]
         self.render()
         self.assertTrue(any("music file is missing" in m for m in self.logs))
+        self.assertAlmostEqual(last(), 3.0, delta=0.15)
 
     def test_render_does_not_touch_comfyui(self):
         self.runner.renderer = mock.Mock(side_effect=AssertionError("ComfyUI used"))

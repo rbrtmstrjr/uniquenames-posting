@@ -95,6 +95,51 @@ def input_name(path, version):
     return "%s-v%d.%s" % (stem, int(version or 0), ext)
 
 
+def comfy_input_dir(comfy_url):
+    """ComfyUI's input folder on this PC: --input-directory from /system_stats argv (Comfy Desktop passes it),
+    else <ComfyUI>/input next to main.py when argv gives an absolute path; None if unknown."""
+    import os
+    from render import http_json
+    argv = ((http_json(comfy_url.rstrip("/") + "/system_stats", timeout=5) or {}).get("system") or {}).get("argv") or []
+    for i, a in enumerate(argv):
+        if a == "--input-directory" and i + 1 < len(argv):
+            return argv[i + 1]
+        if a.startswith("--input-directory="):
+            return a.split("=", 1)[1]
+    if argv and os.path.isabs(argv[0]):
+        return os.path.join(os.path.dirname(argv[0]), "input")
+    return None
+
+
+def prune_inputs(comfy_url, keep, input_dir=None):
+    """Delete the older versions of an uploaded clip from ComfyUI's input folder: keep 'unique-names/voices-kore-ref-v3.wav'
+    removes voices-kore-ref-v1.wav, -v2.wav ... in the same subfolder (only files of exactly that name pattern).
+    Returns how many were removed."""
+    import os
+    sub, _, fn = keep.rpartition("/")
+    m = re.match(r"^(.+)-v\d+\.([A-Za-z0-9]+)$", fn)
+    if not m:
+        return 0
+    input_dir = input_dir or comfy_input_dir(comfy_url)
+    if not input_dir:
+        return 0
+    folder = os.path.join(input_dir, *[p for p in sub.split("/") if p and p not in (".", "..")])
+    pat = re.compile(r"^%s-v\d+\.%s$" % (re.escape(m.group(1)), re.escape(m.group(2))))
+    n = 0
+    try:
+        names = os.listdir(folder)
+    except OSError:
+        return 0
+    for name in names:
+        if name != fn and pat.match(name):
+            try:
+                os.remove(os.path.join(folder, name))
+                n += 1
+            except OSError:
+                pass
+    return n
+
+
 def input_exists(comfy_url, name):
     """True if ComfyUI still has this file in its input folder (name as LoadAudio takes it: 'sub/file')."""
     sub, _, fn = name.rpartition("/")

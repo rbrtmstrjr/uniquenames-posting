@@ -140,6 +140,9 @@ class ReelRunnerTest(unittest.TestCase):
         self.r = FakeRenderer()
         self.logs = []
         self.rr = reels.ReelRunner(self.supa, self.r, log=self.logs.append, sleep=lambda s: None)
+        p = mock.patch.object(reels.voice, "prune_inputs", return_value=0)   # never the real ComfyUI input folder
+        self.prune = p.start()
+        self.addCleanup(p.stop)
 
     # ------------------------------------------------------------ voice
     def run_voice(self, reel=None, chunks=None):
@@ -252,6 +255,15 @@ class ReelRunnerTest(unittest.TestCase):
         self.assertEqual(synth.call_args[0][3], "unique-names/voices-gacrux-ref-v2.wav")
         up3, _s, _sp = self.run_voice_006(make_reel(), exists=False)        # the input folder lost it
         self.assertEqual(up3.call_count, 1)
+        self.assertEqual(self.prune.call_args[0], ("http://comfy", "unique-names/voices-gacrux-ref-v2.wav"))
+        self.supa.voices[0]["version"] = 3                                   # a newer version: older ones pruned
+        self.run_voice_006(make_reel())
+        self.assertEqual(self.prune.call_args[0][1], "unique-names/voices-gacrux-ref-v3.wav")
+        self.prune.side_effect = OSError("locked")
+        self.supa.voices[0]["version"] = 4
+        self.run_voice_006(make_reel())                                       # tidying never fails the voice
+        self.assertTrue(any("could not tidy ComfyUI" in m for m in self.logs))
+        self.assertIn("voice_path", self.supa.of("reels")[-1][2])
 
     def test_missing_reference_file_fails_with_a_clear_message(self):
         self.voices_db()
@@ -318,6 +330,14 @@ class ReelRunnerTest(unittest.TestCase):
             raise JobError("ComfyUI stopped answering while making the music. Is it still open?")
         self.run_music(self.music_reel(), boom=boom)
         self.assertEqual(self.supa.of("reels")[-1][2], {"claimed_at": None})   # no '': it runs again later
+
+    def test_no_internet_for_the_bed_upload_retries_later(self):
+        reel = self.music_reel()
+        self.supa.upload = mock.Mock(side_effect=SupaError("POST x -> network error: reset"))
+        self.run_music(reel)
+        self.assertEqual(self.supa.upload.call_count, 5)                      # retried first
+        self.assertEqual(self.supa.of("reels")[-1][2], {"claimed_at": None})   # released, not ''
+        self.assertFalse([u for u in self.supa.of("reels") if "music_path" in u[2]])
 
     def test_stale_music_is_dropped(self):
         self.supa.stale.add("reels")
@@ -409,6 +429,20 @@ class ReelRunnerTest(unittest.TestCase):
         self.rr.run_step({"step": "timing", "reel": make_reel(voice_path="gone.wav"), "scene": None})
         v = self.supa.of("reels")[-1][2]
         self.assertEqual((v["status"], v["voice_path"]), ("failed", None))
+        self.assertNotIn("music_path", v)                                     # a pre-006 reel: no such column
+
+    def test_redoing_the_voice_also_clears_its_music(self):
+        reel = make_reel(voice_path="%s/voice-v3.wav" % RID, music_path="%s/music-v3.flac" % RID)
+        self.supa.uploads[reel["voice_path"]] = ("reels", wav(1.0), "audio/wav")
+        with mock.patch.object(reels.timing, "transcribe", return_value=[]):
+            self.rr.run_step({"step": "timing", "reel": reel, "scene": None})
+        v = self.supa.of("reels")[-1][2]
+        self.assertEqual((v["status"], v["voice_path"], v["music_path"]), ("failed", None, None))
+        self.assertEqual(self.supa.removed, [reel["voice_path"], reel["music_path"]])
+        self.supa.removed.clear()
+        self.rr.run_step({"step": "timing", "reel": make_reel(voice_path="gone.wav", music_path=""), "scene": None})
+        self.assertIsNone(self.supa.of("reels")[-1][2]["music_path"])             # '' (failed bed) -> made again
+        self.assertEqual(self.supa.removed, ["gone.wav"])
 
     # ------------------------------------------------------------ image
     def test_image_renders_fits_uploads_and_finishes(self):
@@ -595,6 +629,23 @@ class RunnerReelTickTest(unittest.TestCase):
         self.assertEqual(len([a for a in self.supa.rpc_args if a and "p_music" in a]), 1)   # re-checked later
         self.assertEqual(len([m for m in self.logs if "006_reel_voices" in m]), 1)
         self.assertNotIn("005_reels", " ".join(self.logs))
+        self.run_.music_off_until = 0                                         # 10 minutes later: still missing
+        self.assertFalse(self.run_.tick())
+        self.assertEqual(len([m for m in self.logs if "006_reel_voices" in m]), 1)   # logged once per switch
+        self.run_.music_off_until = 0                                         # the owner ran 006
+        self.supa.music_rpc_error = None
+        self.assertFalse(self.run_.tick())
+        self.assertEqual(self.supa.rpc_args[-2], {"p_no_comfy": False, "p_music": True})
+        self.assertEqual(len([m for m in self.logs if "are on (006 found)" in m]), 1)
+        self.assertFalse(self.run_.tick())
+        self.assertEqual(len([m for m in self.logs if "are on (006 found)" in m]), 1)
+
+    def test_a_404_that_is_not_a_missing_function_is_not_a_fallback(self):
+        self.supa.music_rpc_error = SupaError("POST /rest/v1/rpc/claim_next_reel_step -> HTTP 404 page not found")
+        self.assertFalse(self.run_.tick())                                   # 005's handling, not a music switch
+        self.assertEqual(self.run_.music_off_until, 0.0)
+        self.assertEqual(len([a for a in self.supa.rpc_args if a and "p_music" in a]), 1)   # no 2nd call without music
+        self.assertFalse([m for m in self.logs if "006_reel_voices" in m])
 
     def test_voice_sample_runs_when_no_reel_step(self):
         job = {"voice": {"id": "kore", "version": 2}}

@@ -178,6 +178,25 @@ class VoiceHelpersTest(unittest.TestCase):
         tts = voice.chatterbox_graph("Hi.", 1)["1"]["inputs"]
         self.assertEqual((tts["exaggeration"], tts["temperature"], tts["cfg_weight"]), (0.35, 0.7, 0.5))
 
+    def test_older_reference_versions_leave_comfyui_input(self):
+        d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, d, True)
+        sub = os.path.join(d, "unique-names")
+        os.makedirs(sub)
+        names = ["voices-kore-ref-v1.wav", "voices-kore-ref-v2.wav", "voices-kore-ref-v3.wav",
+                 "voices-korean-ref-v1.wav", "voices-gacrux-ref-v1.wav", "reel-voice.wav", "voices-kore-ref-v1.mp3"]
+        for n in names:
+            open(os.path.join(sub, n), "wb").close()
+        self.assertEqual(voice.prune_inputs("http://x", "unique-names/voices-kore-ref-v3.wav", input_dir=d), 2)
+        self.assertEqual(sorted(os.listdir(sub)), sorted(names[2:]))
+        self.assertEqual(voice.prune_inputs("http://x", "unique-names/odd.wav", input_dir=d), 0)
+        argv = {"system": {"argv": ["ComfyUI\\main.py", "--input-directory", d, "--output-directory", "o"]}}
+        with mock.patch("render.http_json", return_value=argv):
+            self.assertEqual(voice.comfy_input_dir("http://x"), d)
+        with mock.patch("render.http_json", return_value={"system": {"argv": ["main.py"]}}):
+            self.assertIsNone(voice.comfy_input_dir("http://x"))
+            self.assertEqual(voice.prune_inputs("http://x", "unique-names/voices-kore-ref-v9.wav"), 0)
+
     def test_input_names_are_safe(self):
         self.assertEqual(voice.input_name("voices/gacrux/ref.wav", 3), "voices-gacrux-ref-v3.wav")
         self.assertEqual(voice.input_name("voice/ref.mp3", 0), "voice-ref-v0.mp3")
