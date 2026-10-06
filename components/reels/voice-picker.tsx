@@ -22,7 +22,8 @@ export function VoicePicker({ reelId, value, defaultId, voices, disabled }: {
   const [chosen, setChosen] = useState<string | null>(value);
   const [saving, setSaving] = useState(false);
   const current = chosen ?? defaultId;
-  const list = voices.filter((v) => isSetUp(v) && (v.sample_status === "ready" || v.id === current));
+  // Ready voices, plus the current one and the default whatever their state, so the Select is never blank.
+  const list = voices.filter((v) => (isSetUp(v) && v.sample_status === "ready") || v.id === current || v.id === defaultId);
   const currentRow = voices.find((v) => v.id === current);
   const signed = useSignedUrls([currentRow?.sample_status === "ready" ? currentRow.sample_path : null], "reels");
   const { playing, toggle } = useSamplePlayer();
@@ -60,9 +61,9 @@ export function VoicePicker({ reelId, value, defaultId, voices, disabled }: {
           </SelectTrigger>
           <SelectContent position="popper" collisionPadding={{ top: 8, bottom: 80 }} className="max-h-[min(22rem,var(--radix-select-content-available-height))]">
             {list.map((v) => (
-              <SelectItem key={v.id} value={v.id} className="min-h-11">
+              <SelectItem key={v.id} value={v.id} disabled={!isSetUp(v)} className="min-h-11">
                 <span className="font-semibold">{v.label}</span>
-                <span className="text-muted">· {toneOf(v)}{v.id === defaultId ? " · default" : ""}</span>
+                <span className="text-muted">· {toneOf(v)}{v.id === defaultId ? " · default" : ""}{isSetUp(v) ? "" : " (not set up)"}</span>
               </SelectItem>
             ))}
           </SelectContent>

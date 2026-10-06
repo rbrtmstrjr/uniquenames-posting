@@ -117,6 +117,13 @@ describe("setUpVoicesAction", () => {
     expect(updates("reel_voices").filter((q) => eqOf(q, "id") === "builtin")).toHaveLength(1);
   });
 
+  it("a failed built-in queue is reported in lastError", async () => {
+    world({ voices: [voice("builtin")] });
+    const inner = respond;
+    respond = (q) => (q.table === "reel_voices" && q.ops.some((o) => o[0] === "update") ? { error: { message: "permission denied" } } : inner(q));
+    expect(await A.setUpVoicesAction()).toMatchObject({ ok: true, made: 0, remaining: 0, lastError: "Built-in: permission denied" });
+  });
+
   it("a clip uploaded by an earlier run that stopped (already exists) still gets its ref_path", async () => {
     world({ voices: [voice("kore")], uploadError: { message: "The resource already exists", statusCode: "409" } });
     expect(await A.setUpVoicesAction()).toMatchObject({ ok: true, made: 1, remaining: 0, failed: 0 });

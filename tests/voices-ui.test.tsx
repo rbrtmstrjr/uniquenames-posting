@@ -88,6 +88,17 @@ describe("NarratorMusic (Settings)", () => {
     expect(screen.getByRole("button", { name: "Play Kore sample" })).toBeTruthy();
   });
 
+  it("an interrupted play() (AbortError) is not an error; a real failure is", async () => {
+    render(<NarratorMusic voices={[readyVoice("gacrux")]} value={value} savedSpeed={1.12} onChange={() => {}} />);
+    play.mockImplementationOnce(() => Promise.reject(Object.assign(new Error("interrupted"), { name: "AbortError" })));
+    fireEvent.click(screen.getByRole("button", { name: "Play Gacrux sample" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Play Gacrux sample" })).toBeTruthy());
+    expect(toast.error).not.toHaveBeenCalled();
+    play.mockImplementationOnce(() => Promise.reject(Object.assign(new Error("no"), { name: "NotSupportedError" })));
+    fireEvent.click(screen.getByRole("button", { name: "Play Gacrux sample" }));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Could not play the sample."));
+  });
+
   it("speed slider shows ×; music switch turns the volume slider off", () => {
     const onChange = vi.fn();
     const { rerender } = render(<NarratorMusic voices={[readyVoice("gacrux")]} value={value} savedSpeed={1.12} onChange={onChange} />);
@@ -95,6 +106,8 @@ describe("NarratorMusic (Settings)", () => {
     expect(screen.getByTestId("volume-value").textContent).toBe("18 %");
     const sliders = screen.getAllByRole("slider");
     expect(sliders.map((s) => [s.getAttribute("aria-valuemin"), s.getAttribute("aria-valuemax")])).toEqual([["1", "1.25"], ["5", "40"]]);
+    expect(screen.getByRole("slider", { name: "Narration speed" })).toBe(sliders[0]);
+    expect(screen.getByRole("slider", { name: "Music volume" })).toBe(sliders[1]);
     fireEvent.keyDown(sliders[0], { key: "ArrowRight" });
     expect(onChange).toHaveBeenCalledWith({ reel_speed: 1.13 });
     fireEvent.click(screen.getByRole("switch", { name: /Background music/ }));
@@ -206,6 +219,16 @@ describe("VoicePicker (review page)", () => {
     expect(screen.getByRole("combobox", { name: "Narrator" }).textContent).toMatch(/Kore/);
   });
 
+  it("the current and default voices are always listed (never a blank Select), not-set-up ones marked and disabled", async () => {
+    render(<VoicePicker reelId={RID} value="puck" defaultId="gacrux" voices={[readyVoice("kore"), voice("gacrux", { ref_path: null }), voice("puck")]} />);
+    const trigger = screen.getByRole("combobox", { name: "Narrator" });
+    expect(trigger.textContent).toMatch(/Puck/);
+    fireEvent.click(trigger);
+    const options = await screen.findAllByRole("option");
+    expect(options.map((o) => o.textContent)).toEqual([expect.stringMatching(/^Kore/), expect.stringMatching(/^Gacrux.*default.*\(not set up\)/), expect.stringMatching(/^Puck/)]);
+    expect(options[1].getAttribute("aria-disabled")).toBe("true");
+  });
+
   it("no samples yet: says the default and links to Settings", () => {
     render(<VoicePicker reelId={RID} value={null} defaultId="gacrux" voices={[voice("gacrux"), voice("builtin")]} />);
     expect(screen.queryByRole("combobox")).toBeNull();
@@ -236,9 +259,12 @@ describe("review page length + status label", () => {
     expect(screen.queryByTestId("narrator")).toBeNull();
   });
 
-  it("voicing with words = the music bed is being made", () => {
+  it("voicing with words = the music bed is being made, only while music is on and not made yet", () => {
     const w = [{ word: "a", start: 0, end: 1 }];
-    expect(reelProgress(reel({ status: "voicing", voice_path: "v", words: w }), []).label).toBe("Music…");
+    expect(reelProgress(reel({ status: "voicing", voice_path: "v", words: w, music_path: null }), [], true).label).toBe("Music…");
+    expect(reelProgress(reel({ status: "voicing", voice_path: "v", words: w, music_path: null }), [], false).label).toBe("Timing captions…");
+    expect(reelProgress(reel({ status: "voicing", voice_path: "v", words: w, music_path: "" }), [], true).label).toBe("Timing captions…");
+    expect(reelProgress(reel({ status: "voicing", voice_path: "v", words: w }), [], true).label).toBe("Timing captions…"); // before 006
     expect(reelProgress(reel({ status: "voicing", voice_path: "v" }), []).label).toBe("Timing captions…");
     expect(reelProgress(reel({ status: "voicing" }), []).label).toBe("Voice…");
   });

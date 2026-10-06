@@ -13,7 +13,7 @@ export const IMAGE_TRIES = 3;
 
 export type Tone = "ok" | "warn" | "bad" | "muted" | "accent";
 type SceneLike = Pick<ReelSceneRow, "status">;
-type ReelLike = Pick<ReelRow, "status" | "voice_path" | "words">;
+type ReelLike = Pick<ReelRow, "status" | "voice_path" | "words"> & Pick<Partial<ReelRow>, "music_path">;
 
 /** The PC is working on (or waiting to work on) the reel. */
 export const WORKING: ReelStatus[] = ["queued", "voicing", "imaging", "rendering"];
@@ -54,15 +54,21 @@ function percent(reel: ReelLike, scenes: SceneLike[]): number {
   return Math.min(99, Math.round(pct));
 }
 
-/** The reel's one-line status for badges and the progress header. */
-export function reelProgress(reel: ReelLike, scenes: SceneLike[]): { label: string; pct: number; tone: Tone } {
+/**
+ * The reel's one-line status for badges and the progress header. `music`: settings.reel_music is on
+ * (migration 006), so a timed reel still voicing is making its music bed (until music_path is set).
+ */
+export function reelProgress(reel: ReelLike, scenes: SceneLike[], music = false): { label: string; pct: number; tone: Tone } {
   const pct = percent(reel, scenes);
   const { total, finished } = imageCounts(scenes);
   switch (reel.status) {
     case "script": return { label: "Script ready", pct, tone: "accent" };
     case "queued": return { label: "Waiting for your PC", pct, tone: "muted" };
     // The music bed (migration 006) is made under 'voicing', after the timing.
-    case "voicing": return { label: reel.words ? "Music…" : reel.voice_path ? "Timing captions…" : "Voice…", pct, tone: "accent" };
+    case "voicing": {
+      const bed = music && !!reel.words && reel.music_path === null;
+      return { label: bed ? "Music…" : reel.voice_path ? "Timing captions…" : "Voice…", pct, tone: "accent" };
+    }
     case "imaging": return { label: `Images ${finished}/${total}`, pct, tone: "accent" };
     case "rendering": return { label: "Making video…", pct, tone: "accent" };
     case "ready": return { label: "Ready", pct, tone: "ok" };

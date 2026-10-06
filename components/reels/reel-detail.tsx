@@ -13,7 +13,7 @@ import { ReelProgress } from "./reel-progress";
 const byPosition = (a: ReelSceneRow, b: ReelSceneRow) => a.position - b.position;
 
 /** /reels/[id]: the reel and its images stay live; `script` shows the review, anything later the progress. */
-export function ReelDetail({ reel: initialReel, scenes: initialScenes, narrator = null }: { reel: ReelRow; scenes: ReelSceneRow[]; narrator?: Narrator | null }) {
+export function ReelDetail({ reel: initialReel, scenes: initialScenes, narrator = null, music = false }: { reel: ReelRow; scenes: ReelSceneRow[]; narrator?: Narrator | null; music?: boolean }) {
   const id = initialReel.id;
   const reelSeed = useMemo(() => [initialReel], [initialReel]);
   const refetchReel = useCallback(async () => {
@@ -41,7 +41,7 @@ export function ReelDetail({ reel: initialReel, scenes: initialScenes, narrator 
       {reel.status === "script"
         ? <ScriptReview reel={reel} scenes={scenes} narrator={narrator}
             onApproved={() => { patchReel({ status: "queued" }); setScenes((prev) => prev.map((s) => (s.status === "pending" ? { ...s, status: "queued" } : s))); }} />
-        : <ReelProgress reel={reel} scenes={scenes} onPatchReel={patchReel} onPatchScene={patchScene} />}
+        : <ReelProgress reel={reel} scenes={scenes} music={music} onPatchReel={patchReel} onPatchScene={patchScene} />}
     </div>
   );
 }

@@ -13,6 +13,13 @@ export async function getVoices(sb?: Awaited<ReturnType<typeof createClient>>): 
   return [...((data ?? []) as ReelVoiceRow[])].sort(byVoiceOrder);
 }
 
+/** Settings → Background music is on (false before migration 006: no music step then). */
+export async function musicOn(): Promise<boolean> {
+  const sb = await createClient();
+  const { data } = await sb.from("settings").select("*").eq("id", 1).maybeSingle();
+  return (data as SettingsRow | null)?.reel_music === true;
+}
+
 /** The voices, the Settings default narrator and the narration speed; null before migration 006. */
 export async function getNarrator(): Promise<Narrator | null> {
   const sb = await createClient();

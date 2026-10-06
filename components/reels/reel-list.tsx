@@ -22,8 +22,8 @@ export function ReelsSetup() {
 export const newReelLink = "inline-flex min-h-11 items-center gap-2 rounded-xl bg-accent px-4 text-sm font-bold text-accent-ink shadow-soft transition hover:opacity-90 active:scale-[.98]";
 
 /** Status badge for a reel (pulses while the PC works on it). */
-export function ReelBadge({ reel, scenes }: { reel: Pick<ReelRow, "status" | "voice_path" | "words">; scenes: { status: ReelListScene["status"] }[] }) {
-  const p = reelProgress(reel, scenes);
+export function ReelBadge({ reel, scenes, music = false }: { reel: Pick<ReelRow, "status" | "voice_path" | "words" | "music_path">; scenes: { status: ReelListScene["status"] }[]; music?: boolean }) {
+  const p = reelProgress(reel, scenes, music);
   return <Badge tone={p.tone} pulse={reel.status !== "queued" && isWorking(reel.status)}>{p.label}</Badge>;
 }
 
@@ -82,7 +82,7 @@ function useLiveReels(initial: ReelListItem[]) {
 
 const dateText = (iso: string) => new Date(iso).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
 
-export function ReelList({ reels: initial }: { reels: ReelListItem[] }) {
+export function ReelList({ reels: initial, music = false }: { reels: ReelListItem[]; music?: boolean }) {
   const reels = useLiveReels(initial);
   const thumbs = reels.map((r) => r.scenes.find((s) => s.status === "done" && s.photo_path)?.photo_path ?? null);
   const urlFor = useSignedUrls(thumbs, "reels");
@@ -95,7 +95,7 @@ export function ReelList({ reels: initial }: { reels: ReelListItem[] }) {
   return (
     <ul className="grid gap-3 md:grid-cols-2 2xl:grid-cols-3">
       {reels.map((r, i) => {
-        const p = reelProgress(r, r.scenes);
+        const p = reelProgress(r, r.scenes, music);
         const { total } = imageCounts(r.scenes);
         const working = isWorking(r.status);
         return (
@@ -116,7 +116,7 @@ export function ReelList({ reels: initial }: { reels: ReelListItem[] }) {
                   </div>
                 </div>
                 <div className="mt-auto flex items-center gap-2 pt-2">
-                  <ReelBadge reel={r} scenes={r.scenes} />
+                  <ReelBadge reel={r} scenes={r.scenes} music={music} />
                   {working && (
                     <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-surface-2" aria-hidden>
                       <div className="h-full rounded-full bg-accent transition-[width] duration-500" style={{ width: `${p.pct}%` }} />

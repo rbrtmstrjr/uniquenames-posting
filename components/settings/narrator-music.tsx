@@ -90,10 +90,10 @@ function NarratorMusicReady({ initial, value, savedSpeed, onChange }: {
       <div className="grid gap-4 sm:grid-cols-2">
         <div>
           <div className="flex items-baseline justify-between gap-2">
-            <span id="speed-label" className="text-xs font-semibold text-muted">Narration speed</span>
+            <span aria-hidden className="text-xs font-semibold text-muted">Narration speed</span>
             <span className="text-sm font-bold tabular-nums text-ink" data-testid="speed-value">{speedLabel(value.reel_speed)}</span>
           </div>
-          <Slider aria-labelledby="speed-label" min={SPEED_MIN} max={SPEED_MAX} step={SPEED_STEP} value={[value.reel_speed]}
+          <Slider aria-label="Narration speed" min={SPEED_MIN} max={SPEED_MAX} step={SPEED_STEP} value={[value.reel_speed]}
             onValueChange={([v]) => onChange({ reel_speed: roundSpeed(v) })} className="mt-1" />
           <p className="mt-1.5 text-xs text-muted">Faster keeps the pitch. Scripts get a few more words so a reel stays 1:30–2:00.</p>
         </div>

@@ -66,9 +66,11 @@ export async function setUpVoicesAction(): Promise<ActionResult<{ made: number; 
   const skipped = voices.filter((v) => v.id !== BUILTIN).length - todo.length;
   // The built-in voice needs no clip: its sample goes in line the first time.
   const builtin = voices.find((v) => v.id === BUILTIN && v.sample_status === "missing");
-  if (builtin) await queueSample(sb, builtin);
-
   let made = 0, failed = 0, lastError: string | undefined;
+  if (builtin) {
+    const { error: be } = await queueSample(sb, builtin);
+    if (be) lastError = `${builtin.label}: ${be.message}`;
+  }
   const queue = [...todo];
   const one = async (v: ReelVoiceRow): Promise<void> => {
     const left = deadline - Date.now();

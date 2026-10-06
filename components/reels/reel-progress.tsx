@@ -47,8 +47,8 @@ const fileName = (title: string) => `${title.replace(/[\\/:*?"<>|]+/g, "").repla
  * A reel after approval: status + step strip + overall bar, banners (needs attention / stopped),
  * the 9:16 preview player when ready, and the grid of images (tap one → New picture / Skip).
  */
-export function ReelProgress({ reel, scenes, onPatchScene, onPatchReel }: {
-  reel: ReelRow; scenes: ReelSceneRow[];
+export function ReelProgress({ reel, scenes, onPatchScene, onPatchReel, music = false }: {
+  reel: ReelRow; scenes: ReelSceneRow[]; music?: boolean;
   onPatchScene?: (id: string, patch: Partial<ReelSceneRow>) => void; onPatchReel?: (patch: Partial<ReelRow>) => void;
 }) {
   const router = useRouter();
@@ -59,7 +59,7 @@ export function ReelProgress({ reel, scenes, onPatchScene, onPatchReel }: {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const urlFor = useSignedUrls([...scenes.map((s) => s.photo_path), reel.preview_path], "reels");
 
-  const progress = reelProgress(reel, scenes);
+  const progress = reelProgress(reel, scenes, music);
   const steps = reelSteps(reel, scenes);
   const counts = imageCounts(scenes);
   const working = isWorking(reel.status);

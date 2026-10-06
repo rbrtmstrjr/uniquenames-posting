@@ -24,7 +24,11 @@ export function useSamplePlayer() {
     if (!url) return;
     setPlaying(id);
     const p = start(a, url, () => setPlaying((cur) => (cur === id ? null : cur)));
-    if (p && typeof p.catch === "function") p.catch(() => { setPlaying((cur) => (cur === id ? null : cur)); toast.error("Could not play the sample."); });
+    if (p && typeof p.catch === "function") p.catch((e: unknown) => {
+      setPlaying((cur) => (cur === id ? null : cur));
+      // Another sample (or Stop) interrupted this one: not an error.
+      if ((e as { name?: string } | null)?.name !== "AbortError") toast.error("Could not play the sample.");
+    });
   }, [playing]);
   return { playing, toggle };
 }
