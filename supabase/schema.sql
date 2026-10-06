@@ -1,8 +1,38 @@
 -- Unique Names posting: database. Paste the whole file into the Supabase SQL editor and run it once.
--- A project created before v2 runs supabase/migrations/002_v2.sql, 003_post_fonts.sql, 004_subject_age.sql then 005_reels.sql instead (this file already includes them).
+-- A project created before v2 runs supabase/migrations/002_v2.sql, 003_post_fonts.sql, 004_subject_age.sql, 005_reels.sql then 006_reel_voices.sql instead (this file already includes them).
 -- Status 'pending' = an AI-suggested name/theme waiting for approval; nothing here ever plans it (only 'available').
 
 -- ---------------------------------------------------------------- tables
+-- reels (006): narrator voices (30 Gemini voices cloned by Chatterbox + the built-in one); before settings, which references them
+create table if not exists public.reel_voices (
+  id text primary key,               -- the Gemini voice name in lower case, or 'builtin'
+  label text not null,
+  tone text not null default '',     -- Gemini's descriptor ("Warm", "Firm", ...)
+  gender text check (gender in ('female', 'male')),
+  ref_path text,                     -- voices/<id>/ref.wav (null for builtin, or until Set up voices made it)
+  sample_path text,                  -- voices/<id>/sample-v<version>.wav
+  sample_status text not null default 'missing' check (sample_status in ('missing', 'queued', 'making', 'ready', 'failed')),
+  sample_key text,                   -- the calm/speed settings the sample was made with (stale when they change)
+  error text,
+  version int not null default 1,
+  claimed_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+insert into public.reel_voices (id, label, tone) values
+  ('zephyr', 'Zephyr', 'Bright'), ('puck', 'Puck', 'Upbeat'), ('charon', 'Charon', 'Informative'),
+  ('kore', 'Kore', 'Firm'), ('fenrir', 'Fenrir', 'Excitable'), ('leda', 'Leda', 'Youthful'),
+  ('orus', 'Orus', 'Firm'), ('aoede', 'Aoede', 'Breezy'), ('callirrhoe', 'Callirrhoe', 'Easy-going'),
+  ('autonoe', 'Autonoe', 'Bright'), ('enceladus', 'Enceladus', 'Breathy'), ('iapetus', 'Iapetus', 'Clear'),
+  ('umbriel', 'Umbriel', 'Easy-going'), ('algieba', 'Algieba', 'Smooth'), ('despina', 'Despina', 'Smooth'),
+  ('erinome', 'Erinome', 'Clear'), ('algenib', 'Algenib', 'Gravelly'), ('rasalgethi', 'Rasalgethi', 'Informative'),
+  ('laomedeia', 'Laomedeia', 'Upbeat'), ('achernar', 'Achernar', 'Soft'), ('alnilam', 'Alnilam', 'Firm'),
+  ('schedar', 'Schedar', 'Even'), ('gacrux', 'Gacrux', 'Mature'), ('pulcherrima', 'Pulcherrima', 'Forward'),
+  ('achird', 'Achird', 'Friendly'), ('zubenelgenubi', 'Zubenelgenubi', 'Casual'), ('vindemiatrix', 'Vindemiatrix', 'Gentle'),
+  ('sadachbia', 'Sadachbia', 'Lively'), ('sadaltager', 'Sadaltager', 'Knowledgeable'), ('sulafat', 'Sulafat', 'Warm'),
+  ('builtin', 'Built-in', 'Default')
+on conflict (id) do nothing;
+
 create table if not exists public.settings (
   id int primary key default 1 check (id = 1),
   caption_template text not null default 'Here are some beautiful names you can give to your baby {gender}. 🥰',
@@ -27,6 +57,11 @@ create table if not exists public.settings (
   -- reels (005): max images per reel; a 5-10 s reference clip in the reels bucket (null = Chatterbox's built-in voice)
   reel_max_images int not null default 40 constraint settings_reel_max_images_check check (reel_max_images between 10 and 40),
   reel_voice_path text,
+  -- reels (006): default narrator, narration speed (atempo), background music on/off and its volume in %
+  reel_voice_id text not null default 'gacrux' references public.reel_voices (id),
+  reel_speed numeric(3,2) not null default 1.12 constraint settings_reel_speed_check check (reel_speed between 1.00 and 1.25),
+  reel_music boolean not null default true,
+  reel_music_volume int not null default 18 constraint settings_reel_music_volume_check check (reel_music_volume between 5 and 40),
   updated_at timestamptz not null default now(),
   check (min_images <= max_images)
 );
@@ -129,6 +164,9 @@ create table if not exists public.reels (
   words jsonb,
   preview_path text,
   pc_path text,
+  -- 006: the narrator (null = settings.reel_voice_id); music: null = not made yet, '' = the music step failed (voice only)
+  voice_id text references public.reel_voices (id) on delete set null,
+  music_path text,
   duration_s numeric,
   version int not null default 1,
   claimed_at timestamptz, started_at timestamptz, finished_at timestamptz,
@@ -165,7 +203,7 @@ create or replace function public.touch_updated_at() returns trigger language pl
 begin new.updated_at := now(); return new; end $$;
 
 do $$ declare t text; begin
-  foreach t in array array['settings', 'worker_status', 'themes', 'posts', 'names', 'cards', 'reels', 'reel_scenes'] loop
+  foreach t in array array['settings', 'worker_status', 'themes', 'posts', 'names', 'cards', 'reels', 'reel_scenes', 'reel_voices'] loop
     execute format('drop trigger if exists touch on public.%I', t);
     execute format('create trigger touch before update on public.%I for each row execute function public.touch_updated_at()', t);
   end loop;
@@ -351,20 +389,53 @@ begin
 end $$;
 
 -- ---------------------------------------------------------------- worker: reel claim + stuck recovery
--- The next unit of reel work: {step: voice|timing|image|render, reel, scene (image only, else null)}, or null.
+-- The next step of one reel: {step, scene_id} or null when it can't move on right now. Shared by
+-- claim_next_reel_step (which claims it) and claim_next_voice_sample (samples only run when no reel step can).
+create or replace function public.reel_next_step(p_reel public.reels, p_no_comfy boolean) returns jsonb language plpgsql stable as $$
+declare v_id uuid; v_open int; v_done int; v_music boolean;
+begin
+  if p_reel.voice_path is null then
+    if not p_no_comfy then return jsonb_build_object('step', 'voice', 'scene_id', null); end if;
+    return null;
+  end if;
+  if p_reel.words is null then return jsonb_build_object('step', 'timing', 'scene_id', null); end if;
+  select coalesce(reel_music, true) into v_music from public.settings where id = 1;
+  if coalesce(v_music, true) and p_reel.music_path is null and p_reel.preview_path is null then
+    if not p_no_comfy then return jsonb_build_object('step', 'music', 'scene_id', null); end if;
+    return null;  -- wait for ComfyUI: never render without the bed when music is on
+  end if;
+  if not p_no_comfy then
+    select id into v_id from public.reel_scenes
+      where reel_id = p_reel.id and (status = 'queued' or (status = 'failed' and attempts < 3))
+      order by position limit 1;
+    if v_id is not null then return jsonb_build_object('step', 'image', 'scene_id', v_id); end if;
+  end if;
+  select count(*) filter (where status not in ('done', 'skipped')), count(*) filter (where status = 'done')
+    into v_open, v_done from public.reel_scenes where reel_id = p_reel.id;
+  if v_open = 0 and v_done > 0 and p_reel.preview_path is null then return jsonb_build_object('step', 'render', 'scene_id', null); end if;
+  return null;
+end $$;
+
+-- The next unit of reel work: {step: voice|timing|music|image|render, reel, scene (image only, else null)}, or null.
 -- Nothing while a card is waiting or being made (a card claim younger than requeue_stuck_cards' 5 minutes).
 -- Oldest reel first; a reel whose next step can't run (a scene failed 3 times, scenes still pending,
 -- every image skipped) is passed over. Render only runs when at least one scene is done.
+-- Music (006): after timing, before the images, while settings.reel_music is on and reels.music_path is null.
+-- It runs under the existing 'voicing' status (no new status: the app shows it as part of the audio).
 -- WORKER CONTRACT:
 --   * after each step, save its result version-guarded AND clear reels.claimed_at (and the scene's claimed_at);
 --     until then the reel is not claimable again.
---   * during long sub-steps (Chatterbox chunks, ffmpeg passes) re-touch reels.claimed_at = now() as a heartbeat:
---     requeue_stuck_reels() releases any claim older than 10 minutes.
+--   * during long sub-steps (Chatterbox chunks, ACE-Step, ffmpeg passes) re-touch reels.claimed_at = now() as a
+--     heartbeat: requeue_stuck_reels() releases any claim older than 10 minutes.
 --   * on an image's 3rd failure set the reel needs_attention; after render set it ready.
--- p_no_comfy: ComfyUI is closed on the PC, so only the steps that don't need it (timing, render) are handed out.
-drop function if exists public.claim_next_reel_step();  -- the first draft had no argument: keep one signature
+--   * music: on success music_path = '<reelId>/music-v<version>.flac'; on failure music_path = '' (not retried, the
+--     reel is NOT failed) and the render uses the voice only. The render mixes music only when settings.reel_music
+--     is on AND music_path is non-empty. Whoever clears voice_path (a new voice) clears music_path too.
+-- p_no_comfy: ComfyUI is closed on the PC, so only the steps that don't need it (timing, render) are handed out;
+-- a reel waiting for its music waits for ComfyUI.
+drop function if exists public.claim_next_reel_step();  -- the first 005 draft had no argument: keep one signature
 create or replace function public.claim_next_reel_step(p_no_comfy boolean default false) returns jsonb language plpgsql as $$
-declare v_reel public.reels%rowtype; v_scene jsonb; v_step text; v_open int; v_done int; v_id uuid;
+declare v_reel public.reels%rowtype; v_next jsonb; v_scene jsonb; v_step text; v_id uuid;
 begin
   perform 1 from public.cards
     where status in ('queued', 'generating', 'restamp')
@@ -378,27 +449,11 @@ begin
     order by created_at, id
     for update skip locked
   loop
-    v_step := null; v_scene := null; v_id := null;
-    if v_reel.voice_path is null then
-      if not p_no_comfy then v_step := 'voice'; end if;
-    elsif v_reel.words is null then
-      v_step := 'timing';
-    else
-      if not p_no_comfy then
-        select id into v_id from public.reel_scenes
-          where reel_id = v_reel.id and (status = 'queued' or (status = 'failed' and attempts < 3))
-          order by position limit 1
-          for update skip locked;
-      end if;
-      if v_id is not null then
-        v_step := 'image';
-      else
-        select count(*) filter (where status not in ('done', 'skipped')), count(*) filter (where status = 'done')
-          into v_open, v_done from public.reel_scenes where reel_id = v_reel.id;
-        if v_open = 0 and v_done > 0 and v_reel.preview_path is null then v_step := 'render'; end if;
-      end if;
-    end if;
-    continue when v_step is null;
+    v_next := public.reel_next_step(v_reel, p_no_comfy);
+    continue when v_next is null;
+    v_step := v_next ->> 'step';
+    v_id := (v_next ->> 'scene_id')::uuid;
+    v_scene := null;
 
     update public.reels set
       claimed_at = now(), started_at = coalesce(started_at, now()), error = null,
@@ -415,11 +470,51 @@ begin
   return null;
 end $$;
 
+-- The next voice sample to make: {voice: reel_voices row} or null. Only when the GPU has nothing better to do:
+-- no card waiting or being made, no reel step in progress (claim younger than 10 minutes) and no reel step
+-- runnable (with ComfyUI). Oldest queued voice that has a reference clip (or the built-in voice) -> 'making'.
+-- Call it only while ComfyUI is up (Chatterbox needs it).
+-- WORKER CONTRACT: write voices/<id>/sample-v<version>.wav, then save sample_path, sample_key, sample_status 'ready',
+-- claimed_at null WHERE id and version match the claimed row (the app bumps version when it re-queues a sample; a
+-- mismatch means the work is stale: discard it). On failure: sample_status 'failed', error, claimed_at null.
+-- requeue_stuck_reels() puts a 'making' sample claimed more than 10 minutes ago back in the queue.
+create or replace function public.claim_next_voice_sample() returns jsonb language plpgsql as $$
+declare v_voice public.reel_voices%rowtype; v_reel public.reels%rowtype;
+begin
+  perform 1 from public.cards
+    where status in ('queued', 'generating', 'restamp')
+      and (claimed_at is null or claimed_at >= now() - interval '5 minutes')
+    limit 1;
+  if found then return null; end if;
+
+  perform 1 from public.reels
+    where status in ('queued', 'voicing', 'imaging', 'rendering') and claimed_at >= now() - interval '10 minutes'
+    limit 1;
+  if found then return null; end if;
+  for v_reel in
+    select * from public.reels where claimed_at is null and status in ('queued', 'voicing', 'imaging', 'rendering')
+  loop
+    if public.reel_next_step(v_reel, false) is not null then return null; end if;
+  end loop;
+
+  select * into v_voice from public.reel_voices
+    where sample_status = 'queued' and (ref_path is not null or id = 'builtin')
+    order by updated_at, id
+    limit 1
+    for update skip locked;
+  if not found then return null; end if;
+  update public.reel_voices set sample_status = 'making', claimed_at = now(), error = null
+  where id = v_voice.id
+  returning * into v_voice;
+  return jsonb_build_object('voice', to_jsonb(v_voice));
+end $$;
+
 -- Releases reel and scene claims older than 10 minutes (the PC was switched off mid-step); the worker then
 -- resumes at the first unfinished step. A scene stuck on its 3rd try fails and its reel needs attention.
--- Also settles unclaimed reels that can't progress (needs_attention / failed). Returns the rows changed.
+-- Also settles unclaimed reels that can't progress (needs_attention / failed) and puts voice samples stuck in
+-- 'making' for 10 minutes back in the queue. Returns the rows changed.
 create or replace function public.requeue_stuck_reels() returns int language plpgsql as $$
-declare v_scenes int; v_reels int; v_flagged int; v_empty int;
+declare v_scenes int; v_reels int; v_flagged int; v_empty int; v_samples int;
   v_gave_up constant text := 'Gave up after 3 tries: the PC stopped responding in the middle of this image.';
 begin
   with stuck as (
@@ -462,7 +557,11 @@ begin
     and r.words is not null and r.preview_path is null
     and not exists (select 1 from public.reel_scenes s where s.reel_id = r.id and s.status <> 'skipped');
   get diagnostics v_empty = row_count;
-  return v_scenes + v_reels + v_flagged + v_empty;
+
+  update public.reel_voices set sample_status = 'queued', claimed_at = null
+  where sample_status = 'making' and claimed_at < now() - interval '10 minutes';
+  get diagnostics v_samples = row_count;
+  return v_scenes + v_reels + v_flagged + v_empty + v_samples;
 end $$;
 
 -- @supabase-only begin
@@ -475,9 +574,10 @@ alter table public.names enable row level security;
 alter table public.cards enable row level security;
 alter table public.reels enable row level security;
 alter table public.reel_scenes enable row level security;
+alter table public.reel_voices enable row level security;
 
 do $$ declare t text; begin
-  foreach t in array array['settings', 'themes', 'posts', 'names', 'cards', 'reels', 'reel_scenes'] loop
+  foreach t in array array['settings', 'themes', 'posts', 'names', 'cards', 'reels', 'reel_scenes', 'reel_voices'] loop
     execute format('drop policy if exists owner_all on public.%I', t);
     execute format('create policy owner_all on public.%I for all to authenticated using (true) with check (true)', t);
   end loop;
@@ -495,9 +595,13 @@ revoke execute on function public.claim_next_card(boolean) from public, anon, au
 revoke execute on function public.requeue_stuck_cards() from public, anon, authenticated;
 grant execute on function public.claim_next_card(boolean) to service_role;
 grant execute on function public.requeue_stuck_cards() to service_role;
+revoke execute on function public.reel_next_step(public.reels, boolean) from public, anon, authenticated;
 revoke execute on function public.claim_next_reel_step(boolean) from public, anon, authenticated;
+revoke execute on function public.claim_next_voice_sample() from public, anon, authenticated;
 revoke execute on function public.requeue_stuck_reels() from public, anon, authenticated;
+grant execute on function public.reel_next_step(public.reels, boolean) to service_role;
 grant execute on function public.claim_next_reel_step(boolean) to service_role;
+grant execute on function public.claim_next_voice_sample() to service_role;
 grant execute on function public.requeue_stuck_reels() to service_role;
 revoke execute on function public.create_post(jsonb) from public, anon;
 revoke execute on function public.add_card(uuid, jsonb) from public, anon;
@@ -519,14 +623,19 @@ drop policy if exists reels_read on storage.objects;
 create policy reels_read on storage.objects for select to authenticated using (bucket_id = 'reels');
 drop policy if exists reels_delete on storage.objects;
 create policy reels_delete on storage.objects for delete to authenticated using (bucket_id = 'reels');
+-- reels (006): the owner's Set up voices action uploads voices/<id>/ref.wav with the owner's session
+drop policy if exists reels_voice_refs_insert on storage.objects;
+create policy reels_voice_refs_insert on storage.objects for insert to authenticated
+  with check (bucket_id = 'reels' and name ~ '^voices/[a-z]+/ref\.wav$');
 
 -- ---------------------------------------------------------------- realtime
 alter table public.cards replica identity full;
 alter table public.posts replica identity full;
 alter table public.reels replica identity full;
 alter table public.reel_scenes replica identity full;
+alter table public.reel_voices replica identity full;
 do $$ declare t text; begin
-  foreach t in array array['cards', 'posts', 'worker_status', 'themes', 'names', 'reels', 'reel_scenes'] loop
+  foreach t in array array['cards', 'posts', 'worker_status', 'themes', 'names', 'reels', 'reel_scenes', 'reel_voices'] loop
     begin execute format('alter publication supabase_realtime add table public.%I', t);
     exception when duplicate_object then null; end;
   end loop;

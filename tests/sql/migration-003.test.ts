@@ -12,6 +12,7 @@ const m002 = read("supabase", "migrations", "002_v2.sql");
 const m003 = read("supabase", "migrations", "003_post_fonts.sql");
 const m004 = read("supabase", "migrations", "004_subject_age.sql");
 const m005 = stripSupabase(read("supabase", "migrations", "005_reels.sql"));
+const m006 = stripSupabase(read("supabase", "migrations", "006_reel_voices.sql"));
 
 async function liveDb() {
   const db = new PGlite();
@@ -92,7 +93,7 @@ describe("003_post_fonts.sql on the live schema (v1 + 002)", () => {
   });
 });
 
-describe("fresh schema.sql matches v1 + 002 + 003 + 004 + 005", () => {
+describe("fresh schema.sql matches v1 + 002..006", () => {
   const shape = async (db: PGlite) => ({
     columns: (await db.query(`select table_name, column_name, data_type, is_nullable, column_default from information_schema.columns
       where table_schema='public' and table_name in ('posts','settings') order by table_name, column_name`)).rows,
@@ -106,6 +107,7 @@ describe("fresh schema.sql matches v1 + 002 + 003 + 004 + 005", () => {
     await migrated.exec(m003);
     await migrated.exec(m004);
     await migrated.exec(m005);
+    await migrated.exec(m006);
     const want = await shape(migrated);
     expect(want.functions).toHaveLength(2);
     expect(await shape(await freshDb())).toEqual(want);

@@ -51,8 +51,36 @@ export interface SettingsRow {
   reel_max_images?: number;
   /** Reels (migration 005): a reference voice clip in the `reels` bucket; null = Chatterbox's built-in voice. */
   reel_voice_path?: string | null;
+  /** Reels (migration 006; absent before it runs): the default narrator, a reel_voices id (default 'gacrux'). */
+  reel_voice_id?: string;
+  /** Narration speed (ffmpeg atempo) 1.00–1.25, default 1.12. numeric(3,2) in Postgres. */
+  reel_speed?: number;
+  /** Background music under the voice (default on) and its volume in % (5–40, default 18). */
+  reel_music?: boolean;
+  reel_music_volume?: number;
   updated_at: string;
 }
+export type VoiceSampleStatus = "missing" | "queued" | "making" | "ready" | "failed";
+/** A narrator voice (migration 006): 30 Gemini voices cloned by Chatterbox from a reference clip + 'builtin'. */
+export interface ReelVoiceRow {
+  /** The Gemini voice name in lower case, or 'builtin'. */
+  id: string;
+  label: string;
+  /** Gemini's descriptor ("Warm", "Firm", ...). */
+  tone: string;
+  gender: "female" | "male" | null;
+  /** `voices/<id>/ref.wav` in the reels bucket (null for builtin, or until Set up voices made it). */
+  ref_path: string | null;
+  /** `voices/<id>/sample-v<version>.wav`. */
+  sample_path: string | null;
+  sample_status: VoiceSampleStatus;
+  /** The calm/speed settings the sample was made with; differs from the current ones = stale. */
+  sample_key: string | null;
+  error: string | null;
+  version: number; claimed_at: string | null; created_at: string; updated_at: string;
+}
+/** What claim_next_voice_sample() returns to the PC (null = nothing to do). */
+export interface VoiceSampleClaim { voice: ReelVoiceRow }
 /** Reel lifecycle (migration 005). script = waiting for review; queued..rendering = the PC is working on it. */
 export type ReelStatus = "script" | "queued" | "voicing" | "imaging" | "rendering" | "ready" | "needs_attention" | "failed";
 export type ReelSceneStatus = "pending" | "queued" | "generating" | "done" | "failed" | "skipped";
@@ -67,6 +95,10 @@ export interface ReelRow {
   voice_path: string | null; words: ReelWord[] | null; preview_path: string | null; pc_path: string | null;
   /** numeric in Postgres; PostgREST returns it as a number. */
   duration_s: number | null;
+  /** Migration 006 (absent before it runs): the narrator (null = settings.reel_voice_id). */
+  voice_id?: string | null;
+  /** Migration 006: null = music not made yet; '' = the music step failed (voice only); else `<id>/music-v<n>.flac`. */
+  music_path?: string | null;
   version: number; claimed_at: string | null; started_at: string | null; finished_at: string | null;
   created_at: string; updated_at: string;
 }
@@ -81,7 +113,8 @@ export interface ReelSceneRow {
 }
 /** What claim_next_reel_step(p_no_comfy) returns to the PC (null = nothing to do). */
 export interface ReelStepClaim {
-  step: "voice" | "timing" | "image" | "render";
+  /** music (006) runs under the reel status 'voicing'. */
+  step: "voice" | "timing" | "music" | "image" | "render";
   reel: ReelRow;
   scene: ReelSceneRow | null;
 }
