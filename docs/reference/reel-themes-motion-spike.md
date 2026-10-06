@@ -334,7 +334,7 @@ Handmade clay stop-motion animation still: every character and object is sculpte
 ### `papercraft`
 
 ```text
-Layered paper-craft diorama: every character, object and background is cut from coloured cardstock and craft paper and built in many stacked layers with soft shadows between them, crisp clean cut edges, visible paper fibre texture and gentle folds. Characters are made of simple flat paper shapes with cut-paper hair, dot eyes and small curved paper smiles, posed with clear expressive gestures. A cozy paper room with a layered paper window and paper sunbeams. Soft warm light from above casting gentle depth shadows between the layers. Palette: warm cream, coral, mustard, teal and soft pink paper. Handmade, whimsical and tactile.
+Handmade layered paper-craft diorama, photographed up close as a real tabletop paper model: every character, object and wall is cut from thick coloured cardstock and textured craft paper, built in many stacked layers that stand apart with real depth and soft shadows between them, crisp hand-cut edges with tiny white paper cores showing, visible paper fibre texture, gentle folds and curls. Characters are cut-paper figures made of simple layered paper shapes, with cut-paper hair, small dot eyes and curved paper smiles, posed with clear expressive gestures. A cozy paper room with a layered paper window, paper curtains and paper sunbeams. Soft warm light from the side casting gentle depth shadows between the layers. Palette: warm cream, coral, mustard, teal and soft pink paper. Handmade, whimsical and tactile.
 ```
 
 ### `anime`
@@ -346,7 +346,7 @@ Soft anime illustration in a gentle slice-of-life film style: clean confident li
 ### `sketch`
 
 ```text
-Black-and-white pencil drawing made by hand on white sketchbook paper: confident graphite line work, expressive loose strokes, soft cross-hatching and smudged tonal shading, visible paper texture, the brightest highlights left as bare white paper, the drawing filling the whole page. Monochrome graphite greys only, from soft silver to deep charcoal black. Faces drawn with care and clear, readable expressions. Gentle light from the window rendered with soft shading. Intimate, artistic and timeless.
+Black-and-white grayscale pencil drawing, a colourless graphite study made by hand on white sketchbook paper: the whole picture is pure greyscale, drawn entirely in shades of pencil grey, so every garment, skin tone, hair colour and object reads only as a lighter or darker graphite grey, from soft silver to deep charcoal black, on white paper. Confident graphite line work, expressive loose strokes, soft cross-hatching and smudged tonal shading, visible paper texture, the brightest highlights left as bare white paper, the drawing filling the whole page. Faces drawn with care and clear, readable expressions. Gentle light from the window rendered with soft shading. Intimate, artistic and timeless, a classic monochrome pencil study.
 ```
 
 ### `cinematic`
