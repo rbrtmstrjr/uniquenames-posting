@@ -12,6 +12,7 @@ import tempfile
 import threading
 import time
 import traceback
+import urllib.parse
 import wave
 
 from render import JobError, fit_to_size
@@ -26,6 +27,7 @@ IMAGE_W, IMAGE_H = 1088, 1920   # Z-Image latent (multiple of 16) ...
 OUT_W, OUT_H = 1080, 1920       # ... fitted to the video frame
 IMAGE_TRIES = 3
 COMFY_CLOSED = "ComfyUI is closed. Open ComfyUI Desktop on your PC, then press Retry."
+BAD_THEME = "This theme's id can't be used for a file name (only a-z and 0-9)."
 NO_NET = "Couldn't reach the internet to save this reel. Press Retry."
 NO_RENDER = "Video step not built yet"
 STALE = "stale reel result dropped (the reel changed while it was being made)"
@@ -52,6 +54,10 @@ def is_http_4xx(e):
 def voice_seed(reel_id):
     """The same reel always gets the same delivery (Chatterbox seed)."""
     return int(str(reel_id).replace("-", "")[:8], 16)
+
+
+class ThemeUnread(Exception):
+    """The reel's theme (007) couldn't be read: the image waits instead of guessing its colours."""
 
 
 class StaleReel(Exception):
@@ -312,7 +318,14 @@ class ReelRunner:
         row = (job or {}).get("theme") or {}
         tid = str(row.get("id") or "")
         if not themes.THEME_ID.match(tid):
-            self.log("theme preview skipped: bad theme id %r" % tid)
+            self.log("theme preview failed: bad theme id %r" % tid)
+            if tid:
+                bad = "id=eq.%s&version=eq.%d" % (urllib.parse.quote(tid, safe=""), int(row.get("version") or 0))
+                try:
+                    self._retry(lambda: self.supa.update("reel_themes", bad, {
+                        "preview_status": "failed", "error": BAD_THEME, "claimed_at": None}))
+                except Exception as e:
+                    self.log("could not save the preview failure: %s" % e)
             return
         version = int(row.get("version") or 0)
         match = "id=eq.%s&version=eq.%d" % (tid, version)
@@ -348,17 +361,21 @@ class ReelRunner:
         self._tidy("themes/%s" % tid, r"preview-v\d+\.jpg$", path)
 
     def _grayscale(self, reel):
-        """True if the reel's theme (reels.theme_id -> settings.reel_theme_id -> knitted) turns pictures grey.
-        A database without 007 (or a failed lookup) keeps the picture as made."""
+        """True if the reel's theme (reels.theme_id -> settings.reel_theme_id -> knitted) turns pictures grey;
+        False on a database without 007. Raises ThemeUnread if the settings or the theme can't be read (the image
+        goes back in line without using an attempt, rather than coming out in the wrong colours)."""
         try:
-            tid = themes.theme_id_for(reel, self._settings_row())
-            if not tid:
-                return False
-            rows = self._retry(lambda: self.supa.select("reel_themes", "id=eq.%s&select=id,grayscale" % tid)) or []
-            return bool(rows and rows[0].get("grayscale"))
+            settings = self._settings_row()
         except Exception as e:
-            self.log("could not read the reel's theme (picture kept in colour): %s" % e)
+            raise ThemeUnread(e)
+        tid = themes.theme_id_for(reel, settings)
+        if not tid:
             return False
+        try:
+            rows = self._retry(lambda: self.supa.select("reel_themes", "id=eq.%s&select=id,grayscale" % tid)) or []
+        except Exception as e:
+            raise ThemeUnread(e)
+        return bool(rows and rows[0].get("grayscale"))
 
     # ------------------------------------------------------------ one image
     def _image(self, reel, scene):
@@ -367,6 +384,9 @@ class ReelRunner:
                 raise JobError(COMFY_CLOSED)
             gray = self._grayscale(reel)
             photo = self.renderer.generate_photo(scene["image_prompt"], int(scene["seed"]), IMAGE_W, IMAGE_H)
+        except ThemeUnread as e:
+            self._requeue_scene(reel, scene, "couldn't read the reel's theme (%s)" % str(e.args[0])[:160])
+            return
         except JobError as e:
             if str(e) != COMFY_CLOSED:
                 raise
@@ -389,8 +409,8 @@ class ReelRunner:
             self._remove([scene["photo_path"]])
         self._release(reel)
 
-    def _requeue_scene(self, reel, scene):
-        self.log("ComfyUI is closed: image %s goes back in line" % scene.get("position"))
+    def _requeue_scene(self, reel, scene, why="ComfyUI is closed"):
+        self.log("%s: image %s goes back in line" % (why, scene.get("position")))
         body = {"status": "queued", "attempts": max(0, int(scene.get("attempts") or 0) - 1), "error": None, "claimed_at": None}
         self._retry(lambda: self.supa.update("reel_scenes", _match(scene), body))
         self._release(reel)

@@ -21,12 +21,14 @@ PAUSE_SECONDS = 0.10         # between chunks (007: was 0.35): no dead air betwe
 # Tightening (007), on each chunk before the chunks are joined and sped up: leading/trailing silence is trimmed
 # (EDGE_PAD kept so soft consonants are never clipped) and pauses longer than MAX_PAUSE shrink to SHORT_PAUSE.
 FRAME_SECONDS = 0.01         # silence is judged on 10 ms frames (RMS)
-EDGE_PAD = 0.02
+EDGE_PAD = 0.07             # kept around the speech: breathy onsets ("h") and soft word tails survive
+FADE_SECONDS = 0.004         # a 4 ms fade at every cut, so no cut ever clicks
 MAX_PAUSE = 0.35
 SHORT_PAUSE = 0.25
-SILENCE_REL = 0.05           # a frame is silent below 5% (-26 dB) of the chunk's loud speech (95th-percentile RMS) ...
-SILENCE_MIN = 58.0           # ... but never below -55 dBFS (a near-silent chunk) ...
-SILENCE_MAX = 583.0          # ... nor above -35 dBFS (a very loud chunk), in 16-bit sample units
+SILENCE_REL = 0.02           # a frame is silent below 2% (-34 dB) of the chunk's loud speech (95th-percentile RMS) ...
+SILENCE_MIN = 33.0           # ... but never below -60 dBFS (a near-silent chunk) ...
+SILENCE_MAX = 184.0          # ... nor above -45 dBFS (so a -40 dBFS word tail always counts as speech), 16-bit units
+TIGHTEN_MARK = "g1"          # in sample_key: samples made before tightening get re-made
 NEEDS_RESTART = "Restart ComfyUI so it loads the Chatterbox voice node."
 COMFY_CLOSED = "ComfyUI is closed. Open ComfyUI Desktop on your PC, then press Retry."
 # Calm delivery (006): less acting, steadier pace than Chatterbox's defaults (0.5 / 0.8 / 0.5).
@@ -81,7 +83,8 @@ def atempo_filter(speed):
 
 def sample_key(speed):
     """What a voice sample was made with (the app re-queues samples whose key differs from the current one)."""
-    return "e%g-t%g-c%g-s%.2f" % (CALM["exaggeration"], CALM["temperature"], CALM["cfg_weight"], float(speed))
+    return "e%g-t%g-c%g-s%.2f-%s" % (CALM["exaggeration"], CALM["temperature"], CALM["cfg_weight"], float(speed),
+                                     TIGHTEN_MARK)
 
 
 def speed_up(wav_bytes, speed):
@@ -238,8 +241,8 @@ def silence_threshold(rms):
 
 def tighten_pcm(pcm, rate=RATE):
     """16-bit mono PCM with the silence before the first and after the last word trimmed (EDGE_PAD kept) and
-    every inner pause longer than MAX_PAUSE shortened to SHORT_PAUSE (its two edges kept, the middle cut out).
-    Audio with no speech at all is returned unchanged (nothing to measure against)."""
+    every inner pause longer than MAX_PAUSE shortened to SHORT_PAUSE (its two edges kept, the middle cut out),
+    with a FADE_SECONDS fade on both sides of every cut. Audio with no speech at all is returned unchanged (nothing to measure against)."""
     import numpy as np
     x = np.frombuffer(pcm[: len(pcm) // 2 * 2], dtype="<i2").astype(np.float32)
     win = max(1, int(round(rate * FRAME_SECONDS)))
@@ -265,7 +268,17 @@ def tighten_pcm(pcm, rate=RATE):
             pieces.append((cur, a + keep_half))
             cur = b - keep_half
     pieces.append((cur, end))
-    out = np.concatenate([x[p:q] for p, q in pieces]).astype("<i2")
+    fade = max(1, int(round(rate * FADE_SECONDS)))
+    parts = []
+    for p, q in pieces:
+        seg = x[p:q].copy()
+        k = min(fade, len(seg))
+        if p > 0 and k:                 # a cut before this piece: fade in
+            seg[:k] *= np.linspace(0.0, 1.0, k, endpoint=False, dtype=np.float32)
+        if q < len(x) and k:            # a cut after it: fade out
+            seg[-k:] *= np.linspace(1.0, 0.0, k, dtype=np.float32)
+        parts.append(seg)
+    out = np.clip(np.round(np.concatenate(parts)), -32768, 32767).astype("<i2")
     return out.tobytes()
 
 

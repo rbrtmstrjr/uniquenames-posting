@@ -368,7 +368,7 @@ class ReelRunnerTest(unittest.TestCase):
         _table, match, v = self.supa.of("reel_voices")[-1]
         self.assertEqual(match, "id=eq.kore&version=eq.4")
         self.assertEqual(v, {"sample_status": "ready", "sample_path": "voices/kore/sample-v4.wav",
-                             "sample_key": "e0.35-t0.7-c0.5-s1.12", "error": None, "claimed_at": None})
+                             "sample_key": "e0.35-t0.7-c0.5-s1.12-g1", "error": None, "claimed_at": None})
         self.assertEqual(self.supa.removed, ["voices/kore/sample-v3.wav"])
 
     def test_builtin_sample_needs_no_reference(self):

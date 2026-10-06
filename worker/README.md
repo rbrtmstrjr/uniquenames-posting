@@ -28,8 +28,9 @@ Steps, in order: voice → timing → music → images → render.
 - **Voice** (`voice.py`): the scene lines are grouped into chunks of whole lines (<= 100 words, ~25 s; Chatterbox
   stops at ~40 s), each voiced by the `FL_ChatterboxTTS` node in ComfyUI (custom node `ComfyUI_Fill-ChatterBox`,
   see `docs/reference/reel-pc-spike.md`) with the calm settings (exaggeration 0.35, temperature 0.7, cfg_weight 0.5),
-  tightened (007: silence before the first and after the last word trimmed, 20 ms kept; pauses over 0.35 s cut to
-  0.25 s; judged on 10 ms RMS frames against the chunk's own loudness), joined with a 0.10 s gap, sped up with ffmpeg `atempo=settings.reel_speed` (1.00–1.25, pitch kept; skipped at 1.00)
+  tightened (007: silence before the first and after the last word trimmed, 70 ms kept; pauses over 0.35 s cut to
+  0.25 s; 4 ms fade at every cut; judged on 10 ms RMS frames: silent below 2 % of the chunk's loud speech,
+  clamped to -60…-45 dBFS, so a -40 dBFS word tail is speech), joined with a 0.10 s gap, sped up with ffmpeg `atempo=settings.reel_speed` (1.00–1.25, pitch kept; skipped at 1.00)
   and uploaded as `reels/<id>/voice-v<version>.wav` (Whisper then times the sped-up track).
   Narrator: `reels.voice_id` → `settings.reel_voice_id` → `builtin` (Chatterbox's own voice). A voice's reference clip
   (`reel_voices.ref_path`, `voices/<id>/ref.wav`) is downloaded once and sent to ComfyUI's input folder
@@ -44,7 +45,7 @@ Steps, in order: voice → timing → music → images → render.
   step back (like images).
 - **Voice samples** (006): only when no reel step can run and ComfyUI is up, `claim_next_voice_sample()` hands out one
   voice; Chatterbox reads the sample sentence with it (calm + current speed) →
-  `reels/voices/<id>/sample-v<version>.wav`, `sample_status 'ready'`, `sample_key` (e.g. `e0.35-t0.7-c0.5-s1.12`), saved
+  `reels/voices/<id>/sample-v<version>.wav`, `sample_status 'ready'`, `sample_key` (e.g. `e0.35-t0.7-c0.5-s1.12-g1`; `-g1` = tightened), saved
   only if the row's version still matches; older samples are removed. Failure → `'failed'` + `error`; ComfyUI closed
   → back to `'queued'`.
 - **Theme previews** (007): after voice samples (same conditions), `claim_next_theme_preview()` hands out one theme;
@@ -53,13 +54,13 @@ Steps, in order: voice → timing → music → images → render.
   when `grayscale` (sketch) → `reels/themes/<id>/preview-v<version>.jpg`, `preview_status 'ready'` + `preview_path`,
   saved only if the version still matches; older previews are removed. Failure → `'failed'` + `error`; ComfyUI closed
   → back to `'queued'`. Before 007 the claim function is missing: previews are off (logged once, re-checked every
-  10 minutes).
+  10 minutes). A theme id that isn't a-z/0-9 → `'failed'` with a message.
 - **Timing** (`timing.py`): faster-whisper `small.en` on the CPU gives word times (`reels.words`); each scene gets
   `start_s`/`end_s` by matching its line letter by letter (first line from 0, last to the end of the audio).
 - **Images**: each scene's `image_prompt` + `seed` in Z-Image at 1088x1920, fitted to 1080x1920, JPEG q92, uploaded as
   `reels/<id>/scenes/<pos>-v<scene version>.jpg`. If the reel's theme (`reels.theme_id` →
-  `settings.reel_theme_id` → `knitted`) has `grayscale` (sketch), the picture is turned grey first (before 007, or if
-  the theme can't be read, it stays as made). The 3rd failure of an image sets the reel `needs_attention`.
+  `settings.reel_theme_id` → `knitted`) has `grayscale` (sketch), the picture is turned grey first (before 007 it stays as made; if
+  the settings or the theme can't be read, the image goes back in line without using an attempt). The 3rd failure of an image sets the reel `needs_attention`.
 - **Render** (`reel_render.py`): ffmpeg (from `imageio-ffmpeg`) gives each image a camera move for its line's spoken
   time (`reel_scenes.motion`, 007: push_in, pull_out, pan_left/right, tilt_up/down at zoom 1.15, punch = 0.3 s snap
   to +18 %, settle, creep; zoompan on a 2x pre-scaled picture; no motion (before 007) → `punch` for a key moment,

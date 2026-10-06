@@ -168,12 +168,40 @@ class TightenTest(unittest.TestCase):
         pcm = (silence_pcm(0.5) + tone_pcm(1.0) + silence_pcm(0.6) + tone_pcm(1.0) + silence_pcm(0.2) + tone_pcm(0.5)
                + silence_pcm(0.8))
         out = voice.tighten_pcm(pcm)
-        # 0.02 pad + 1.0 + 0.6 -> 0.25 + 1.0 + 0.2 (kept: <= 0.35) + 0.5 + 0.02 pad
-        self.assertAlmostEqual(secs(out), 0.02 + 1.0 + 0.25 + 1.0 + 0.2 + 0.5 + 0.02, delta=0.021)
+        # 0.07 pad + 1.0 + 0.6 -> 0.25 + 1.0 + 0.2 (kept: <= 0.35) + 0.5 + 0.07 pad
+        self.assertAlmostEqual(secs(out), 0.07 + 1.0 + 0.25 + 1.0 + 0.2 + 0.5 + 0.07, delta=0.021)
 
     def test_quiet_room_noise_counts_as_silence(self):
         pcm = silence_pcm(0.4, noise=40) + tone_pcm(0.8) + silence_pcm(1.0, noise=40) + tone_pcm(0.8) + silence_pcm(0.4, noise=40)
-        self.assertAlmostEqual(secs(voice.tighten_pcm(pcm)), 0.02 + 0.8 + 0.25 + 0.8 + 0.02, delta=0.021)
+        self.assertAlmostEqual(secs(voice.tighten_pcm(pcm)), 0.07 + 0.8 + 0.25 + 0.8 + 0.07, delta=0.021)
+
+    def test_a_soft_word_tail_after_loud_speech_survives(self):
+        loud = tone_pcm(0.8, amp=20000)                       # near full scale
+        tail = tone_pcm(0.08, amp=int(32768 * 10 ** (-40 / 20.0) * math.sqrt(2)))   # -40 dBFS RMS, 80 ms
+        out = voice.tighten_pcm(silence_pcm(0.5) + loud + tail + silence_pcm(0.6))
+        self.assertAlmostEqual(secs(out), 0.07 + 0.8 + 0.08 + 0.07, delta=0.021)   # the tail counts as speech
+        x = [struct.unpack_from("<h", out, 2 * i)[0] for i in range(len(out) // 2)]
+        start = int(RATE * (0.07 + 0.8))
+        tail_out = x[start + 100:start + int(RATE * 0.08) - 100]
+        self.assertGreater(max(abs(v) for v in tail_out), 300)                       # still there, not faded
+
+    def test_a_breathy_onset_survives(self):
+        h = silence_pcm(0.06, noise=int(32768 * 10 ** (-50 / 20.0)))  # an "h" at -50 dBFS: below the threshold
+        out = voice.tighten_pcm(silence_pcm(0.5) + h + tone_pcm(0.8))
+        self.assertGreaterEqual(secs(out), 0.06 + 0.8)
+        x = [struct.unpack_from("<h", out, 2 * i)[0] for i in range(len(out) // 2)]
+        lead = len(x) - int(RATE * 0.8)
+        h_out = x[lead - int(RATE * 0.06) + 200:lead]
+        self.assertTrue(h_out and max(abs(v) for v in h_out) >= int(32768 * 10 ** (-50 / 20.0)) - 1)
+
+    def test_every_cut_fades(self):
+        pcm = silence_pcm(0.5, noise=30) + tone_pcm(0.5) + silence_pcm(0.8, noise=30) + tone_pcm(0.5) + silence_pcm(0.5, noise=30)
+        out = voice.tighten_pcm(pcm)
+        x = [struct.unpack_from("<h", out, 2 * i)[0] for i in range(len(out) // 2)]
+        self.assertEqual(x[0], 0)                                                     # faded in at the front cut
+        self.assertLessEqual(abs(x[-1]), 1)                                           # faded out at the end cut
+        mid = int(RATE * (0.07 + 0.5 + 0.125))                                        # the inner cut
+        self.assertTrue(any(abs(v) <= 1 for v in x[mid - 3:mid + 3]))
 
     def test_short_pauses_and_tight_speech_are_kept(self):
         pcm = tone_pcm(0.7) + silence_pcm(0.3) + tone_pcm(0.7)
@@ -188,7 +216,7 @@ class TightenTest(unittest.TestCase):
         wav = voice.pcm_to_wav(silence_pcm(0.3) + tone_pcm(1.0) + silence_pcm(0.3))
         out = voice.concat_wavs([voice.tighten(wav), voice.tighten(wav)])
         with wave.open(io.BytesIO(out), "rb") as w:
-            self.assertAlmostEqual(w.getnframes() / float(RATE), 2 * 1.04 + 0.10, delta=0.03)
+            self.assertAlmostEqual(w.getnframes() / float(RATE), 2 * 1.14 + 0.10, delta=0.03)
         self.assertEqual(voice.PAUSE_SECONDS, 0.10)
 
     def test_the_reel_voice_is_tightened_before_the_speed_up(self):
@@ -202,7 +230,7 @@ class TightenTest(unittest.TestCase):
                 mock.patch.object(reels.voice, "speed_up", side_effect=lambda w, s: seen.append(w) or w):
             rr_.run_step({"step": "voice", "reel": make_reel(), "scene": None})
         with wave.open(io.BytesIO(seen[0]), "rb") as w:
-            self.assertAlmostEqual(w.getnframes() / float(RATE), 2 * 1.04 + 0.10, delta=0.03)
+            self.assertAlmostEqual(w.getnframes() / float(RATE), 2 * 1.14 + 0.10, delta=0.03)
 
 
 # ---------------------------------------------------------------- themes
@@ -326,9 +354,13 @@ class ThemePreviewJobTest(unittest.TestCase):
         self.assertEqual(self.supa.of("reel_themes")[-1][2], {"preview_status": "queued", "claimed_at": None})
         self.assertEqual(self.r.calls, [])
 
-    def test_bad_id_is_skipped(self):
+    def test_bad_id_fails_with_a_message(self):
         self.rr.run_theme_preview({"theme": {"id": "../x", "version": 1}})
-        self.assertEqual(self.supa.updates, [])
+        _t, match, body = self.supa.of("reel_themes")[-1]
+        self.assertEqual(match, "id=eq." + "..%2Fx" + "&version=eq.1")   # url-encoded, never a raw filter
+        self.assertEqual(body, {"preview_status": "failed", "error": reels.BAD_THEME, "claimed_at": None})
+        self.assertEqual(self.r.calls, [])
+        self.assertEqual(self.supa.uploads, {})
         self.assertTrue(any("bad theme id" in m for m in self.logs))
 
 
@@ -354,14 +386,23 @@ class GrayscaleSceneTest(unittest.TestCase):
         self.assertFalse(is_gray(self.image(make_reel(), {"id": 1})))
         self.assertFalse([q for q in self.supa.selects if q[0] == "reel_themes"])
 
-    def test_a_failed_theme_lookup_keeps_colour(self):
-        def boom(table, query):
-            if table == "reel_themes":
-                raise SupaError("GET x -> HTTP 404 relation does not exist")
-            return FakeSupa.select(self.supa, table, query)
-        self.supa.select = boom
-        self.assertFalse(is_gray(self.image(make_reel(theme_id="sketch"), {"id": 1, "reel_theme_id": "sketch"})))
-        self.assertEqual(self.supa.of("reel_scenes")[-1][2]["status"], "done")
+    def test_a_failed_theme_lookup_puts_the_image_back_without_an_attempt(self):
+        for failing in ("reel_themes", "settings"):
+            with self.subTest(failing=failing):
+                self.setUp()
+                self.supa.settings = [{"id": 1, "reel_theme_id": "sketch"}]
+
+                def boom(table, query, failing=failing):
+                    if table == failing:
+                        raise SupaError("GET x -> network error: down")
+                    return ThemeSupa.select(self.supa, table, query)
+                self.supa.select = boom
+                self.rr.run_step({"step": "image", "reel": make_reel(theme_id="sketch"), "scene": make_scene(1, attempts=2)})
+                self.assertEqual(self.supa.uploads, {})
+                self.assertEqual(self.rr.renderer.calls, [])                    # no picture made in the wrong colours
+                _t, _m, body = self.supa.of("reel_scenes")[-1]
+                self.assertEqual(body, {"status": "queued", "attempts": 1, "error": None, "claimed_at": None})
+                self.assertEqual(self.supa.of("reels")[-1][2], {"claimed_at": None})
 
 
 class PreviewTickTest(unittest.TestCase):
