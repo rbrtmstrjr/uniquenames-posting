@@ -142,6 +142,39 @@ class PunchTest(unittest.TestCase):
         self.assertEqual([s["punch_k"] is not None for s in shots], [True] * 4 + [False] * 4)
 
 
+class ReframeTest(unittest.TestCase):
+    def test_line_one_gets_two_or_three_visual_changes_in_3_s(self):
+        words = [{"word": w, "start": s, "end": s + 0.2} for w, s in
+                 (("When", 0.0), ("your", 0.3), ("toddler", 0.9), ("screams", 1.3), ("in", 1.8), ("the", 2.0),
+                  ("supermarket", 2.3), ("aisle", 2.9))]
+        shots = rf.build_shots([{"image": "a", "duration": 3.4}, {"image": "b", "duration": 2.0}], words)
+        self.assertEqual(shots[0]["reframes"], [(27, 0.12), (69, 0.12)])     # "toddler" 0.9 s, "supermarket" 2.3 s
+        z = [rf.shot_zoom(shots[0], k) for k in range(shots[0]["n"])]
+        self.assertAlmostEqual(z[27] / z[26], 1.12, delta=0.005)             # instant
+        self.assertAlmostEqual(z[69] / z[68], 1.12, delta=0.005)
+        self.assertEqual(rf.punch_times(shots), [])                          # not script punch-ins
+        short = rf.build_shots([{"image": "a", "duration": 2.8}], [])
+        self.assertEqual(short[0]["reframes"], [(36, 0.12)])                 # no words: 1.2 s; no second under 3 s
+
+    def test_line_one_reframe_keeps_clear_of_a_script_punch(self):
+        words = words_of("one two three four five six seven eight nine ten", step=0.3)
+        shots = rf.build_shots([{"image": "a", "duration": 3.3, "punch": "five"}], words)   # "five" at 1.2 s
+        self.assertEqual(shots[0]["punch_k"], 36)
+        self.assertTrue(all(abs(k / 30.0 - 1.2) >= rf.REFRAME_GAP_S for k, _f in shots[0]["reframes"]))
+        self.assertEqual(len(shots[0]["reframes"]), 1)                       # only the ~2.4 s one
+
+    def test_long_shots_are_split_at_the_middle_unless_punched(self):
+        words = words_of(" ".join("w%d" % i for i in range(30)), step=0.5)
+        items = [{"image": "a", "duration": 2.0}, {"image": "b", "duration": 4.2},
+                 {"image": "c", "duration": 4.0, "punch": "w14"}, {"image": "d", "duration": 3.4}]
+        shots = rf.build_shots(items, words)
+        self.assertEqual(shots[1]["reframes"], [(60, 0.10)])                 # mid at 4.1 s -> the word at 4.0 s (2.0 s in)
+        self.assertEqual(shots[2]["reframes"], [])                           # already has a punch-in
+        self.assertEqual(shots[3]["reframes"], [])                           # not over 3.5 s
+        z = [rf.shot_zoom(shots[1], k) for k in range(shots[1]["n"])]
+        self.assertAlmostEqual(z[60] / z[59], 1.10, delta=0.005)
+
+
 class CutsTest(unittest.TestCase):
     def test_hard_cuts_and_a_dissolve_only_into_time_jump_scenes(self):
         items = [{"image": "a", "duration": 2.0}, {"image": "b", "duration": 2.0, "time_jump": True},

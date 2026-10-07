@@ -3,7 +3,8 @@
 # float box), so slow zooms glide instead of stepping a whole pixel at a time the way ffmpeg's zoompan does
 # (measured in the playbook plan's Task 2: ~20x less frame-to-frame jerk than 4x zoompan). Moves: push_in / pull_out / hold only (no pans or tilts),
 # eased with smoothstep, alternating; a punch-in is an instant +15% jump on the scene's stressed word, held to the
-# end of the shot; hard cuts, with a 0.4 s dissolve only into a time_jump scene. The hook card and the word
+# end of the shot (plus automatic reframes: 2-3 visual changes in line 1, and a split of any shot over 3.5 s);
+# hard cuts, with a 0.4 s dissolve only into a time_jump scene. The hook card and the word
 # captions are drawn here too (Pillow, Montserrat ExtraBold), inside the platform safe zone.
 import collections
 import concurrent.futures
@@ -24,6 +25,14 @@ PUNCH = 0.15                       # a punch-in: instant +15% (playbook 12-18%)
 MAX_PUNCHES = 4
 PUNCH_LEAD_S = 0.30                # no punch in a shot's first 0.3 s (the cut is the accent there) ...
 PUNCH_TAIL_S = 0.35                # ... nor in its last 0.35 s (it would only flash)
+# Automatic reframes (instant scale jumps that are not script punch-ins and don't count toward MAX_PUNCHES):
+OPEN_REFRAME = 0.12                # line 1: 2-3 visual changes in the first 3 s ...
+OPEN_WINDOWS = ((0.8, 1.6, 1.2), (2.0, 2.8, 2.4))   # ... on the longest word in each window (else its fallback
+OPEN_SECOND_AFTER_S = 3.0          #     time); the second only when line 1 lasts over 3 s
+LONG_SHOT_S = 3.5                  # a longer shot without a punch-in is split by a reframe at its middle ...
+LONG_REFRAME = 0.10
+SNAP_S = 0.4                       # ... snapped to a word start this close to the middle
+REFRAME_GAP_S = 0.5                # never this close to another jump
 DISSOLVE_S = 0.4                   # only into a time_jump scene
 THREADS = max(1, min(6, (os.cpu_count() or 2) - 2))
 LOOKAHEAD = 12                     # frames in flight
@@ -169,9 +178,57 @@ def build_shots(items, words, fps=FPS):
             if t is not None:
                 shot["punch_k"] = int(round((t - start) * fps))
                 punches += 1
+        shot["reframes"] = auto_reframes(shot, i, words, fps)
         shots.append(shot)
         f0 += n
     return shots
+
+
+def _longest_word(words, lo, hi):
+    """Start of the longest word (the likeliest stressed one) starting in [lo, hi], or None."""
+    best = None
+    for w in words or []:
+        t = float(w.get("start", -1))
+        if lo <= t <= hi:
+            n = len(norm_word(w.get("word")))
+            if best is None or n > best[0]:
+                best = (n, t)
+    return best[1] if best else None
+
+
+def _nearest_word(words, t, within):
+    near = [float(w["start"]) for w in words or [] if abs(float(w.get("start", -99)) - t) <= within]
+    return min(near, key=lambda s: abs(s - t)) if near else None
+
+
+def auto_reframes(shot, i, words, fps=FPS):
+    """[(frame within the shot, scale factor)] of automatic instant reframes:
+    - the first shot (line 1): +12% on the longest word starting 0.8-1.6 s (else at 1.2 s), and another +12% on
+      the longest word 2.0-2.8 s (else 2.4 s) when the shot lasts over 3 s, so the hook has 2-3 visual changes;
+    - any other shot over 3.5 s without a script punch-in: +10% at its middle (snapped to a nearby word start).
+    Never within REFRAME_GAP_S of the punch-in or another reframe, nor in the shot's last PUNCH_TAIL_S."""
+    start, secs = shot["f0"] / float(fps), shot["n"] / float(fps)
+    taken = [shot["punch_k"] / float(fps)] if shot["punch_k"] is not None else []
+    want = []
+    if i == 0:
+        for k, (lo, hi, fallback) in enumerate(OPEN_WINDOWS):
+            if k == 1 and secs <= OPEN_SECOND_AFTER_S:
+                break
+            t = _longest_word(words, start + lo, start + hi)
+            want.append(((t - start) if t is not None else fallback, OPEN_REFRAME))
+    elif secs > LONG_SHOT_S and shot["punch_k"] is None:
+        mid = secs / 2.0
+        t = _nearest_word(words, start + mid, SNAP_S)
+        want.append(((t - start) if t is not None else mid, LONG_REFRAME))
+    out = []
+    for rel, factor in want:
+        if rel < PUNCH_LEAD_S or rel > secs - PUNCH_TAIL_S:
+            continue
+        if any(abs(rel - o) < REFRAME_GAP_S for o in taken):
+            continue
+        taken.append(rel)
+        out.append((int(round(rel * fps)), factor))
+    return sorted(out)
 
 
 def punch_times(shots, fps=FPS):
@@ -184,6 +241,9 @@ def shot_zoom(shot, k):
     z = base_zoom(shot["move"], p, shot["amount"])
     if shot["punch_k"] is not None and k >= shot["punch_k"]:
         z *= 1.0 + PUNCH
+    for rk, factor in shot.get("reframes") or ():
+        if k >= rk:
+            z *= 1.0 + factor
     return z
 
 

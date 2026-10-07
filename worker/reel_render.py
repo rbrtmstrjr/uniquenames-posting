@@ -307,8 +307,9 @@ def render_reel(runner, reel, scenes):
         hook_text = reel.get("hook_text")  # 008; missing column or null = no hook card
         has_hook = bool(reel_frames.hook_words(hook_text))
         punches = reel_frames.punch_times(shots)
-        runner.log("reel render: %d pictures, %.1f s of voice%s, %d punch-ins, %d dissolves%s" % (
+        runner.log("reel render: %d pictures, %.1f s of voice%s, %d punch-ins + %d reframes, %d dissolves%s" % (
             len(items), total, ", music at %d%%" % round(volume * 100) if bed else "", len(punches),
+            sum(len(s["reframes"]) for s in shots),
             sum(1 for s in shots if s["dissolve"]), ", hook card" if has_hook else ""))
         reel_audio.make_audio(ffmpeg, work, "voice.wav", video_s, reel_audio.sfx_events(has_hook, punches, total),
                               lambda args, what: run_ffmpeg(args, work, AUDIO_TIMEOUT, what, beat, log=runner.log),
