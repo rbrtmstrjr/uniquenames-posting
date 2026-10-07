@@ -299,6 +299,28 @@ describe("the shot list, punches, time jumps and the loop (playbook v2)", () => 
     expect({ shot_size: last.shot_size, subject: last.subject }).toEqual({ shot_size: "close", subject: "both" });
   });
 
+  it("an ending whose idea names its own place keeps its setting (no contradiction); the subject still mirrors", async () => {
+    const s = script(10);
+    s.scenes[9] = { ...s.scenes[9], idea: "The mom doll tucks the baby doll into his bed.", setting: "the dim bedroom at night", subject: "mom" };
+    generateJson.mockResolvedValueOnce({ ok: true, data: s });
+    const r = await writeReelScript(input10);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.script.scenes[9].idea).toBe("The mom doll tucks the baby doll into his bed — the dim bedroom at night");
+    expect(r.script.scenes[9].subject).toBe("both");
+  });
+
+  it("a size the idea implies is never overridden; the idea text is never changed by the repair", async () => {
+    const s = script(10);
+    s.scenes[5] = { ...s.scenes[5], idea: "Looking down at the baby doll's pleading face", shot_size: "wide", subject: "baby" };
+    generateJson.mockResolvedValueOnce({ ok: true, data: s });
+    const r = await writeReelScript(input10);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.script.scenes[5].shot_size).toBe("pov");
+    expect(splitIdea(r.script.scenes[5].idea).moment).toBe("Looking down at the baby doll's pleading face");
+  });
+
   it("punch: verbatim from its line, at most 4 per reel; time_jump never on line 1", async () => {
     const s = script(10);
     s.scenes = s.scenes.map((x, i) => ({ ...x, punch: i === 0 ? "last time" : i < 7 ? "short" : "spoken phrase", time_jump: i < 2 }));

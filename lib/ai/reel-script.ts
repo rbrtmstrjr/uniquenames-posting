@@ -233,6 +233,10 @@ export const GREETING_RE = /^(?:hi|hello|hey|hiya|welcome|greetings|good (?:morn
 /** A spoken call to action (the playbook bans them: no follow / comment / tag / share / save / subscribe). */
 export const CTA_RE = /\b(?:follow (?:me|us|the page|this page|for more|along)|comment (?:below|down|if|your)|tag (?:a|your|someone|every|another)|share (?:this|it) (?:with|to)|save this|like and|hit (?:the )?(?:like|follow|share)|link in (?:the )?bio|subscribe)\b/i;
 
+const PLACE = /\b(?:bed|beds|crib|cot|sala|living room|kitchen|room|bedroom|nursery|bathroom|bath|tub|garden|yard|park|street|sidewalk|road|jeepney|tricycle|car|bus|church|market|palengke|store|school|hospital|clinic|house|home|porch|doorway|door|stairs|window|sofa|couch|table|floor|mat|hammock|beach|lola's|veranda|balcony)\b/i;
+/** The idea already names a place of its own ("sets Leo down onto his bed"): its setting is not replaced. */
+export const namesPlace = (idea: string) => PLACE.test(idea);
+
 /** Check and normalise Gemini's JSON into a script (shot list repaired), or say what is wrong. */
 export function validateReelScript(raw: unknown, maxScenes: number, speed = 1): ReelScriptResult {
   const d = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
@@ -284,10 +288,12 @@ export function validateReelScript(raw: unknown, maxScenes: number, speed = 1): 
   if (GREETING_RE.test(hook_text) || CTA_RE.test(hook_text)) return { ok: false, error: "The hook card is a greeting or a call to action, not a hook." };
   if (norm(hook_text) === norm(lines[0].narration)) return { ok: false, error: "The hook card repeats line 1 instead of adding to it." };
 
-  // the shot list follows the rules (lib/reels/shots); the last line is set where line 1 is (the loop)
-  const shots = repairShotList(raws.map((o) => ({ shot_size: o.shot_size, subject: o.subject })));
+  // the shot list follows the rules (lib/reels/shots) without overriding a size the idea implies; the repair only
+  // changes the shot (the prompt's size + lens part), never the idea's words. The last line is set where line 1 is (the
+  // loop) only when its own idea names no place.
+  const shots = repairShotList(raws.map((o, i) => ({ shot_size: o.shot_size, subject: o.subject, idea: lines[i].idea })));
   const n = lines.length;
-  if (n >= 3 && lines[0].setting) lines[n - 1].setting = lines[0].setting;
+  if (n >= 3 && lines[0].setting && !namesPlace(lines[n - 1].idea)) lines[n - 1].setting = lines[0].setting;
   const punches = capPunches(lines.map((x, i) => punchIn(x.narration, raws[i].punch)));
   const scenes: ReelScriptScene[] = lines.map((x, i) => ({
     beat: x.beat, narration: x.narration, idea: joinIdea(x.idea, x.setting), emotion: x.emotion, action: x.action,

@@ -75,6 +75,19 @@ const SIZE_FOR: Record<MixBucket, (subject: ReelSubject) => ReelShotSize> = {
   povBroll: (subject) => (hasFace(subject) ? "pov" : "broll"),
 };
 
+/**
+ * The shot size a picture idea's own wording implies ("looking down at…" = POV, "close-up of…" = close, "tiny hands" =
+ * detail, "the whole room" = wide), or null. The repair never overrides it, so the shot never contradicts the idea.
+ */
+export function impliedSize(idea: string): ReelShotSize | null {
+  const t = (idea ?? "").toLowerCase();
+  if (/\b(?:looking down at|through (?:her|his|my|your|the mom's|the parent's) eyes|point of view|pov\b|seen from (?:her|his|my|your) eyes)/.test(t)) return "pov";
+  if (/\b(?:extreme close-?up|macro|tiny (?:hands?|fingers?|feet|toes?|socks?)|small (?:hands?|fingers?|feet|toes?)|fingers? (?:curl|wrap|grip|touch|hold)|close-?up (?:of|on) (?:her|his|their|the|a)?\s*(?:hands?|fingers?|feet|toes?))/.test(t)) return "detail";
+  if (/\b(?:close-?up|close up)\b/.test(t)) return "close";
+  if (/\b(?:wide view|the whole (?:room|house|street|sala|kitchen|park)|seen from across)\b/.test(t)) return "wide";
+  return null;
+}
+
 /** The mirror rule applies from 3 lines on (2 lines would repeat the same shot back to back). */
 const mirrors = (n: number) => n >= 3;
 
@@ -116,17 +129,23 @@ export function shotListIssues(shots: readonly Shot[], settings?: readonly (stri
 }
 
 /**
- * Make Gemini's shot list follow the rules. Subjects stay as written (they match the picture idea) except line 1
+ * Make Gemini's shot list follow the rules. A size the line's idea implies (impliedSize) is never overridden, even
+ * when that leaves a rule broken: the picture must match its words. Subjects stay as written (they match the picture idea) except line 1
  * (no face → both) and the last line (it takes line 1's subject). Shot sizes are kept where they fit and reassigned
  * where Gemini drifted: line 1 close/medium, an establishing wide at line 2 (when neither 2 nor 3 is wide), the last
  * line = line 1's size, then left to right each line keeps its size if that breaks no rule and its bucket is not full,
  * else takes the most-needed size that fits (a detail or B-roll insert always fits); finally buckets still short take
  * over lines from buckets above target where nothing breaks.
  */
-export function repairShotList(raw: readonly { shot_size?: unknown; subject?: unknown }[]): Shot[] {
+export function repairShotList(raw: readonly { shot_size?: unknown; subject?: unknown; idea?: string | null }[]): Shot[] {
   const n = raw.length;
   if (!n) return [];
-  const want = raw.map((r) => sizeOf(r.shot_size));
+  // a size the idea's own wording implies is locked (line 1 keeps its close/medium rule)
+  const locked = raw.map((r, i) => {
+    const l = impliedSize(r.idea ?? "");
+    return l && (i > 0 || l === "close" || l === "medium") ? l : null;
+  });
+  const want = raw.map((r, i) => locked[i] ?? sizeOf(r.shot_size));
   const subj: ReelSubject[] = raw.map((r, i) => subjectOf(r.subject) ?? (want[i] === "broll" ? "none" : "both"));
   if (!hasFace(subj[0])) subj[0] = "both";
   if (mirrors(n)) subj[n - 1] = subj[0];
@@ -148,12 +167,14 @@ export function repairShotList(raw: readonly { shot_size?: unknown; subject?: un
   const first: ReelShotSize = want[0] === "close" || want[0] === "medium" ? want[0]
     : range.medium.target - count.medium >= range.close.target - count.close ? "medium" : "close";
   put(0, first, true);
-  // 7. the last line mirrors line 1
-  if (mirrors(n)) put(n - 1, first, true);
-  // 5. the establishing wide: Gemini's at line 2 or 3 (when that line is not the mirrored last), else line 2
+  // locked sizes (the idea says so) stay as written
+  for (let i = 1; i < n; i++) if (locked[i]) put(i, locked[i]!, true);
+  // 7. the last line mirrors line 1 (its size only when the idea implies none)
+  if (mirrors(n) && !locked[n - 1]) put(n - 1, first, true);
+  // 5. the establishing wide: Gemini's at line 2 or 3 (when that line is not the mirrored last), else line 2, else 3
   if (n >= 2) {
-    const at = want[1] === "wide" ? 1 : n > 3 && want[2] === "wide" ? 2 : 1;
-    if (!fixed[at]) put(at, "wide", true);
+    const at = want[1] === "wide" ? 1 : n > 3 && want[2] === "wide" ? 2 : !fixed[1] ? 1 : 2;
+    if (at < n && !fixed[at]) put(at, "wide", true);
   }
 
   const shotAt = (i: number): Shot | null => (size[i] ? { shot_size: size[i]!, subject: subj[i] } : null);

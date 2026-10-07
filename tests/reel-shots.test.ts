@@ -165,3 +165,32 @@ describe("punch-ins", () => {
     expect(capPunches([null, "a", null])).toEqual([null, "a", null]);
   });
 });
+
+describe("the repair never contradicts the idea", () => {
+  it("impliedSize reads the idea's own wording", async () => {
+    const { impliedSize } = await import("@/lib/reels/shots");
+    expect(impliedSize("Looking down at Leo's pleading eyes and raised hands")).toBe("pov");
+    expect(impliedSize("A close-up of the mom's tired face")).toBe("close");
+    expect(impliedSize("Leo's tiny hands grip the blanket")).toBe("detail");
+    expect(impliedSize("The whole room is quiet")).toBe("wide");
+    expect(impliedSize("Maya carries Leo on her hip")).toBeNull();
+  });
+
+  it("a size the idea implies is kept, even against the mix; line 1 keeps its close/medium rule", () => {
+    const raw = Array.from({ length: 10 }, (_, i) => ({ shot_size: "medium", subject: "both", idea: `moment ${i}` }));
+    raw[5] = { shot_size: "wide", subject: "baby", idea: "Looking down at Leo's pleading eyes" };
+    raw[6] = { shot_size: "medium", subject: "mom", idea: "Her tiny hands fold the sock" };
+    raw[0] = { shot_size: "medium", subject: "both", idea: "Looking down at the crib" };
+    const out = repairShotList(raw);
+    expect(out[5].shot_size).toBe("pov");
+    expect(out[6].shot_size).toBe("detail");
+    expect(["close", "medium"]).toContain(out[0].shot_size);
+    expect(shotListIssues(out)).toEqual([]);
+  });
+
+  it("a locked last line keeps its own size (the subject still mirrors line 1)", () => {
+    const raw = GOOD_FIXED.map((x, i) => ({ ...x, idea: i === 9 ? "A close-up of tiny toes under the blanket" : "x" }));
+    const out = repairShotList(raw);
+    expect(out[9]).toEqual({ shot_size: "detail", subject: "both" });
+  });
+});
