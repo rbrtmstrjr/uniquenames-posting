@@ -328,6 +328,21 @@ describe("no strangers, no faces on objects, a fixed child age (e2e 4cc98904)", 
     }
   });
 
+  it("people-free shots also lose lens / mm / camera words from the script's own idea and setting", async () => {
+    const { scrubOptics } = await import("@/lib/reels/prompt");
+    expect(scrubOptics("a blue block seen through a 50mm lens, tipping over")).toBe("a blue block, tipping over");
+    expect(scrubOptics("the crib, macro lens, soft blur")).toBe("the crib, soft blur");
+    expect(scrubOptics("a bottle on the counter, 85 mm")).toBe("a bottle on the counter");
+    expect(scrubOptics("a toy facing the camera")).toBe("a toy");
+    expect(scrubOptics("a quiet kitchen")).toBe("a quiet kitchen");
+    const p = scenePrompt(STATIC_THEMES.cinematic, CAST, { ...line, subject: "object", shot_size: "detail",
+      idea: "a blue block seen through a 50mm lens, tipping off a stack, the camera close — the play mat, macro lens" }, 2);
+    expect(p).not.toMatch(/\blens\b|\d+\s?mm\b|camera|viewer/i);
+    expect(p).toContain("a quiet still life, a blue block, tipping off a stack");
+    // people shots keep their own lens line
+    expect(scenePrompt(STATIC_THEMES.cinematic, CAST, { ...line, subject: "mom" }, 2)).toMatch(/50mm lens/);
+  });
+
   it("every prompt says who is in frame, positively", () => {
     const p = (subject: string, shot_size = "medium") => scenePrompt(STATIC_THEMES.animated3d, CAST, { ...line, subject, shot_size }, 3);
     expect(p("both")).toContain("The only people in the picture are the mom and her baby.");

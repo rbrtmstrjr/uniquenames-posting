@@ -51,6 +51,19 @@ export const STILL_FRAMES: Record<ReelShotSize, readonly string[]> = {
   pov: ["first-person view looking down, soft background blur", "first-person view at arm's length, soft background blur"],
   broll: ["quiet cutaway view from directly above, soft background blur", "quiet cutaway view from a high angle, soft background blur", "quiet cutaway view from the side, soft background blur"],
 };
+/**
+ * Drops optics words from free text for people-free pictures ("seen through a 50mm lens", "the camera", "viewer"
+ * left by positiveOnly): the phrase goes, the rest stays.
+ */
+export function scrubOptics(s: string): string {
+  return s
+    .replace(/\bfacing (?:a |an |the )?(?:camera|viewer|lens)\b/gi, "")
+    .replace(/\b(?:seen |shot |captured |facing |looking |turned )?(?:through|with|by|from|on|at|toward|towards|into) (?:a |an |the )?(?:\d+\s?mm |macro |wide |telephoto )*(?:lens(?:es)?|camera|viewer)\b/gi, "")
+    .replace(/\b(?:a |an |the )?(?:\d+\s?mm |macro |wide |telephoto )*(?:lens(?:es)?|camera|viewer)\b/gi, "")
+    .replace(/\b\d+\s?mm\b/gi, "")
+    .replace(/\s+([,.;])/g, "$1").replace(/,\s*,/g, ",").replace(/\s{2,}/g, " ")
+    .trim().replace(/^[,;.\s]+|[,;\s]+$/g, "");
+}
 /** A line's framing phrase (`still` = nobody in frame: no lens words). */
 export const frameOf = (size: ReelShotSize, index: number, still = false) => {
   const f = (still ? STILL_FRAMES : SHOT_FRAMES)[size];
@@ -330,8 +343,9 @@ export function scenePrompt(theme: ReelTheme, cast: ReelCast, scene: PromptScene
     const c2 = dedupeFragments(a, c);
     who = subject === "mom" ? a : subject === "baby" ? c : c2 ? `${a} with ${c2}` : a;
   }
-  const setting = fix(rawSetting);
-  const still = moment.replace(/^(A|An|The|One|Some|Two|Three)\b/, (w) => w.toLowerCase());
+  // with nobody in frame a named lens / camera is drawn as an object: the script's own words lose those phrases too
+  const setting = person ? fix(rawSetting) : scrubOptics(fix(rawSetting));
+  const still = scrubOptics(moment).replace(/^(A|An|The|One|Some|Two|Three)\b/, (w) => w.toLowerCase()) || "a quiet, cozy still moment";
   const shown = !person ? `a quiet still life, ${still}, a calm, peaceful space` : index === 0 ? `a striking, high-emotion moment: ${moment}` : moment;
   const slots = [
     `Vertical 9:16 ${frameOf(size, index, !person)}`,

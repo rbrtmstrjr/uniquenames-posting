@@ -87,6 +87,7 @@ describe("reelScriptPrompt", () => {
     // examples are patterns: Gemini copied them word for word in a smoke run
     expect(prompt).toMatch(/PATTERNS only: write fresh words for THIS story and never reuse an example sentence/);
     expect(prompt).toMatch(/Fresh words for this story, never an example sentence/);
+    expect(prompt).toMatch(/hook_text.*ideally at most 8 words and 45 characters/);
   });
 
   it("asks for a varied shot list: sizes, subjects, the mix, adjacency, line 1 face, establishing wide, mirrored end", async () => {

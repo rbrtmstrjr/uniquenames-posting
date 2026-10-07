@@ -155,7 +155,7 @@ export function reelScriptPrompt({ topic, maxScenes, alreadyMade, speed, theme }
     "",
     `LENGTH (CRITICAL): narration for a ${b.secLo}-${b.secHi} second reel at about ${b.wps} words per second = ${b.lo}-${b.hi} words in total, as ${b.minScenes}-${maxScenes} lines (never fewer than ${b.minScenes}, never more than ${maxScenes}). Every line is one image on screen for about 1.5-3.5 seconds. A script under ${b.lo} words is TOO SHORT and will be rejected. BEFORE ANSWERING, COUNT the lines and the words.`,
     "",
-    `THE HOOK CARD: "hook_text" is the big title shown on screen over the first 3.5 seconds: at most ${HOOK_TEXT_MAX_WORDS} words, it COMPLEMENTS line 1 (adds the stakes or the twist) and never repeats it word for word (pattern: line 1 states the moment, the card names what is at stake or the twist). Fresh words for this story, never an example sentence from this brief.`,
+    `THE HOOK CARD: "hook_text" is the big title shown on screen over the first 3.5 seconds: at most ${HOOK_TEXT_MAX_WORDS} words, it COMPLEMENTS line 1 (adds the stakes or the twist) and never repeats it word for word (pattern: line 1 states the moment, the card names what is at stake or the twist). Fresh words for this story, never an example sentence from this brief. Keep it short and big on screen: ideally at most 8 words and 45 characters.`,
     "",
     "THE CAST:",
     "- ONE recurring parent (mom or dad) and ONE young child of the stage that fits the topic (age 0-5 only).",
