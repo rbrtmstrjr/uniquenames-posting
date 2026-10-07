@@ -190,6 +190,32 @@ export function undoll(s: string): string {
     .trim();
 }
 
+const AGE_RE = /\b(?:a |an )?(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|eighteen)[- ](?:week|month|year)s?[- ]old(?:[- ](?:baby|newborn|toddler|boy|girl|child|kid))*(?: (?:boy|girl))?/i;
+const STAGE_AGE: Record<string, string> = { newborn: "a newborn baby", baby: "a baby", toddler: "a toddler", preschooler: "a preschool-age child" };
+/** The child's age phrase: the script's own, else one found in the child's description ("six-month-old baby"), else the stage's. */
+export function childAge(cast: ReelCast, stage?: string | null): string {
+  const own = (cast.child_age ?? "").trim();
+  if (own) return capWords(own, 6);
+  const m = (cast.child ?? "").match(AGE_RE);
+  if (m) return m[0].trim();
+  return (stage && STAGE_AGE[stage]) || "";
+}
+/** The child's noun for "who is in the picture" (newborn / baby / toddler / child), from the age phrase. */
+export function childNoun(age: string): string {
+  if (/newborn|\b(?:\d|one|two|three|four)[- ]weeks?\b/i.test(age)) return "newborn";
+  if (/toddler|\b(?:1|2|one|two|eighteen|1[2-9]|2\d)[- ](?:year|month)/i.test(age) && !/\b(?:[1-9]|1[01]|one|two|three|four|five|six|seven|eight|nine|ten|eleven)[- ]months?\b/i.test(age)) return "toddler";
+  if (/\b(?:3|4|5|three|four|five)[- ]years?|preschool|child/i.test(age)) return "child";
+  return "baby";
+}
+const WHO_WORD = /\b(?:baby|babies|newborn|infant|toddler|boy|girl|child|kid|preschooler|son|daughter|doll)\b/i;
+/** The child's tag with its age first: the tag's own who-fragment ("chubby baby") gives way to the age phrase. */
+export function childTagWithAge(tag: string, age: string): string {
+  if (!age) return tag;
+  const parts = tag.split(",").map((x) => x.trim()).filter(Boolean);
+  const rest = parts.length && WHO_WORD.test(parts[0]) ? parts.slice(1) : parts;
+  return [age, ...rest].join(", ");
+}
+
 /** Comma fragments of `b` that `a` already has are dropped ("tan skin, rust shorts" after "…, tan skin, …" → "rust shorts"). */
 export function dedupeFragments(a: string, b: string): string {
   const key = (x: string) => x.trim().toLowerCase();
@@ -223,6 +249,20 @@ export function positiveOnly(s: string, dolls = false): string {
 export const HOOK_ROOM =
   "Composition: the top quarter of the frame is calm and simple, a soft stretch of the scene's own background; the faces and the action sit in the lower three quarters of the frame.";
 
+/**
+ * Who is in the picture, said positively (naming "nobody else" would summon strangers at cfg 1): both → "the only
+ * people in the picture are the mom and her baby"; one → "the mom is the only person in the picture"; hands-only shots
+ * say so; object / none → the still-life wording of the moment slot already describes a people-free picture.
+ */
+export function onlyLine(subject: ReelSubject, faceFree: boolean, parent: string, child: string, dolls = false): string {
+  const p = dolls ? `${parent} doll` : parent, c = dolls ? `${child} doll` : child;
+  const hands = faceFree ? ", seen only as their hands" : "";
+  if (subject === "both") return `The only ${dolls ? "figures" : "people"} in the picture are the ${p} and her ${c}${hands}.`.replace("and her", parent === "dad" ? "and his" : "and her");
+  if (subject === "mom") return `The ${p} is the only ${dolls ? "figure" : "person"} in the picture${faceFree ? ", seen only as her hands" : ""}.`.replace("her hands", parent === "dad" ? "his hands" : "her hands");
+  if (subject === "baby") return `The ${c} is the only ${dolls ? "figure" : "person"} in the picture${faceFree ? ", seen only as small hands" : ""}.`;
+  return "";
+}
+
 const HANDS: Record<"mom" | "baby" | "both", string> = {
   mom: "the parent's hands", baby: "the child's small hands", both: "the parent's and the child's hands",
 };
@@ -235,12 +275,19 @@ const HANDS: Record<"mom" | "baby" | "both", string> = {
  * carry no face: a person there is only their hands (skin tone + wardrobe). Only the opening picture (index 0) gets
  * the hook treatment. Lines from before 008 map their 007 framing to a size and show both characters.
  */
+/** The parent's noun for "who is in the picture" (mom unless the cast is a dad). */
+const parentNoun = (cast: ReelCast) => (/\b(?:dad|father|papa|tatay)\b/i.test(`${cast.adult_tag ?? ""} ${cast.adult}`) ? "dad" : "mom");
+
 export function scenePrompt(theme: ReelTheme, cast: ReelCast, scene: PromptScene, index: number): string {
   const dolls = isDollTheme(theme);
   // Doll wording becomes people wording only when the cast was written as dolls (a Knitted Doll script).
   const people = !dolls && isDollCast(cast);
   const fix = (s: string | null | undefined, lift = dolls) => positiveOnly(people ? undoll(s ?? "") : (s ?? ""), lift);
-  const tag = (who: "adult" | "child") => positiveOnly(castTag(cast, who, people ? undoll : undefined));
+  const age = positiveOnly(people ? undoll(childAge(cast)) : childAge(cast));
+  const tag = (who: "adult" | "child") => {
+    const t = positiveOnly(castTag(cast, who, people ? undoll : undefined));
+    return who === "child" ? childTagWithAge(t, age) : t;
+  };
   const legacy = shotOf(scene.shot);
   const size: ReelShotSize = sizeOf(scene.shot_size) ?? (legacy ? LEGACY_SIZE[legacy] : "medium");
   const subject: ReelSubject = subjectOf(scene.subject) ?? (size === "broll" ? "none" : "both");
@@ -267,15 +314,18 @@ export function scenePrompt(theme: ReelTheme, cast: ReelCast, scene: PromptScene
     who = subject === "mom" ? a : subject === "baby" ? c : c2 ? `${a} with ${c2}` : a;
   }
   const setting = fix(rawSetting);
+  const still = moment.replace(/^(A|An|The|One|Some|Two|Three)\b/, (w) => w.toLowerCase());
+  const shown = !person ? `a quiet still life, ${still}, a calm, peaceful space` : index === 0 ? `a striking, high-emotion moment: ${moment}` : moment;
   const slots = [
     `Vertical 9:16 ${frameOf(size, index)}`,
-    [index === 0 ? `a striking, high-emotion moment: ${moment}` : moment, action, feeling].filter(Boolean).join(", "),
+    [shown, action, feeling].filter(Boolean).join(", "),
     who,
     setting,
     lightFor(emotion, setting),
-    styleTag(theme),
+    styleTag(theme, !person),
   ].filter(Boolean);
+  const only = onlyLine(subject, faceFree, parentNoun(cast), childNoun(age), dolls);
   const pose = dolls && subject === "both" && !faceFree ? ` ${KNIT_POSE}` : "";
   const room = index === 0 ? ` ${HOOK_ROOM}` : "";
-  return `${slots.join(", ")}.${pose}${room}\n${NO_TEXT}`;
+  return `${slots.join(", ")}.${only ? ` ${only}` : ""}${pose}${room}\n${NO_TEXT}`;
 }

@@ -4,12 +4,12 @@ import { describe, expect, it } from "vitest";
 import { NO_TEXT } from "@/lib/planner/prompt";
 import { REEL_THEME_IDS } from "@/lib/db/types";
 import {
-  capWords, castTag, dedupeFragments, HOOK_ROOM, EMOTION_FACE, EMOTION_LIGHT, EMOTION_POSE, EMOTION_POSE_ONE, frameOf, lightFor, isDollCast, joinIdea, KNIT_POSE, KNIT_STYLE, positiveOnly,
+  capWords, castTag, childAge, childNoun, childTagWithAge, dedupeFragments, HOOK_ROOM, onlyLine, EMOTION_FACE, EMOTION_LIGHT, EMOTION_POSE, EMOTION_POSE_ONE, frameOf, lightFor, isDollCast, joinIdea, KNIT_POSE, KNIT_STYLE, positiveOnly,
   SHOT_FRAMES, scenePrompt, splitIdea, undoll, wardrobeCue,
 } from "@/lib/reels/prompt";
 import { REEL_EMOTIONS, REEL_SHOTS } from "@/lib/reels/motion";
 import { REEL_SHOT_SIZES, REEL_SUBJECTS } from "@/lib/reels/shots";
-import { DEFAULT_THEME_ID, STATIC_THEMES, STYLE_TAG, staticTheme, styleTag, themeOf } from "@/lib/reels/themes";
+import { DEFAULT_THEME_ID, STATIC_THEMES, STILL_STYLE_TAG, STYLE_TAG, staticTheme, styleTag, themeOf } from "@/lib/reels/themes";
 
 const DOLLS = {
   adult: "the mom doll: a crocheted mother doll with chunky dark-brown yarn hair gathered in a low bun, warm tan wool skin, a mustard-yellow cable-knit cardigan over a cream knitted dress",
@@ -73,7 +73,7 @@ describe("scenePrompt v2: front-loaded token order", () => {
     expect(at("chubby baby, rust romper")).toBeLessThan(at("the sala at dusk"));
     expect(at("the sala at dusk")).toBeLessThan(at(lightFor("teary", "the sala at dusk")));
     expect(at(lightFor("teary", "the sala at dusk"))).toBeLessThan(at(STYLE_TAG.animated3d));
-    expect(p.endsWith(`${STYLE_TAG.animated3d}.\n${NO_TEXT}`)).toBe(true);
+    expect(p.endsWith(`${STYLE_TAG.animated3d}. The only people in the picture are the mom and her baby.\n${NO_TEXT}`)).toBe(true);
     // the long style block is for theme previews only
     expect(p).not.toContain(STATIC_THEMES.animated3d.style);
     expect(p).not.toContain("—");
@@ -290,5 +290,52 @@ describe("undoll only for a doll-written cast", () => {
 
   it("maps bead eyes to eyes and drops embroidered", () => {
     expect(undoll("a crocheted baby doll with glossy bead eyes and a small embroidered smile")).toBe("a baby with glossy eyes and a small smile");
+  });
+});
+
+describe("no strangers, no faces on objects, a fixed child age (e2e 4cc98904)", () => {
+  const CAST = { ...PEOPLE, child_age: "a 10-month-old baby boy" };
+
+  it("style tags never invite faces, families or extra characters; the still variant has no character wording at all", () => {
+    for (const id of REEL_THEME_IDS) {
+      expect(STYLE_TAG[id], id).not.toMatch(/face|family|people|characters?/i);
+      expect(STILL_STYLE_TAG[id], id).not.toMatch(/face|family|people|character|doll|skin|figure/i);
+      expect(STILL_STYLE_TAG[id].split(" ").length, id).toBeLessThanOrEqual(12);
+    }
+    expect(styleTag(STATIC_THEMES.knitted, true)).toBe(STILL_STYLE_TAG.knitted);
+  });
+
+  it("every prompt says who is in frame, positively", () => {
+    const p = (subject: string, shot_size = "medium") => scenePrompt(STATIC_THEMES.animated3d, CAST, { ...line, subject, shot_size }, 3);
+    expect(p("both")).toContain("The only people in the picture are the mom and her baby.");
+    expect(p("mom")).toContain("The mom is the only person in the picture.");
+    expect(p("baby")).toContain("The baby is the only person in the picture.");
+    expect(p("both", "detail")).toContain("The only people in the picture are the mom and her baby, seen only as their hands.");
+    const still = p("object");
+    expect(still).toContain("a quiet still life, the mom rocks the baby by the window, a calm, peaceful space");
+    expect(still).toContain(STILL_STYLE_TAG.animated3d);
+    expect(still).not.toMatch(/only person|only people/);
+    for (const s of ["both", "mom", "baby", "object", "none"]) expect(p(s).replace(NO_TEXT, "")).not.toMatch(/\b(?:no|nobody|not|without|empty of|else)\b/i);
+    const dad = scenePrompt(STATIC_THEMES.anime, { ...CAST, adult_tag: "Filipino dad, tan skin, grey shirt" }, { ...line, subject: "both" }, 3);
+    expect(dad).toContain("The only people in the picture are the dad and his baby.");
+    expect(onlyLine("both", false, "mom", "toddler", true)).toBe("The only figures in the picture are the mom doll and her toddler doll.");
+    expect(onlyLine("none", false, "mom", "baby")).toBe("");
+  });
+
+  it("the child's age leads its tag every time the child appears", () => {
+    const b = scenePrompt(STATIC_THEMES.animated3d, CAST, { ...line, subject: "baby" }, 3);
+    expect(b).toContain("a 10-month-old baby boy, tan skin, rust romper");
+    expect(b).not.toContain("chubby baby");
+    const both = scenePrompt(STATIC_THEMES.animated3d, CAST, { ...line, subject: "both" }, 3);
+    expect(both).toContain("Filipino mom, tan skin, low bun, mustard cardigan with a 10-month-old baby boy, rust romper");
+    expect(childTagWithAge("chubby baby, tan skin, rust romper", "a 2-year-old toddler girl")).toBe("a 2-year-old toddler girl, tan skin, rust romper");
+    expect(childAge({ adult: "x", child: "Leo, a chubby six-month-old baby with dark hair" })).toBe("six-month-old baby");
+    expect(childAge({ adult: "x", child: "Leo, an energetic toddler" }, "toddler")).toBe("a toddler");
+    expect(childNoun("a 10-month-old baby boy")).toBe("baby");
+    expect(childNoun("a 2-year-old toddler girl")).toBe("toddler");
+    expect(childNoun("a newborn baby")).toBe("newborn");
+    expect(childNoun("a four-year-old boy")).toBe("child");
+    expect(scenePrompt(STATIC_THEMES.anime, { ...CAST, child_age: "a 2-year-old toddler girl" }, { ...line, subject: "baby" }, 3))
+      .toContain("The toddler is the only person in the picture.");
   });
 });

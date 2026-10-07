@@ -1,6 +1,6 @@
 import "server-only";
 import { emotionOf, REEL_EMOTIONS, type ReelEmotion } from "@/lib/reels/motion";
-import { joinIdea, type ReelCast } from "@/lib/reels/prompt";
+import { childAge, joinIdea, type ReelCast } from "@/lib/reels/prompt";
 import {
   capPunches, PUNCH_MAX, PUNCH_MAX_WORDS, punchIn, REEL_SHOT_SIZES, REEL_SUBJECTS, repairShotList,
   type ReelShotSize, type ReelSubject,
@@ -112,8 +112,8 @@ export function reelWordBudget(maxScenes: number, speed = 1) {
 /** The cast block: crocheted dolls for Knitted Doll, people for every other theme (the style turns them into clay, paper, …). */
 function castRules(dolls: boolean): string {
   return dolls
-    ? "- The art is a HANDMADE KNITTED-TEXTILE DOLL style (amigurumi crochet dolls of soft wool and yarn), so describe the recurring cast AS TEXTILE DOLLS. \"adult\" / \"child\": a short name, then exact fixed details — e.g. \"the mom doll: a crocheted mother doll with chunky dark-brown yarn hair in a low bun, warm tan wool skin, a mustard-yellow cable-knit cardigan over a cream knitted dress\". \"adult_tag\" / \"child_tag\": the SAME doll in at most 7 words, in the form '<who>, <skin> skin, <hair>, <outfit>' — e.g. \"mom doll, tan wool skin, yarn bun, mustard cardigan\" and \"baby doll, tan wool skin, rust romper\"."
-    : "- The art style is added later, so describe the recurring cast as REAL PEOPLE. \"adult\" / \"child\": a short name, then exact fixed details — e.g. \"the mom: a young Filipino mother in her early thirties with warm tan skin and dark-brown hair in a low bun, wearing a mustard-yellow cardigan over a cream dress\". \"adult_tag\" / \"child_tag\": the SAME person in at most 7 words, in the form '<who>, <skin> skin, <hair>, <outfit>' — e.g. \"Filipino mom, tan skin, low bun, mustard cardigan\" and \"chubby baby, tan skin, rust romper\". Clothing in warm earthy colours (mustard, cream, rust, oatmeal, sage) so the same two people appear in every image.";
+    ? "- The art is a HANDMADE KNITTED-TEXTILE DOLL style (amigurumi crochet dolls of soft wool and yarn), so describe the recurring cast AS TEXTILE DOLLS. \"adult\" / \"child\": a short name, then exact fixed details — e.g. \"the mom doll: a crocheted mother doll with chunky dark-brown yarn hair in a low bun, warm tan wool skin, a mustard-yellow cable-knit cardigan over a cream knitted dress\". \"adult_tag\" / \"child_tag\": the SAME doll in at most 7 words, in the form '<who>, <skin> skin, <hair>, <outfit>' — e.g. \"mom doll, tan wool skin, yarn bun, mustard cardigan\" and \"baby doll, tan wool skin, rust romper\". \"child_age\": the child's exact age + noun, fixed for the whole reel (e.g. \"a 10-month-old baby boy\")."
+    : "- The art style is added later, so describe the recurring cast as REAL PEOPLE. \"adult\" / \"child\": a short name, then exact fixed details — e.g. \"the mom: a young Filipino mother in her early thirties with warm tan skin and dark-brown hair in a low bun, wearing a mustard-yellow cardigan over a cream dress\". \"adult_tag\" / \"child_tag\": the SAME person in at most 7 words, in the form '<who>, <skin> skin, <hair>, <outfit>' — e.g. \"Filipino mom, tan skin, low bun, mustard cardigan\" and \"chubby baby, tan skin, rust romper\". \"child_age\": the child's exact age + noun, fixed for the whole reel and matching the stage (e.g. \"a 10-month-old baby boy\", \"a 2-year-old toddler girl\"). Clothing in warm earthy colours (mustard, cream, rust, oatmeal, sage) so the same two people appear in every image.";
 }
 
 /** Feeling + pose rules: faceless themes (Knitted Doll, Paper Craft) show the feeling through body language only. */
@@ -183,7 +183,7 @@ export function reelScriptPrompt({ topic, maxScenes, alreadyMade, speed, theme }
     '  "title": "<short internal title, at most 60 characters, different from every already-made title>",',
     '  "stage": "<exactly one of newborn|baby|toddler|preschooler>",',
     `  "hook_text": "<the hook card, at most ${HOOK_TEXT_MAX_WORDS} words>",`,
-    '  "cast": { "adult": "<exact fixed description>", "child": "<exact fixed description>", "adult_tag": "<at most 7 words>", "child_tag": "<at most 7 words>" },',
+    '  "cast": { "adult": "<exact fixed description>", "child": "<exact fixed description>", "adult_tag": "<at most 7 words>", "child_tag": "<at most 7 words>", "child_age": "<e.g. a 10-month-old baby boy>" },',
     `  "scenes": [ { "beat": "<hook|build|turn|close>", "narration": "<the spoken line>", "idea": "<what is in the picture>", "setting": "<place + time of day>", "shot_size": "<${REEL_SHOT_SIZES.join("|")}>", "subject": "<${REEL_SUBJECTS.join("|")}>", "emotion": "<${REEL_EMOTIONS.join("|")}>", "action": "<body language + hands>", "punch": "<word(s) from the line, or empty>", "time_jump": <true|false> } ]`,
     "}",
   ].join("\n");
@@ -198,8 +198,8 @@ const SCHEMA: GeminiSchema = {
     hook_text: { type: "STRING", description: `the on-screen hook card, at most ${HOOK_TEXT_MAX_WORDS} words, complementing line 1` },
     cast: {
       type: "OBJECT",
-      properties: { adult: { type: "STRING" }, child: { type: "STRING" }, adult_tag: { type: "STRING" }, child_tag: { type: "STRING" } },
-      required: ["adult", "child", "adult_tag", "child_tag"],
+      properties: { adult: { type: "STRING" }, child: { type: "STRING" }, adult_tag: { type: "STRING" }, child_tag: { type: "STRING" }, child_age: { type: "STRING" } },
+      required: ["adult", "child", "adult_tag", "child_tag", "child_age"],
     },
     scenes: {
       type: "ARRAY",
@@ -250,10 +250,13 @@ export function validateReelScript(raw: unknown, maxScenes: number, speed = 1): 
   const cast: ReelCast = { adult: lightClean(str(c.adult)), child: lightClean(str(c.child)) };
   if (!cast.adult || !cast.child) return { ok: false, error: "The script is missing the parent or child doll." };
   // the short tags are optional: the prompt builder cuts one from the description when they are missing
-  for (const k of ["adult_tag", "child_tag"] as const) {
+  for (const k of ["adult_tag", "child_tag", "child_age"] as const) {
     const tag = lightClean(str(c[k])).slice(0, TAG_MAX).trim();
     if (tag) cast[k] = tag;
   }
+  // the child's age is pinned on every reel (from the description or the stage when Gemini gave none)
+  const age = childAge(cast, stage);
+  if (age) cast.child_age = age;
   const list = Array.isArray(d.scenes) ? d.scenes.slice(0, maxScenes) : [];
   if (list.length < 2) return { ok: false, error: "The script needs at least 2 scenes." };
   const budget = reelWordBudget(maxScenes, speed);

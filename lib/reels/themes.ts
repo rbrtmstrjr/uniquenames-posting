@@ -62,7 +62,7 @@ export const STATIC_THEMES: Record<ReelThemeId, ReelTheme> = {
  */
 export const STYLE_TAG: Record<ReelThemeId, string> = {
   knitted: "handmade amigurumi crochet doll photography, visible stitches, felt and yarn set",
-  animated3d: "stylized 3D animated family-film still, expressive faces, warm cream and honey palette",
+  animated3d: "stylized 3D animated feature-film still, soft global illumination, warm honey palette",
   watercolor: "storybook watercolor illustration on textured paper, soft washes, fine ink lines",
   clay: "handmade clay stop-motion still, matte clay with fingerprints, miniature tabletop set",
   papercraft: "layered cut-paper diorama, thick cardstock layers, soft depth shadows between layers",
@@ -86,8 +86,24 @@ export function themeOf(row: unknown, id?: string | null): ReelTheme {
   return staticTheme(isThemeId(r.id) ? r.id : id);
 }
 
-/** The short style tag of a theme (unknown id → the default theme's). */
-export const styleTag = (t: Pick<ReelTheme, "id">) => STYLE_TAG[isThemeId(t.id) ? t.id : DEFAULT_THEME_ID];
+/**
+ * The style tag for pictures with nobody in them (objects, empty places, B-roll): no doll, face, skin or character
+ * wording, so a bottle never gets a face and no stranger walks in.
+ */
+export const STILL_STYLE_TAG: Record<ReelThemeId, string> = {
+  knitted: "handmade felt and yarn miniature set photography, visible stitches, soft textiles",
+  animated3d: "stylized 3D animated feature-film still, soft global illumination, warm honey palette",
+  watercolor: "storybook watercolor illustration on textured paper, soft washes, fine ink lines",
+  clay: "handmade clay stop-motion still, matte clay with fingerprints, miniature tabletop set",
+  papercraft: "layered cut-paper diorama, thick cardstock layers, soft depth shadows between layers",
+  anime: "soft slice-of-life anime background art, clean line art, gentle cel shading",
+  sketch: "black-and-white graphite pencil drawing on white sketchbook paper, soft cross-hatching",
+  cinematic: "cinematic real-life film still, 35mm film grain, shallow depth of field",
+};
+
+/** The short style tag of a theme (unknown id → the default theme's); `still` = the people-free variant. */
+export const styleTag = (t: Pick<ReelTheme, "id">, still = false) =>
+  (still ? STILL_STYLE_TAG : STYLE_TAG)[isThemeId(t.id) ? t.id : DEFAULT_THEME_ID];
 
 /** Knitted Doll draws every character as a crocheted doll: the cast and ideas are written as dolls. */
 export const isDollTheme = (t: Pick<ReelTheme, "id">) => t.id === "knitted";

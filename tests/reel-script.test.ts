@@ -140,7 +140,7 @@ describe("writeReelScript", () => {
     const r = await writeReelScript(input30);
     expect(r.ok).toBe(true);
     if (!r.ok) return;
-    expect(r.script).toMatchObject({ title: "The Last Time You Carry Them", stage: "baby", hook_text: HOOK_TEXT, cast });
+    expect(r.script).toMatchObject({ title: "The Last Time You Carry Them", stage: "baby", hook_text: HOOK_TEXT, cast: { ...cast, child_age: "a baby" } });
     expect(r.script.scenes).toHaveLength(20);
     expect(r.script.scenes[0]).toEqual({
       beat: "hook", narration: HOOK, idea: "The mom doll rocks the baby doll, moment 0 — the nursery at 3 a.m", emotion: "tender",
@@ -155,7 +155,7 @@ describe("writeReelScript", () => {
     expect(items.properties.subject.enum).toHaveLength(5);
     expect(items.properties.time_jump.type).toBe("BOOLEAN");
     expect(arg.schema.required).toContain("hook_text");
-    expect(arg.schema.properties.cast.required).toEqual(["adult", "child", "adult_tag", "child_tag"]);
+    expect(arg.schema.properties.cast.required).toEqual(["adult", "child", "adult_tag", "child_tag", "child_age"]);
   });
 
   it("uses the caller's remaining time budget when given", async () => {
@@ -174,7 +174,11 @@ describe("writeReelScript", () => {
   it("missing short tags are fine (the prompt builder cuts one from the description)", async () => {
     generateJson.mockResolvedValueOnce({ ok: true, data: script(10, { cast: { adult: cast.adult, child: cast.child } }) });
     const r = await writeReelScript(input10);
-    expect(r.ok && r.script.cast).toEqual({ adult: cast.adult, child: cast.child });
+    expect(r.ok && r.script.cast).toEqual({ adult: cast.adult, child: cast.child, child_age: "a baby" });
+    // Gemini's own age wins
+    generateJson.mockResolvedValueOnce({ ok: true, data: script(10, { cast: { ...cast, child_age: "a 10-month-old baby boy" } }) });
+    const r2 = await writeReelScript(input10);
+    expect(r2.ok && r2.script.cast.child_age).toBe("a 10-month-old baby boy");
   });
 
   it("trims scenes beyond the max; rejects too few scenes or words", async () => {

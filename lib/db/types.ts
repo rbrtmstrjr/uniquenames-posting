@@ -126,7 +126,11 @@ export type ReelSubject = (typeof REEL_SUBJECTS)[number];
 export type ReelStatus = "script" | "queued" | "voicing" | "imaging" | "rendering" | "ready" | "needs_attention" | "failed";
 export type ReelSceneStatus = "pending" | "queued" | "generating" | "done" | "failed" | "skipped";
 /** The script's two characters (reels.doll_cast); the short tags (playbook v2) are absent on older reels. */
-export interface ReelCast { adult: string; child: string; adult_tag?: string; child_tag?: string }
+export interface ReelCast {
+  adult: string; child: string; adult_tag?: string; child_tag?: string;
+  /** The child's age phrase put first in every picture of the child ("a 10-month-old baby boy"); absent on older reels. */
+  child_age?: string;
+}
 /** One Whisper word with its times in seconds. */
 export interface ReelWord { word: string; start: number; end: number }
 export interface ReelRow {
