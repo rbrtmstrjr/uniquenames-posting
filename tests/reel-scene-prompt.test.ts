@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { NO_TEXT } from "@/lib/planner/prompt";
 import { REEL_THEME_IDS } from "@/lib/db/types";
 import {
-  capWords, castTag, EMOTION_FACE, EMOTION_LIGHT, EMOTION_POSE, EMOTION_POSE_ONE, frameOf, lightFor, isDollCast, joinIdea, KNIT_POSE, KNIT_STYLE, positiveOnly,
+  capWords, castTag, HOOK_ROOM, EMOTION_FACE, EMOTION_LIGHT, EMOTION_POSE, EMOTION_POSE_ONE, frameOf, lightFor, isDollCast, joinIdea, KNIT_POSE, KNIT_STYLE, positiveOnly,
   SHOT_FRAMES, scenePrompt, splitIdea, undoll, wardrobeCue,
 } from "@/lib/reels/prompt";
 import { REEL_EMOTIONS, REEL_SHOTS } from "@/lib/reels/motion";
@@ -176,6 +176,19 @@ describe("scenePrompt v2: front-loaded token order", () => {
     expect(p).toContain("The mom rocks the baby; the characters smile");
     expect(p).not.toContain(KNIT_POSE);
     expect(undoll("both dolls hug; the mom doll's lap")).toBe("both of them hug; the mom's lap");
+  });
+
+  it("scene 1 keeps the top fifth calm (room for the hook card), faces and action below it; only scene 1", () => {
+    for (const id of REEL_THEME_IDS) {
+      const p = scenePrompt(STATIC_THEMES[id], DOLLS, line, 0);
+      expect(p, id).toContain(HOOK_ROOM);
+      expect(p.indexOf(HOOK_ROOM)).toBeGreaterThan(p.indexOf(STYLE_TAG[id]));
+      expect(p.trim().endsWith(NO_TEXT)).toBe(true);
+    }
+    expect(HOOK_ROOM).toMatch(/top fifth of the frame is calm and simple/);
+    expect(HOOK_ROOM).toMatch(/faces and the action sit below it/);
+    expect(HOOK_ROOM).not.toMatch(/\b(?:no|not|never|without|avoid|empty of|free of)\b|camera|text/i);
+    expect(scenePrompt(STATIC_THEMES.anime, PEOPLE, line, 1)).not.toContain(HOOK_ROOM);
   });
 
   it("only the opening picture gets the hook treatment", () => {

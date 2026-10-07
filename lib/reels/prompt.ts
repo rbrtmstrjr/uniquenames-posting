@@ -207,6 +207,10 @@ export function positiveOnly(s: string, dolls = false): string {
   return clean(kept.join(" ").replace(/\bcamera\b/gi, "viewer"));
 }
 
+/** The opening picture carries the hook card up top: that band stays calm so the card never covers a face (positive wording). */
+export const HOOK_ROOM =
+  "Composition: the top fifth of the frame is calm and simple, a soft stretch of the scene's own background; the faces and the action sit below it, in the middle of the frame.";
+
 const HANDS: Record<"mom" | "baby" | "both", string> = {
   mom: "the parent's hands", baby: "the child's small hands", both: "the parent's and the child's hands",
 };
@@ -259,5 +263,6 @@ export function scenePrompt(theme: ReelTheme, cast: ReelCast, scene: PromptScene
     styleTag(theme),
   ].filter(Boolean);
   const pose = dolls && subject === "both" && !faceFree ? ` ${KNIT_POSE}` : "";
-  return `${slots.join(", ")}.${pose}\n${NO_TEXT}`;
+  const room = index === 0 ? ` ${HOOK_ROOM}` : "";
+  return `${slots.join(", ")}.${pose}${room}\n${NO_TEXT}`;
 }
