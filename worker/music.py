@@ -1,6 +1,6 @@
 # A reel's background music: ACE-Step 1.5 through ComfyUI's native nodes (models in Comfy Desktop's shared
 # models folder, see docs/reference/reel-voices-music-spike.md) makes one unique instrumental bed per reel,
-# generated voice length + 8 s, as a 48 kHz stereo FLAC. The render (reel_render.py) mixes it under the voice and
+# generated voice length + 8 s, as a 48 kHz stereo FLAC. The render (reel_audio.py) mixes it under the voice and
 # trims it to voice + 2 s with a 2 s fade-out.
 import json
 import random
@@ -105,21 +105,3 @@ def clamp_volume(pct):
     except (TypeError, ValueError):
         return 18
     return min(40, max(5, v))
-
-
-def mix_filter(voice_in, music_in, volume, duration):
-    """filter_complex part: the bed (loudness-normalised, at `volume` 0..1, full from t=0 (007: only a 50 ms
-    de-click fade in, was 1 s), fade out 2 s) ducked under
-    the voice (sidechain, voice as key) and mixed with it into [aout], exactly `duration` s long.
-    The voice and the key are padded (apad) so the compressor and amix never stop when the voice does; the bed
-    is padded then trimmed so a short bed can never cut the video. The fades are on the bed only: the video
-    ends when the voice does, and the last words must not fade out."""
-    d = max(0.1, float(duration))
-    fmt = "aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo"
-    return ";\n".join([
-        "[%s]%s,apad,asplit=2[voice][key]" % (voice_in, fmt),
-        "[%s]%s,apad,atrim=0:%.3f,asetpts=PTS-STARTPTS,loudnorm=I=-16:TP=-1.5:LRA=7,aresample=48000,volume=%.2f,"
-        "afade=t=in:st=0:d=%.2f,afade=t=out:st=%.3f:d=2[bed]" % (music_in, fmt, d, float(volume), FADE_IN_SECONDS, max(0.0, d - 2)),
-        "[bed][key]sidechaincompress=threshold=0.02:ratio=8:attack=20:release=400:makeup=1[ducked]",
-        "[voice][ducked]amix=inputs=2:duration=shortest:normalize=0,atrim=0:%.3f[aout]" % d,
-    ])

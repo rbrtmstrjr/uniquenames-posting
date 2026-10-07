@@ -45,39 +45,6 @@ def jpeg(colour):
     return buf.getvalue()
 
 
-class CaptionTest(unittest.TestCase):
-    def test_five_words_in_groups_with_the_spoken_word_yellow(self):
-        ass = rr.ass_captions(WORDS)
-        self.assertIn("PlayResX: 1080\nPlayResY: 1920", ass)
-        style = [l for l in ass.splitlines() if l.startswith("Style: Cap,")][0].split(",")
-        self.assertEqual(style[1], "Poppins")
-        self.assertEqual(style[6], "&H80000000")                                    # soft shadow colour
-        self.assertEqual((style[7], style[16], style[17], style[18]), ("-1", "6", "3", "2"))  # bold, outline, shadow, bottom-centre
-        self.assertEqual(int(style[21]), round(1920 * 0.34))                       # MarginV = 34% of the height
-        events = [l for l in ass.splitlines() if l.startswith("Dialogue:")]
-        self.assertEqual(len(events), 5)                                           # one per spoken word
-        # "close," ends the first group (comma); the gap to "every" (0.2 s) is bridged
-        # the spoken word is yellow and pops (80% -> 110% -> 100%), then the rest of the group is reset
-        pop, reset = rr.POP, "{\\1c&H00FFFFFF&\\fscx100\\fscy100}"
-        self.assertEqual(events[0], "Dialogue: 0,0:00:00.00,0:00:00.30,Cap,,0,0,0,,{\\1c&H0000E6FF&}" + pop + "HOLD"
-                         + reset + " THEM CLOSE")
-        self.assertTrue(events[2].startswith("Dialogue: 0,0:00:00.60,0:00:01.20,"))
-        self.assertTrue(events[2].endswith("HOLD THEM {\\1c&H0000E6FF&}" + pop + "CLOSE" + reset))
-        self.assertTrue(events[4].startswith("Dialogue: 0,0:00:01.50,0:00:02.00,"))
-        self.assertTrue(events[4].endswith("EVERY {\\1c&H0000E6FF&}" + pop + "DAY" + reset))
-
-    def test_groups_hold_at_most_three_words_and_long_text_splits(self):
-        words = [{"word": w, "start": i * 0.3, "end": i * 0.3 + 0.3} for i, w in
-                 enumerate("one two three four extraordinarily wonderful".split())]
-        self.assertEqual([[w["text"] for w in g] for g in rr.group_words(words)],
-                         [["ONE", "TWO", "THREE"], ["FOUR", "EXTRAORDINARILY"], ["WONDERFUL"]])
-
-    def test_ass_control_characters_are_dropped(self):
-        self.assertEqual(rr.caption_text("{\\b1}hi"), "B1HI")
-        self.assertEqual(rr.caption_text("why?"), "WHY?")
-        self.assertEqual(rr.ass_time(61.257), "0:01:01.26")
-
-
 class TimelineTest(unittest.TestCase):
     def test_short_spans_get_the_minimum_and_the_total_is_kept(self):
         d = rr.fit_durations([0.0, 3.0, 0.2, 6.8], 10.0)
@@ -111,34 +78,14 @@ class TimelineTest(unittest.TestCase):
 
 
 class ArgsTest(unittest.TestCase):
-    def test_ffmpeg_args(self):
-        args = rr.ffmpeg_args("ffmpeg", [{"image": "a.jpg", "duration": 2.0}, {"image": "b.jpg", "duration": 1.5},
-                                         {"image": "c.jpg", "duration": 6.0}],
-                              "voice.wav", "C:\\tmp\\captions.ass", "out.mp4", fontsdir="fonts")
-        graph = args[args.index("-filter_complex") + 1]
-        self.assertIn("scale=2160:3840", graph)
-        # no motion given (a database without 007): the rotation, never the same move twice in a row
-        self.assertIn("zoompan=z='1+0.100*(on/59)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=60", graph)  # push_in
-        self.assertIn("zoompan=z='1.150':x='(iw-iw/zoom)*((on/44)*(on/44)*(3-2*(on/44)))'", graph)        # pan_right
-        self.assertIn("zoompan=z='1.100-0.100*(on/179)'", graph)                                          # pull_out
-        self.assertNotIn("fade", graph)                                                # the first frame is instant
-        self.assertIn(":d=60:s=1080x1920:fps=30", graph)
-        self.assertIn(":d=45:s=1080x1920:fps=30", graph)
-        self.assertIn("concat=n=3:v=1:a=0", graph)
-        self.assertIn("subtitles=filename='C\\:/tmp/captions.ass':fontsdir='fonts'", graph)
-        tail = " ".join(args[args.index("-map"):])
-        for want in ("-map 3:a", "-c:v libx264 -preset veryfast -crf 20", "-pix_fmt yuv420p", "-c:a aac -b:a 160k",
+    def test_video_args(self):
+        args = rr.video_args("ffmpeg", "audio.wav", "out.mp4")
+        line = " ".join(args)
+        self.assertIn("-f rawvideo -pix_fmt rgb24 -s 1080x1920 -r 30 -i pipe:0 -i audio.wav -map 0:v -map 1:a", line)
+        for want in ("-c:v libx264 -preset veryfast -crf 20", "-pix_fmt yuv420p", "-c:a aac -b:a 160k",
                      "-movflags +faststart", "-shortest"):
-            self.assertIn(want, tail)
+            self.assertIn(want, line)
         self.assertEqual(args[-1], "out.mp4")
-
-    def test_filter_script(self):
-        d = tempfile.mkdtemp()
-        self.addCleanup(shutil.rmtree, d, True)
-        args = rr.use_filter_script(["ff", "-filter_complex", "GRAPH", "-map", "[v]"], os.path.join(d, "g.txt"))
-        self.assertEqual(args, ["ff", "-/filter_complex", "g.txt", "-map", "[v]"])
-        with open(os.path.join(d, "g.txt")) as fh:
-            self.assertEqual(fh.read(), "GRAPH")
 
     def test_preview_bitrate(self):
         self.assertEqual(rr.preview_bitrate_k(100), int(15 * 8192 / 100 - 128))   # 1100k for a 100 s reel
@@ -214,7 +161,7 @@ class RealRenderTest(unittest.TestCase):
         ]
 
     def render(self):
-        with mock.patch.object(rr, "caption_font", return_value=None):
+        with mock.patch.object(rr.fonts, "reel_caption_font", return_value=(None, 800)):
             rr.render_reel(self.runner, self.reel, self.scenes)
 
     def probe(self, path):
@@ -253,9 +200,21 @@ class RealRenderTest(unittest.TestCase):
         self.assertIn(RID + "/preview-v4.mp4", self.supa.removed)
         self.assertIn(reels.STALE, self.logs)
 
-    def test_ffmpeg_failure_fails_the_reel_with_its_message(self):
+    def test_a_broken_picture_fails_the_reel_with_a_redo_message(self):
         self.store[RID + "/scenes/02-v1.jpg"] = b"not a picture at all"
-        with mock.patch.object(rr, "caption_font", return_value=None), \
+        with mock.patch.object(rr.fonts, "reel_caption_font", return_value=(None, 800)), \
+                mock.patch.object(self.runner, "_scenes", return_value=self.scenes):
+            self.runner.run_step({"step": "render", "reel": self.reel, "scene": None})
+        v = self.supa.updates[-1][2]
+        self.assertEqual(v["status"], "failed")
+        self.assertEqual(v["error"], "Picture 3 couldn't be opened. Redo that picture.")
+        self.assertFalse(os.path.exists(os.path.join(self.root, "Reels")))           # nothing saved on the PC
+
+    def test_ffmpeg_failure_fails_the_reel_with_its_message(self):
+        real = rr.video_args
+        bad = lambda *a, **kw: real(*a, **kw)[:-1] + ["-c:v", "no_such_codec", "out.mp4"]  # noqa: E731
+        with mock.patch.object(rr.fonts, "reel_caption_font", return_value=(None, 800)), \
+                mock.patch.object(rr, "video_args", side_effect=bad), \
                 mock.patch.object(self.runner, "_scenes", return_value=self.scenes):
             self.runner.run_step({"step": "render", "reel": self.reel, "scene": None})
         v = self.supa.updates[-1][2]

@@ -61,20 +61,33 @@ Steps, in order: voice → timing → music → images → render.
   `reels/<id>/scenes/<pos>-v<scene version>.jpg`. If the reel's theme (`reels.theme_id` →
   `settings.reel_theme_id` → `knitted`) has `grayscale` (sketch), the picture is turned grey first (before 007 it stays as made; if
   the settings or the theme can't be read, the image goes back in line without using an attempt). The 3rd failure of an image sets the reel `needs_attention`.
-- **Render** (`reel_render.py`): ffmpeg (from `imageio-ffmpeg`) gives each image a camera move for its line's spoken
-  time (`reel_scenes.motion`, 007: push_in, pull_out, pan_left/right, tilt_up/down at zoom 1.15, punch = 0.3 s snap
-  to +18 %, settle, creep; zoompan on a 2x pre-scaled picture; no motion (before 007) → `punch` for a key moment,
-  else a rotation; never the same move twice in a row). The first frame is the picture, no fade; the voice starts at
-  once. Word-by-word captions (bottom, white, the spoken word yellow and popping 80 % → 110 % → 100 % in 120 ms), H.264 1080x1920, then a 720p preview
-  (<= ~15 MB, 45 MB cap). Time limits 120 / 900 / 300 s per ffmpeg run. With `settings.reel_music` on and a
-  non-empty `music_path`, the bed is loudness-normalised, set to `reel_music_volume` % (5–40, default 18), there from t=0
-  (a 50 ms de-click fade in), out 2 s, ducked under the voice (`sidechaincompress`, voice as key) and mixed in, cut to the video's length
-  (the voice is padded so the music never stops early; the fades are on the bed only, so the last words never fade).
-  With music the last picture is held 2 s longer (its move goes on), so the reel is voice + 2 s and the music fades
-  out after the last word. Music off, failed (`''`) or missing from storage → the voice only, as long as the voice.
-  A redone voice clears `music_path` too (a new bed is made for the new length); no internet during the music step
-  hands the step back instead of skipping the music. Older versions of a voice's reference clip are deleted from
-  ComfyUI's input folder (found via `--input-directory` in `/system_stats`).
+- **Render** (`reel_render.py` + `reel_frames.py` + `reel_audio.py`, playbook v2): the frames are drawn in Python and
+  piped into ffmpeg (from `imageio-ffmpeg`), H.264 1080x1920 30 fps, then a 720p preview (<= ~15 MB, 45 MB cap).
+  - **Motion**: one move per picture, `push_in` / `pull_out` / `hold` only (`reel_scenes.motion`; old rows with
+    pan/tilt/punch or no motion get push/pull), push and pull alternate, never two holds in a row. Zoom eased with
+    smoothstep, ~3 %/s, 1.04–1.10 per shot (the last shot up to 1.15). Each frame is cut from a 2x (2160x3840) copy
+    with a sub-pixel box (Pillow), so there is no zoompan pixel-stepping (measured ~20x less frame-to-frame jerk than
+    4x-supersampled zoompan). A 60 s reel renders in ~40 s.
+  - **Punch-ins** (008 `punch`): an instant +15 % on the punch word's Whisper start (normalized match inside the line),
+    held to the end of the shot; at most 4 a reel, never in a shot's first 0.3 s or last 0.35 s.
+  - **Cuts**: hard cuts; a 0.4 s dissolve only into a scene with `time_jump` (008).
+  - **Hook card** (008 `reels.hook_text`): white rounded card, Montserrat ExtraBold 92 px (shrinks to fit 3 lines),
+    centred in y 350–650, on from frame 0 (86 % → 104 % → 100 % in 180 ms, no fade-in), gone at 3.5 s.
+  - **Captions**: Montserrat ExtraBold 68 px (`fonts.reel_caption_font`: the catalog's Montserrat at wght 800 →
+    Poppins Bold → Poppins SemiBold), ALL CAPS, 1–3 words / <= 18 characters per chunk, white + 4 px black outline + soft
+    shadow, the spoken word #FFD60A popping 110 % → 100 % over 120 ms (it pushes its neighbours aside), baseline
+    y 1180, never below y 1248 (the bottom 35 %), <= 870 px wide.
+  - **Sound** (built first, `audio.wav`): voice → 48 kHz stereo, HPF 80 Hz, gain to -16 LUFS, light compression; the
+    bed (when `settings.reel_music` is on and `music_path` is set) 18 LU under the voice at the default
+    `reel_music_volume` 18 % (36 % = 6 dB louder), sidechain-ducked ~9 dB (50 / 400 ms), 50 ms in, 2 s out; SFX
+    generated with ffmpeg: a soft whoosh at 0, a pop with the hook card, a soft impact on the first punch-in after
+    70 % of the voice, each peaking 8 dB under the voice; master `loudnorm=I=-14:TP=-1.5:LRA=11` two-pass (linear).
+    With music the last picture is held 2 s longer, so the reel is voice + 2 s and the music fades out after the last
+    word. Music off, failed (`''`) or missing from storage → no bed.
+  - Without 008 the render still works (no hook card, no punch-ins, no dissolves). Time limits: 900 s video,
+    300 s per audio step, 300 s preview. A redone voice clears `music_path` too (a new bed is made for the new length);
+    no internet during the music step hands the step back instead of skipping the music. Older versions of a voice's
+    reference clip are deleted from ComfyUI's input folder (found via `--input-directory` in `/system_stats`).
 - **Versioned storage paths** (bucket `reels`), so a late result never overwrites a newer one:
   `<id>/voice-v<reel version>.wav`, `<id>/music-v<reel version>.flac`, `<id>/scenes/<NN>-v<scene version>.jpg`,
   `<id>/preview-v<reel version>.mp4`, `voices/<id>/sample-v<voice version>.wav`, `themes/<id>/preview-v<theme version>.jpg`.

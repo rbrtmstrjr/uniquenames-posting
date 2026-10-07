@@ -1,9 +1,11 @@
-# The reel's video on the PC: every finished scene picture gets a camera move for its narration line
-# (reel_scenes.motion, 007: push in / pull out / pan / tilt / punch; never the same twice in a row), the voice
-# goes under it from the very first frame, and the words pop in as they are spoken (3 at a time, the spoken one
-# in yellow with a small scale bounce). ffmpeg comes from imageio-ffmpeg. Nothing here needs ComfyUI.
+# The reel's video on the PC (playbook v2). The frames are drawn in Python (reel_frames: sub-pixel push-in /
+# pull-out / hold moves, punch-ins on the stressed words, hard cuts and a dissolve only into time_jump scenes, the
+# hook card and the word captions) and piped into ffmpeg; the sound is built first (reel_audio: voice, ducked
+# music bed, generated SFX, loudness master -14 LUFS). ffmpeg comes from imageio-ffmpeg. Nothing here needs ComfyUI.
 #   full MP4 (1080x1920)  -> Pictures\Unique Names\Reels\<date> <title>.mp4  (written as .part, then renamed)
 #   preview MP4 (720x1280) -> storage reels/<id>/preview-v<version>.mp4     (<= ~15 MB, 45 MB hard cap)
+# Reads 008's columns (reels.hook_text; reel_scenes.punch, time_jump, motion 'hold') when they are there; a database
+# without 008 renders with no hook card and no punch-ins.
 import datetime
 import os
 import re
@@ -12,25 +14,21 @@ import subprocess
 import tempfile
 import time
 
+from PIL import Image
+
 from render import JobError, default_output_root
 from supa import SupaError
 import fonts
 import music as music_mod
+import reel_audio
+import reel_frames
 import timing
 
-FPS = 30
-WIDTH, HEIGHT = 1080, 1920
-# Camera moves (docs/reference/reel-themes-motion-spike.md section 2), on a 2x pre-scaled picture
-MOVES = ("push_in", "pull_out", "pan_left", "pan_right", "tilt_up", "tilt_down", "punch")
-ROTATION = ("push_in", "pan_right", "pull_out", "tilt_up", "pan_left", "tilt_down")  # when a scene has no motion
-PUSH = 0.10                    # push_in / pull_out zoom travel over the scene
-PAN_Z = 1.15                   # pans and tilts hold this zoom and travel the spare margin
-PUNCH_PEAK, PUNCH_SET = 0.18, 0.12   # punch: snap to +18% in 0.3 s, settle to +12% in 0.3 s, then a slow creep
-PUNCH_CREEP = 0.02
-# The spoken word pops: 80% -> 110% in 70 ms -> 100% at 120 ms (times from the word's own event start)
-POP = "{\\fscx80\\fscy80\\t(0,70,\\fscx110\\fscy110)\\t(70,120,\\fscx100\\fscy100)}"
+FPS = reel_frames.FPS
+WIDTH, HEIGHT = reel_frames.WIDTH, reel_frames.HEIGHT
 MIN_SCENE_S = 0.8              # a picture is never on screen for less than this
 RENDER_TIMEOUT = 900
+AUDIO_TIMEOUT = 300
 PREVIEW_TIMEOUT = 300
 HEARTBEAT_S = 60
 PREVIEW_MB = 15
@@ -38,81 +36,9 @@ PREVIEW_RETRY_MB = 8
 PREVIEW_CAP_MB = 45
 PREVIEW_MAX_K = 2500           # a short reel doesn't need more than this at 720p
 UPLOAD_TIMEOUT = 600
-YELLOW = "&H0000E6FF&"         # ASS colours are &HAABBGGRR: this is a warm yellow
-CAPTION_FONT = "Poppins-Bold.ttf"
-# Captions: bottom-centre, a third of the way up (clear of the platform buttons), white with a black
-# outline + soft shadow; the spoken word turns YELLOW.
-CAPTION_STYLE = {"size": 0.046, "align": 2, "margin_v": 0.34, "margin_lr": 0.07, "outline": 6, "shadow": 3,
-                 "back": "&H80000000"}
 ERR_TAIL = 240                 # stderr chars kept in the message (reels.error holds 600)
 NO_NET = "Couldn't reach the internet to save this reel. Press Retry."
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-
-
-# ---------------------------------------------------------------- captions
-def ass_time(t):
-    cs = int(round(max(0.0, float(t)) * 100))
-    return "%d:%02d:%02d.%02d" % (cs // 360000, cs // 6000 % 60, cs // 100 % 60, cs % 100)
-
-
-def caption_text(word):
-    """ALL CAPS, no ASS control characters, no trailing , . ; : (? and ! stay)."""
-    w = re.sub(r"[{}\\]", "", str(word or "")).strip().upper()
-    return re.sub(r"[,.;:]+$", "", w).strip() or w
-
-
-def group_words(words, max_words=3, max_chars=20):
-    """Words in on-screen groups: up to `max_words`, a new group after a comma or a sentence end, or when it gets long."""
-    groups, cur = [], []
-    for w in words:
-        text = caption_text(w.get("word"))
-        if not text:
-            continue
-        item = {"text": text, "start": float(w["start"]), "end": float(w["end"])}
-        if cur and (len(cur) >= max_words or sum(len(c["text"]) + 1 for c in cur) + len(text) > max_chars):
-            groups.append(cur)
-            cur = []
-        cur.append(item)
-        if re.search(r"[,;:.!?]$", str(w.get("word") or "").strip()):
-            groups.append(cur)
-            cur = []
-    if cur:
-        groups.append(cur)
-    return groups
-
-
-def ass_captions(words, width=WIDTH, height=HEIGHT, linger=0.6):
-    """An ASS file: one event per spoken word showing its whole group, that word in yellow and popping in
-    (POP: a scale bounce that starts as the word is spoken). A group stays up until the next group starts (if
-    that is within `linger` s), so it doesn't flicker."""
-    c = CAPTION_STYLE
-    size = int(round(height * c["size"]))
-    lr = int(width * c["margin_lr"])
-    head = (
-        "[Script Info]\nScriptType: v4.00+\nPlayResX: %d\nPlayResY: %d\nWrapStyle: 0\nScaledBorderAndShadow: yes\n\n"
-        "[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, "
-        "Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, "
-        "Alignment, MarginL, MarginR, MarginV, Encoding\n"
-        "Style: Cap,Poppins,%d,&H00FFFFFF,&H00FFFFFF,&H00000000,%s,-1,0,0,0,100,100,0,0,1,%d,%d,%d,%d,%d,%d,1\n\n"
-        "[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
-    ) % (width, height, size, c["back"], c["outline"], c["shadow"], c["align"], lr, lr, int(round(height * c["margin_v"])))
-    groups = group_words(words or [])
-    out = []
-    for gi, g in enumerate(groups):
-        nxt = groups[gi + 1][0]["start"] if gi + 1 < len(groups) else None
-        g_end = g[-1]["end"]
-        if nxt is not None and nxt - g_end <= linger:
-            g_end = nxt
-        for j, w in enumerate(g):
-            start = w["start"]
-            end = g[j + 1]["start"] if j + 1 < len(g) else g_end
-            if end <= start:
-                end = start + 0.05
-            parts = [("{\\1c%s}%s%s{\\1c&H00FFFFFF&\\fscx100\\fscy100}" % (YELLOW, POP, o["text"])) if k == j
-                     else o["text"]
-                     for k, o in enumerate(g)]
-            out.append("Dialogue: 0,%s,%s,Cap,,0,0,0,,%s" % (ass_time(start), ass_time(end), " ".join(parts)))
-    return head + "\n".join(out) + "\n"
 
 
 # ---------------------------------------------------------------- timeline
@@ -158,110 +84,69 @@ def scene_timeline(scenes, total, min_s=MIN_SCENE_S):
     return list(zip([s for s, _t in shown], fit_durations(raw, float(total), min_s)))
 
 
-def frame_counts(durations, fps=FPS):
-    """Whole frames per scene; rounding the running total keeps the video exactly as long as the voice."""
-    out, acc, done = [], 0.0, 0
-    for d in durations:
-        acc += d
-        edge = int(round(acc * fps))
-        out.append(max(1, edge - done))
-        done += out[-1]
-    return out
+frame_counts = reel_frames.frame_counts
 
 
-# ---------------------------------------------------------------- camera moves
-def scene_moves(scenes):
-    """The camera move per shown scene: its `motion` (007) when valid, else 'punch' for a key moment, else the
-    next move of ROTATION; never the same move twice in a row (a repeat takes the next rotation move instead)."""
-    out, k = [], 0
-    for s in scenes:
-        s = s or {}
-        m = s.get("motion")
-        if m not in MOVES:
-            m = "punch" if s.get("key_moment") else None
-        prev = out[-1] if out else None
-        if m is None or m == prev:
-            while ROTATION[k % len(ROTATION)] == prev:
-                k += 1
-            m = ROTATION[k % len(ROTATION)]
-            k += 1
-        out.append(m)
-    return out
+def video_args(ffmpeg, audio, out_path, width=WIDTH, height=HEIGHT, fps=FPS):
+    """Raw RGB frames on stdin + the finished sound -> H.264 + AAC."""
+    return [ffmpeg, "-y", "-nostdin", "-hide_banner", "-v", "error",
+            "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", "%dx%d" % (width, height), "-r", str(fps), "-i", "pipe:0",
+            "-i", audio, "-map", "0:v", "-map", "1:a",
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-maxrate", "8M", "-bufsize", "16M",
+            "-pix_fmt", "yuv420p", "-r", str(fps),
+            "-c:a", "aac", "-b:a", "160k", "-ar", "48000", "-ac", "2", "-movflags", "+faststart", "-shortest", out_path]
 
 
-def move_expr(move, n, fps=FPS):
-    """(z, x, y) zoompan expressions for a move over `n` output frames (iw/ih = the 2x pre-scaled picture).
-    p runs 0 -> 1 over the scene; pans and tilts ease in and out (smoothstep). Frame 0 is the move's start: the
-    picture is on screen from the first frame, no fade."""
-    last = max(1, int(n) - 1)
-    p = "(on/%d)" % last
-    ease = "(%s*%s*(3-2*%s))" % (p, p, p)
-    cx, cy = "iw/2-(iw/zoom/2)", "ih/2-(ih/zoom/2)"
-    if move == "push_in":
-        return "1+%.3f*%s" % (PUSH, p), cx, cy
-    if move == "pull_out":
-        return "%.3f-%.3f*%s" % (1 + PUSH, PUSH, p), cx, cy
-    if move == "pan_left":      # the view travels left: from the right edge to the left edge
-        return "%.3f" % PAN_Z, "(iw-iw/zoom)*(1-%s)" % ease, cy
-    if move == "pan_right":
-        return "%.3f" % PAN_Z, "(iw-iw/zoom)*%s" % ease, cy
-    if move == "tilt_up":       # the view travels up: from the bottom to the top
-        return "%.3f" % PAN_Z, cx, "(ih-ih/zoom)*(1-%s)" % ease
-    if move == "tilt_down":
-        return "%.3f" % PAN_Z, cx, "(ih-ih/zoom)*%s" % ease
-    if move == "punch":         # ease-out snap, settle, then a slow creep to the end
-        f = max(1, int(round(0.3 * fps)))
-        a, b = "(on/%d)" % f, "((on-%d)/%d)" % (f, f)
-        z = ("if(lt(on,%d),1+%.3f*%s*(2-%s),if(lt(on,%d),%.3f-%.3f*%s,%.3f+%.3f*(on-%d)/%d))"
-             % (f, PUNCH_PEAK, a, a, 2 * f, 1 + PUNCH_PEAK, PUNCH_PEAK - PUNCH_SET, b, 1 + PUNCH_SET, PUNCH_CREEP,
-                2 * f, max(1, last - 2 * f)))
-        return z, cx, cy
-    raise ValueError("unknown camera move: %r" % (move,))
+def pipe_ffmpeg(args, cwd, frames, timeout, what, beat=None, beat_every=HEARTBEAT_S, log=None):
+    """Run ffmpeg in `cwd` feeding it `frames` (bytes, in order) on stdin, with the same timeout / heartbeat /
+    error handling as run_ffmpeg. An error while making a frame stops ffmpeg and is raised as is."""
+    log_path = os.path.join(cwd, "ffmpeg-%s.log" % re.sub(r"\W+", "-", what))
+    with open(log_path, "wb") as errf:
+        p = subprocess.Popen(args, cwd=cwd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=errf,
+                             creationflags=_NO_WINDOW)
+        t0 = last = time.time()
 
+        def tick():
+            nonlocal last
+            now = time.time()
+            if now - t0 > timeout:
+                raise JobError("ffmpeg took over %d seconds making the %s." % (timeout, what))
+            if beat and now - last >= beat_every:
+                last = now
+                beat()
 
-# ---------------------------------------------------------------- ffmpeg
-def filter_path(p):
-    """A path as a filter-graph option value (Windows drive colons and backslashes escaped)."""
-    return "'%s'" % p.replace("\\", "/").replace(":", "\\:").replace("'", "")
-
-
-def ffmpeg_args(ffmpeg, scenes, voice_wav, ass_path, out_path, width=WIDTH, height=HEIGHT, fps=FPS, fontsdir=None,
-                music=None, music_volume=0.18):
-    """scenes: [{"image": path, "duration": seconds, "motion"?: move, "key_moment"?: bool}]. One input per picture
-    (a single frame that zoompan turns into the scene's frames) with its camera move (scene_moves), concat,
-    captions, H.264 + AAC.
-    music: a bed to duck under the voice (music.mix_filter) at music_volume (0..1); None = the voice only."""
-    frames = frame_counts([s["duration"] for s in scenes], fps)
-    args = [ffmpeg, "-y", "-nostdin", "-hide_banner", "-v", "error"]
-    for s in scenes:
-        args += ["-i", s["image"]]
-    args += ["-i", voice_wav]
-    if music:
-        args += ["-i", music]
-    parts = []
-    for i, (n, move) in enumerate(zip(frames, scene_moves(scenes))):
-        z, x, y = move_expr(move, n, fps)
-        # 2x up first: zoompan crops in whole pixels, so a bigger source keeps the slow moves smooth
-        parts.append(
-            "[%d:v]scale=%d:%d:force_original_aspect_ratio=increase:flags=lanczos,crop=%d:%d,setsar=1,"
-            "zoompan=z='%s':x='%s':y='%s':d=%d:s=%dx%d:fps=%d,setsar=1,format=yuv420p[v%d]"
-            % (i, 2 * width, 2 * height, 2 * width, 2 * height, z, x, y, n, width, height, fps, i))
-    parts.append("".join("[v%d]" % i for i in range(len(frames))) + "concat=n=%d:v=1:a=0[vcat]" % len(frames))
-    subs = "subtitles=filename=%s" % filter_path(ass_path)
-    if fontsdir:
-        subs += ":fontsdir=%s" % filter_path(fontsdir)
-    parts.append("[vcat]%s[vout]" % subs)
-    audio = "%d:a" % len(scenes)
-    if music:
-        # the video is exactly sum(frames) / fps long: the mix is made that long
-        parts.append(music_mod.mix_filter("%d:a" % len(scenes), "%d:a" % (len(scenes) + 1), music_volume,
-                                          sum(frames) / float(fps)))
-        audio = "[aout]"
-    args += ["-filter_complex", ";\n".join(parts), "-map", "[vout]", "-map", audio,
-             "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-maxrate", "8M", "-bufsize", "16M",
-             "-pix_fmt", "yuv420p", "-r", str(fps),
-             "-c:a", "aac", "-b:a", "160k", "-ar", "48000", "-ac", "2", "-movflags", "+faststart", "-shortest", out_path]
-    return args
+        try:
+            try:
+                for buf in frames:
+                    tick()
+                    try:
+                        p.stdin.write(buf)
+                    except OSError:      # ffmpeg stopped reading: its exit code says why
+                        break
+            finally:
+                close = getattr(frames, "close", None)
+                if close:
+                    close()
+            try:
+                p.stdin.close()
+            except OSError:
+                pass
+            while True:
+                try:
+                    p.wait(timeout=1.0)
+                    break
+                except subprocess.TimeoutExpired:
+                    tick()
+        finally:
+            if p.poll() is None:
+                p.kill()
+                p.wait()
+    if p.returncode != 0:
+        with open(log_path, "rb") as fh:
+            err = fh.read().decode("utf-8", "replace").strip()
+        if log:
+            log("ffmpeg (%s) failed, exit %d:\n%s" % (what, p.returncode, err[-4000:]))
+        raise JobError("ffmpeg couldn't make the %s: %s" % (what, err[-ERR_TAIL:] or "exit code %d" % p.returncode))
 
 
 def preview_bitrate_k(duration, target_mb=PREVIEW_MB):
@@ -276,16 +161,6 @@ def preview_args(ffmpeg, src, out, target_mb=PREVIEW_MB, duration=60.0):
             "-vf", "scale=720:1280:flags=lanczos,setsar=1", "-c:v", "libx264", "-preset", "veryfast",
             "-b:v", "%dk" % k, "-maxrate", "%dk" % k, "-bufsize", "%dk" % (2 * k), "-pix_fmt", "yuv420p",
             "-c:a", "aac", "-b:a", "128k", "-ar", "48000", "-ac", "2", "-movflags", "+faststart", out]
-
-
-def use_filter_script(args, script_path):
-    """Move a long -filter_complex into a file (Windows caps a command line at 32k characters).
-    `-/option file` reads an option's value from a file (ffmpeg 7+; the bundled 7.1 has it, and
-    -filter_complex_script is deprecated)."""
-    i = args.index("-filter_complex")
-    with open(script_path, "w", encoding="utf-8") as fh:
-        fh.write(args[i + 1])
-    return args[:i] + ["-/filter_complex", os.path.basename(script_path)] + args[i + 2:]
 
 
 def probe_duration(ffmpeg, path):
@@ -388,22 +263,6 @@ def copy_to_pc(src, dest):
         raise
 
 
-def caption_font(log=print):
-    """worker/fonts/Poppins-Bold.ttf (fetched once), else Poppins SemiBold; None = libass picks a system font."""
-    dest = os.path.join(fonts.FONTS_DIR, CAPTION_FONT)
-    if not os.path.exists(dest):
-        try:
-            os.makedirs(fonts.FONTS_DIR, exist_ok=True)
-            fonts._download(fonts.file_url("poppins", CAPTION_FONT), dest, timeout=30)
-        except Exception as e:
-            log("caption font download failed (%s); using Poppins SemiBold" % e)
-            try:
-                return fonts.font_file("poppins", 600)
-            except Exception:
-                return None
-    return dest
-
-
 # ---------------------------------------------------------------- the step
 def render_reel(runner, reel, scenes):
     from reels import BUCKET, _redo_voice, is_http_4xx  # here: reels imports this module lazily
@@ -436,28 +295,32 @@ def render_reel(runner, reel, scenes):
             name = "img_%02d.jpg" % k
             with open(os.path.join(work, name), "wb") as fh:
                 fh.write(fetch(s["photo_path"], JobError("Picture %s is missing from storage. Redo that picture." % s.get("position"))))
-            items.append({"image": name, "duration": secs, "motion": s.get("motion"), "key_moment": s.get("key_moment")})
+            items.append(scene_item(s, name, secs))
         bed, volume = fetch_music(runner, reel, work, BUCKET, is_http_4xx)
         if bed and items:
             # the music rings out after the last word: hold the last picture (its move goes on) for the bed's extra time
             items[-1]["duration"] += music_mod.EXTRA_SECONDS
         beat()
 
-        with open(os.path.join(work, "captions.ass"), "w", encoding="utf-8") as fh:
-            fh.write(ass_captions(words))
-        font = caption_font(runner.log)
-        fontsdir = None
-        if font:
-            os.makedirs(os.path.join(work, "fonts"))
-            shutil.copyfile(font, os.path.join(work, "fonts", os.path.basename(font)))
-            fontsdir = "fonts"
+        shots = reel_frames.build_shots(items, words, FPS)
+        video_s = (shots[-1]["f0"] + shots[-1]["n"]) / float(FPS)
+        hook_text = reel.get("hook_text")  # 008; missing column or null = no hook card
+        has_hook = bool(reel_frames.hook_words(hook_text))
+        punches = reel_frames.punch_times(shots)
+        runner.log("reel render: %d pictures, %.1f s of voice%s, %d punch-ins, %d dissolves%s" % (
+            len(items), total, ", music at %d%%" % round(volume * 100) if bed else "", len(punches),
+            sum(1 for s in shots if s["dissolve"]), ", hook card" if has_hook else ""))
+        reel_audio.make_audio(ffmpeg, work, "voice.wav", video_s, reel_audio.sfx_events(has_hook, punches, total),
+                              lambda args, what: run_ffmpeg(args, work, AUDIO_TIMEOUT, what, beat, log=runner.log),
+                              music=bed, volume=volume or reel_audio.MUSIC_DEFAULT_VOLUME, log=runner.log)
+        beat()
 
-        runner.log("reel render: %d pictures, %.1f s of voice%s" % (
-            len(items), total, ", music at %d%%" % round(volume * 100) if bed else ""))
-        args = ffmpeg_args(ffmpeg, items, "voice.wav", "captions.ass", "full.mp4", fontsdir=fontsdir,
-                           music=bed, music_volume=volume)
-        args = use_filter_script(args, os.path.join(work, "graph.txt"))
-        run_ffmpeg(args, work, RENDER_TIMEOUT, "video", beat, log=runner.log)
+        font, weight = caption_font(runner.log)
+        captions = reel_frames.Captions(words, font, weight)
+        hook = reel_frames.Hook(hook_text, font, weight)
+        frames = reel_frames.frames(shots, lambda shot: open_picture(work, shot, items), captions, hook, FPS)
+        pipe_ffmpeg(video_args(ffmpeg, "audio.wav", "full.mp4"), work, frames, RENDER_TIMEOUT, "video", beat,
+                    log=runner.log)
         full = os.path.join(work, "full.mp4")
         duration = probe_duration(ffmpeg, full)
 
@@ -505,6 +368,37 @@ def render_reel(runner, reel, scenes):
             _remove_file(old_pc)  # this reel's superseded video (only ever inside the Reels folder)
     finally:
         shutil.rmtree(work, ignore_errors=True)
+
+
+def caption_font(log=print):
+    """(path, weight) for the captions and hook card. A worker started before this code still holds the old fonts
+    module (reel_render is imported on the first render), so the Montserrat lookup is done here if it lacks the helper."""
+    pick = getattr(fonts, "reel_caption_font", None)
+    if pick:
+        return pick(log)
+    try:
+        return fonts.font_file("montserrat", 800), 800
+    except Exception as e:
+        log("caption font unavailable (%s); using the built-in font" % e)
+        return None, 800
+
+
+def scene_item(scene, image, seconds):
+    """What the frames need from a scene row (008's punch / time_jump read defensively: absent = none)."""
+    punch = scene.get("punch")
+    return {"image": image, "duration": seconds, "motion": scene.get("motion"),
+            "punch": punch.strip() if isinstance(punch, str) and punch.strip() else None,
+            "time_jump": scene.get("time_jump") is True, "start_s": scene.get("start_s"), "end_s": scene.get("end_s"),
+            "position": scene.get("position")}
+
+
+def open_picture(work, shot, items):
+    """The shot's picture, ready for sub-pixel cutting; a file that isn't a picture is a clear redo message."""
+    try:
+        return reel_frames.load_source(os.path.join(work, shot["image"]))
+    except (OSError, ValueError, Image.DecompressionBombError):
+        pos = items[shot["index"]].get("position")
+        raise JobError("Picture %s couldn't be opened. Redo that picture." % (pos if pos is not None else shot["index"] + 1))
 
 
 def music_choice(settings, reel):

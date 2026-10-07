@@ -1,0 +1,560 @@
+# The reel's pictures, frame by frame (playbook v2, docs/superpowers/plans/2026-10-07-reels-playbook.md Task 2).
+# Every frame is cut out of a 2x (2160x3840) copy of its scene picture with a SUB-PIXEL box (Pillow resize with a
+# float box), so slow zooms glide instead of stepping a whole pixel at a time the way ffmpeg's zoompan does
+# (measured in the playbook plan's Task 2: ~20x less frame-to-frame jerk than 4x zoompan). Moves: push_in / pull_out / hold only (no pans or tilts),
+# eased with smoothstep, alternating; a punch-in is an instant +15% jump on the scene's stressed word, held to the
+# end of the shot; hard cuts, with a 0.4 s dissolve only into a time_jump scene. The hook card and the word
+# captions are drawn here too (Pillow, Montserrat ExtraBold), inside the platform safe zone.
+import collections
+import concurrent.futures
+import os
+import re
+
+from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageOps
+
+FPS = 30
+WIDTH, HEIGHT = 1080, 1920
+SRC_SCALE = 2                      # pictures are cut from a 2160x3840 copy (sharper sub-pixel sampling)
+FOCUS = (0.5, 0.45)                # zooms aim a little above the middle (faces sit in the upper half)
+MOVES = ("push_in", "pull_out", "hold")
+ZOOM_RATE = 0.03                   # zoom travel per second of shot ...
+ZOOM_MIN, ZOOM_MAX = 0.04, 0.10    # ... kept to 1.04-1.10 per shot
+PAYOFF_MAX = 0.15                  # the last (payoff) shot may travel up to 1.15
+PUNCH = 0.15                       # a punch-in: instant +15% (playbook 12-18%)
+MAX_PUNCHES = 4
+PUNCH_LEAD_S = 0.30                # no punch in a shot's first 0.3 s (the cut is the accent there) ...
+PUNCH_TAIL_S = 0.35                # ... nor in its last 0.35 s (it would only flash)
+DISSOLVE_S = 0.4                   # only into a time_jump scene
+THREADS = max(1, min(6, (os.cpu_count() or 2) - 2))
+LOOKAHEAD = 12                     # frames in flight
+
+# ---- captions (1-3 words, <= 18 characters, the spoken word yellow with a 110% pop)
+CAPTION_SIZE = 68
+CAPTION_BASELINE = 1180
+CAPTION_MAX_CHARS = 18
+CAPTION_MAX_W = 870                # centred: x 105-975, inside the shared safe box
+CAPTION_STRIP = (1000, 1248)       # the strip captions are drawn in: never in the bottom 35% (y >= 1248)
+SAFE_BOTTOM = 1248
+WHITE, BLACK, YELLOW = (255, 255, 255), (0, 0, 0), (255, 214, 10)   # YELLOW = #FFD60A
+OUTLINE = 4
+SHADOW = (0, 4, 5, 150)            # dx, dy, blur radius, alpha
+POP = 0.10                         # the spoken word starts at 110% ...
+POP_S = 0.12                       # ... and settles to 100% over 120 ms
+LINGER_S = 0.6                     # a group stays up into a pause this short
+
+# ---- hook card (reels.hook_text, 008)
+HOOK_SIZE, HOOK_MIN_SIZE = 92, 64
+HOOK_BOX = (350, 650)              # the card sits inside y 350-650
+HOOK_MAX_W = 870
+HOOK_PAD = (38, 24)
+HOOK_RADIUS = 30
+HOOK_LINES = 3
+HOOK_END_S = 3.5
+HOOK_OUT_S = 0.15                  # a quick fade at the end (the start is instant: frame 0, no fade)
+HOOK_POP = ((0.0, 0.86), (0.12, 1.04), (0.18, 1.0))   # pop-in done in 180 ms
+HOOK_MAX_WORDS = 12
+HOOK_INK = (17, 17, 17)
+
+
+# ---------------------------------------------------------------- easing + moves
+def smoothstep(p):
+    p = min(1.0, max(0.0, float(p)))
+    return p * p * (3 - 2 * p)
+
+
+def scene_moves(scenes):
+    """One move per shown scene: its `motion` when it is push_in / pull_out / hold, else (an old row: pan, tilt,
+    punch, nothing) the push/pull that alternates with the last one. Push and pull always alternate (a repeat
+    flips), and two holds never follow each other."""
+    out, last_dir = [], None
+    for s in scenes:
+        m = (s or {}).get("motion")
+        if m not in MOVES or (m == "hold" and out and out[-1] == "hold"):
+            m = None
+        if m is None or (m != "hold" and m == last_dir):
+            m = "pull_out" if last_dir == "push_in" else "push_in"
+        out.append(m)
+        if m != "hold":
+            last_dir = m
+    return out
+
+
+def zoom_amount(seconds, payoff=False):
+    """Zoom travel for a shot: ~3% a second, 4-10% (up to 15% on the payoff shot)."""
+    return round(min(PAYOFF_MAX if payoff else ZOOM_MAX, max(ZOOM_MIN, ZOOM_RATE * float(seconds))), 4)
+
+
+def base_zoom(move, p, amount):
+    if move == "push_in":
+        return 1.0 + amount * smoothstep(p)
+    if move == "pull_out":
+        return 1.0 + amount * (1.0 - smoothstep(p))
+    if move == "hold":
+        return 1.0
+    raise ValueError("unknown move: %r" % (move,))
+
+
+def crop_box(z, sw, sh, focus=FOCUS):
+    """The float box (left, top, right, bottom) of a sw x sh source shown at zoom z, aimed at `focus` and kept
+    inside the picture."""
+    z = max(1.0, float(z))
+    bw, bh = sw / z, sh / z
+    x0 = min(max(0.0, focus[0] * sw - bw / 2), sw - bw)
+    y0 = min(max(0.0, focus[1] * sh - bh / 2), sh - bh)
+    return (x0, y0, x0 + bw, y0 + bh)
+
+
+def frame_counts(durations, fps=FPS):
+    """Whole frames per scene; rounding the running total keeps the video exactly as long as the audio."""
+    out, acc, done = [], 0.0, 0
+    for d in durations:
+        acc += d
+        edge = int(round(acc * fps))
+        out.append(max(1, edge - done))
+        done += out[-1]
+    return out
+
+
+# ---------------------------------------------------------------- punch-ins
+def norm_word(w):
+    return re.sub(r"[^a-z0-9]", "", str(w or "").lower().replace("’", "'"))
+
+
+def punch_time(punch, words, t0, t1, earliest=None, latest=None):
+    """Start (s) of the punch word/phrase among the Whisper words spoken in [t0, t1), matched by normalized text:
+    the first place the whole phrase is said, else the first place its first word is said. With earliest/latest
+    only matches starting inside [earliest, latest] count (a word repeated in the line can still land). None if
+    absent."""
+    tokens = [norm_word(t) for t in str(punch or "").split()]
+    tokens = [t for t in tokens if t]
+    if not tokens:
+        return None
+    inside = [w for w in (words or []) if t0 - 0.05 <= float(w.get("start", -1)) < t1]
+    normed = [norm_word(w.get("word")) for w in inside]
+    lo = float("-inf") if earliest is None else earliest
+    hi = float("inf") if latest is None else latest
+    phrase, first = None, None
+    for i, n in enumerate(normed):
+        t = float(inside[i]["start"])
+        if n != tokens[0] or not lo <= t <= hi:
+            continue
+        if phrase is None and normed[i:i + len(tokens)] == tokens:
+            phrase = t
+        if first is None:
+            first = t
+    return phrase if phrase is not None else first
+
+
+# ---------------------------------------------------------------- the shot plan
+def build_shots(items, words, fps=FPS):
+    """items: [{"image", "duration", "motion"?, "punch"?, "time_jump"?, "start_s"?, "end_s"?}] in order.
+    Returns one dict per shot: f0 (first frame), n (frames), move, amount, punch_k (frame within the shot of the
+    punch-in, or None), dissolve (a dissolve INTO this shot). At most MAX_PUNCHES punch-ins (the first ones)."""
+    frames = frame_counts([i["duration"] for i in items], fps)
+    moves = scene_moves(items)
+    shots, f0, punches = [], 0, 0
+    for i, (it, n, move) in enumerate(zip(items, frames, moves)):
+        start, secs = f0 / float(fps), n / float(fps)
+        shot = {"index": i, "image": it["image"], "f0": f0, "n": n, "move": move,
+                "amount": 0.0 if move == "hold" else zoom_amount(secs, payoff=(i == len(items) - 1 and len(items) > 1)),
+                "punch_k": None, "dissolve": bool(it.get("time_jump")) and i > 0}
+        if it.get("punch") and punches < MAX_PUNCHES:
+            lo = it.get("start_s") if it.get("start_s") is not None else start
+            hi = it.get("end_s") if it.get("end_s") is not None else start + secs
+            t = punch_time(it["punch"], words, float(lo), float(hi) + 0.05, earliest=start + PUNCH_LEAD_S,
+                           latest=start + secs - PUNCH_TAIL_S)
+            if t is not None:
+                shot["punch_k"] = int(round((t - start) * fps))
+                punches += 1
+        shots.append(shot)
+        f0 += n
+    return shots
+
+
+def punch_times(shots, fps=FPS):
+    return [(s["f0"] + s["punch_k"]) / float(fps) for s in shots if s["punch_k"] is not None]
+
+
+def shot_zoom(shot, k):
+    """The zoom of `shot` at its frame k (k may fall outside the shot during a dissolve: the move holds its end)."""
+    p = k / float(max(1, shot["n"] - 1))
+    z = base_zoom(shot["move"], p, shot["amount"])
+    if shot["punch_k"] is not None and k >= shot["punch_k"]:
+        z *= 1.0 + PUNCH
+    return z
+
+
+def frame_layers(shots, f, fps=FPS):
+    """[(shot index, frame within that shot, weight)] for output frame f: one layer, or two during a dissolve
+    (centred on the cut into a time_jump shot, DISSOLVE_S long, shortened for very short shots)."""
+    lo, hi = 0, len(shots) - 1
+    while lo < hi:                                   # the shot that holds frame f
+        mid = (lo + hi + 1) // 2
+        if shots[mid]["f0"] <= f:
+            lo = mid
+        else:
+            hi = mid - 1
+    i = lo
+    s = shots[i]
+
+    def half(a, b):
+        return min(int(round(DISSOLVE_S * fps / 2)), a["n"] // 2, b["n"] // 2)
+
+    if i + 1 < len(shots) and shots[i + 1]["dissolve"]:
+        nxt = shots[i + 1]
+        h = half(s, nxt)
+        if h > 0 and f >= nxt["f0"] - h:
+            a = (f - (nxt["f0"] - h) + 0.5) / (2.0 * h)
+            return [(i, f - s["f0"], 1.0 - a), (i + 1, f - nxt["f0"], a)]
+    if s["dissolve"] and i > 0:
+        prev = shots[i - 1]
+        h = half(prev, s)
+        if h > 0 and f < s["f0"] + h:
+            a = (f - (s["f0"] - h) + 0.5) / (2.0 * h)
+            return [(i - 1, f - prev["f0"], 1.0 - a), (i, f - s["f0"], a)]
+    return [(i, f - s["f0"], 1.0)]
+
+
+def load_source(path, scale=SRC_SCALE):
+    """A scene picture fitted to the video frame, then enlarged `scale`x (Lanczos) for sub-pixel cutting."""
+    with Image.open(path) as im:
+        im = ImageOps.fit(im.convert("RGB"), (WIDTH, HEIGHT), Image.LANCZOS)
+    return im.resize((WIDTH * scale, HEIGHT * scale), Image.LANCZOS) if scale != 1 else im
+
+
+# ---------------------------------------------------------------- captions
+def caption_text(word):
+    """ALL CAPS, no trailing , . ; : (? and ! stay)."""
+    w = str(word or "").strip().upper()
+    return re.sub(r"[,.;:]+$", "", w).strip() or w
+
+
+def chunk_words(words, max_words=3, max_chars=CAPTION_MAX_CHARS, gap_s=LINGER_S):
+    """Words in on-screen chunks: 1-3 words, at most `max_chars` characters on the line (a longer single word
+    stands alone), a new chunk after , ; : . ! ? and after a pause longer than gap_s."""
+    chunks, cur = [], []
+    for w in words or []:
+        text = caption_text(w.get("word"))
+        if not text:
+            continue
+        item = {"text": text, "start": float(w["start"]), "end": float(w["end"])}
+        if cur and (len(cur) >= max_words or len(" ".join([c["text"] for c in cur] + [text])) > max_chars
+                    or item["start"] - cur[-1]["end"] > gap_s):
+            chunks.append(cur)
+            cur = []
+        cur.append(item)
+        if re.search(r"[,;:.!?]$", str(w.get("word") or "").strip()):
+            chunks.append(cur)
+            cur = []
+    if cur:
+        chunks.append(cur)
+    return chunks
+
+
+def caption_events(chunks, linger=LINGER_S):
+    """[(start, end, chunk index, active word index)]: one per spoken word. A chunk stays up until the next one
+    starts when that is within `linger` s (no flicker), else until its last word ends."""
+    out = []
+    for ci, c in enumerate(chunks):
+        nxt = chunks[ci + 1][0]["start"] if ci + 1 < len(chunks) else None
+        c_end = c[-1]["end"]
+        if nxt is not None and nxt - c_end <= linger:
+            c_end = nxt
+        for j, w in enumerate(c):
+            end = c[j + 1]["start"] if j + 1 < len(c) else c_end
+            out.append((w["start"], max(end, w["start"] + 0.05), ci, j))
+    return out
+
+
+def pop_scale(dt):
+    """The spoken word's scale `dt` s after it starts: 110% -> 100% over POP_S (smoothstep)."""
+    if dt < 0 or dt >= POP_S:
+        return 1.0
+    return 1.0 + POP * (1.0 - smoothstep(dt / POP_S))
+
+
+def _font(path, weight, size):
+    if not path:
+        return ImageFont.load_default(size)
+    f = ImageFont.truetype(path, int(size))
+    try:
+        axes = f.get_variation_axes()
+    except Exception:  # a static font
+        return f
+    vals = []
+    for a in axes:
+        name = a.get("name")
+        name = name.decode("utf-8", "replace") if isinstance(name, bytes) else str(name)
+        vals.append(max(a["minimum"], min(a["maximum"], int(weight))) if name.lower() == "weight" else a["default"])
+    f.set_variation_by_axes(vals)
+    return f
+
+
+class Captions:
+    """Pre-renders caption states (chunk, spoken word, pop scale) as RGBA strips, cached."""
+
+    def __init__(self, words, font_path=None, weight=800):
+        self.chunks = chunk_words(words)
+        self.events = caption_events(self.chunks)
+        self.font_path, self.weight = font_path, weight
+        self._fonts = {}
+        self._cache = collections.OrderedDict()
+
+    def font(self, size):
+        size = int(size)
+        if size not in self._fonts:
+            self._fonts[size] = _font(self.font_path, self.weight, size)
+        return self._fonts[size]
+
+    def layout(self, ci, active=-1, scale=1.0):
+        """(size, [(text, x_left, width)]) of a chunk, centred, at most CAPTION_MAX_W wide even with the spoken word
+        popped. The spoken word (`active`) is laid out at its popped size, so it pushes its neighbours aside
+        instead of running into them."""
+        texts = [w["text"] for w in self.chunks[ci]]
+        size = CAPTION_SIZE
+        for _ in range(8):
+            f = self.font(size)
+            widths = [f.getlength(t) for t in texts]
+            total = sum(widths) + f.getlength(" ") * (len(texts) - 1) + 2 * OUTLINE
+            need = total + POP * max(widths)                    # room for the spoken word's pop
+            if need <= CAPTION_MAX_W or size <= 40:
+                break
+            size = max(40, int(size * CAPTION_MAX_W / need))
+        f = self.font(size)
+        space = f.getlength(" ")
+        if 0 <= active < len(texts) and scale != 1.0:
+            widths[active] = self.font(max(8, int(round(size * scale)))).getlength(texts[active])
+        total = sum(widths) + space * (len(texts) - 1)
+        x = (WIDTH - total) / 2.0
+        out = []
+        for t, w in zip(texts, widths):
+            out.append((t, x, w))
+            x += w + space
+        return size, out
+
+    def state(self, ci, active, scale):
+        key = (ci, active, round(scale, 3))
+        hit = self._cache.get(key)
+        if hit is not None:
+            self._cache.move_to_end(key)
+            return hit
+        img = self.draw(ci, active, scale)
+        self._cache[key] = img
+        if len(self._cache) > 64:
+            self._cache.popitem(last=False)
+        return img
+
+    def draw(self, ci, active, scale=1.0):
+        """RGBA strip (WIDTH x CAPTION_STRIP height) to paste at (0, CAPTION_STRIP[0])."""
+        top = CAPTION_STRIP[0]
+        size, items = self.layout(ci, active, scale)
+        base = CAPTION_BASELINE - top
+        ink = Image.new("RGBA", (WIDTH, CAPTION_STRIP[1] - top), (0, 0, 0, 0))
+        shadow = Image.new("L", ink.size, 0)
+        d, ds = ImageDraw.Draw(ink), ImageDraw.Draw(shadow)
+        cap_h = self.font(size).getbbox("H", anchor="ls")
+        mid = base + (cap_h[1] + cap_h[3]) / 2.0          # the middle of a capital: the pop grows from here
+        order = [k for k in range(len(items)) if k != active] + ([active] if 0 <= active < len(items) else [])
+        for k in order:
+            text, x, w = items[k]
+            s = scale if k == active else 1.0
+            f = self.font(max(8, int(round(size * s))))
+            cx = x + w / 2.0
+            y = mid + (base - mid) * s
+            fill = YELLOW if k == active else WHITE
+            ds.text((cx + SHADOW[0], y + SHADOW[1]), text, font=f, anchor="ms", fill=SHADOW[3],
+                    stroke_width=OUTLINE, stroke_fill=SHADOW[3])
+            d.text((cx, y), text, font=f, anchor="ms", fill=fill, stroke_width=OUTLINE, stroke_fill=BLACK)
+        shadow = shadow.filter(ImageFilter.GaussianBlur(SHADOW[2]))
+        out = Image.new("RGBA", ink.size, (0, 0, 0, 0))
+        out.putalpha(shadow)
+        return Image.alpha_composite(out, ink)
+
+    def at(self, t):
+        """The strip to show at time t (seconds), or None."""
+        for start, end, ci, j in self._active(t):
+            return self.state(ci, j, pop_scale(t - start))
+        return None
+
+    def _active(self, t):
+        # events are in time order; a linear scan from a remembered index keeps this O(1) per frame
+        i = getattr(self, "_i", 0)
+        ev = self.events
+        if i >= len(ev) or (i > 0 and ev[i][0] > t):
+            i = 0
+        while i < len(ev) and ev[i][1] <= t:
+            i += 1
+        self._i = i
+        if i < len(ev) and ev[i][0] <= t < ev[i][1]:
+            return [ev[i]]
+        return []
+
+
+# ---------------------------------------------------------------- hook card
+def hook_words(text, limit=HOOK_MAX_WORDS):
+    t = re.sub(r"\s+", " ", str(text or "")).strip().strip("\"'“”").strip()
+    return t.split(" ")[:limit] if t else []
+
+
+def wrap(words, font, max_w):
+    lines, cur = [], []
+    for w in words:
+        if cur and font.getlength(" ".join(cur + [w])) > max_w:
+            lines.append(" ".join(cur))
+            cur = []
+        cur.append(w)
+    if cur:
+        lines.append(" ".join(cur))
+    return lines
+
+
+def hook_layout(text, font_for_size):
+    """(size, lines, box w, box h) for the hook card: HOOK_SIZE px, shrunk (to HOOK_MIN_SIZE) until it fits in
+    HOOK_LINES lines, HOOK_MAX_W wide and the y 350-650 band."""
+    words = hook_words(text)
+    if not words:
+        return None
+    max_h = HOOK_BOX[1] - HOOK_BOX[0]
+    size = HOOK_SIZE
+    while True:
+        f = font_for_size(size)
+        lines = wrap(words, f, HOOK_MAX_W - 2 * HOOK_PAD[0])
+        line_h = int(round(size * 1.12))
+        w = int(max(f.getlength(l) for l in lines)) + 2 * HOOK_PAD[0]
+        h = line_h * len(lines) + 2 * HOOK_PAD[1]
+        if (len(lines) <= HOOK_LINES and w <= HOOK_MAX_W and h <= max_h) or size <= HOOK_MIN_SIZE:
+            return size, lines, min(w, HOOK_MAX_W), min(h, max_h)
+        size -= 4
+
+
+def hook_card(text, font_path=None, weight=800):
+    """(RGBA card, (x, y)) placed centred in the y 350-650 band, or None without hook text."""
+    fonts = {}
+
+    def font_for(size):
+        if size not in fonts:
+            fonts[size] = _font(font_path, weight, size)
+        return fonts[size]
+
+    lay = hook_layout(text, font_for)
+    if not lay:
+        return None
+    size, lines, w, h = lay
+    f = font_for(size)
+    line_h = int(round(size * 1.12))
+    sh = 14                                                   # soft drop shadow around the card
+    card = Image.new("RGBA", (w + 2 * sh, h + 2 * sh), (0, 0, 0, 0))
+    shadow = Image.new("L", card.size, 0)
+    ImageDraw.Draw(shadow).rounded_rectangle((sh, sh + 6, sh + w, sh + h + 6), HOOK_RADIUS, fill=110)
+    card.putalpha(shadow.filter(ImageFilter.GaussianBlur(9)))
+    box = Image.new("RGBA", card.size, (0, 0, 0, 0))
+    d = ImageDraw.Draw(box)
+    d.rounded_rectangle((sh, sh, sh + w, sh + h), HOOK_RADIUS, fill=(255, 255, 255, 246))
+    asc = f.getbbox("H", anchor="ls")
+    for k, line in enumerate(lines):
+        # each line centred; its capitals centred in their line slot
+        slot_mid = sh + HOOK_PAD[1] + line_h * k + line_h / 2.0
+        d.text((sh + w / 2.0, slot_mid - (asc[1] + asc[3]) / 2.0), line, font=f, anchor="ms", fill=HOOK_INK)
+    card = Image.alpha_composite(card, box)
+    x = (WIDTH - card.width) // 2
+    y = (HOOK_BOX[0] + HOOK_BOX[1]) // 2 - card.height // 2
+    return card, (x, y)
+
+
+def hook_scale(t):
+    """Card scale at t s: 86% on frame 0 -> 104% at 120 ms -> 100% at 180 ms (no fade-in)."""
+    (t0, s0), (t1, s1), (t2, s2) = HOOK_POP
+    if t >= t2:
+        return s2
+    if t < t1:
+        p = (t - t0) / (t1 - t0)
+        return s0 + (s1 - s0) * (1 - (1 - p) ** 3)          # ease-out
+    return s1 + (s2 - s1) * smoothstep((t - t1) / (t2 - t1))
+
+
+def hook_alpha(t):
+    if t < 0 or t >= HOOK_END_S:
+        return 0.0
+    if t > HOOK_END_S - HOOK_OUT_S:
+        return (HOOK_END_S - t) / HOOK_OUT_S
+    return 1.0
+
+
+class Hook:
+    def __init__(self, text, font_path=None, weight=800):
+        made = hook_card(text, font_path, weight)
+        self.card, self.pos = made if made else (None, None)
+        self._cache = {}
+
+    def at(self, t):
+        """(RGBA, (x, y)) to paste at time t, or None."""
+        if self.card is None:
+            return None
+        a = hook_alpha(t)
+        if a <= 0:
+            return None
+        s = round(hook_scale(t), 3)
+        key = (s, round(a, 2))
+        hit = self._cache.get(key)
+        if hit is None:
+            img = self.card
+            if s != 1.0:
+                img = img.resize((max(1, int(round(img.width * s))), max(1, int(round(img.height * s)))), Image.BICUBIC)
+            if a < 1.0:
+                img = img.copy()
+                img.putalpha(img.getchannel("A").point(lambda v: int(v * a)))
+            cx = self.pos[0] + self.card.width / 2.0
+            cy = self.pos[1] + self.card.height / 2.0
+            hit = (img, (int(round(cx - img.width / 2.0)), int(round(cy - img.height / 2.0))))
+            self._cache[key] = hit
+        return hit
+
+
+# ---------------------------------------------------------------- frames
+def _render(sources, layers, overlays, shots):
+    out = None
+    for idx, k, wgt in layers:
+        src = sources[idx]
+        sw, sh = src.size
+        im = src.resize((WIDTH, HEIGHT), Image.BICUBIC, box=crop_box(shot_zoom(shots[idx], k), sw, sh))
+        out = im if out is None else Image.blend(out, im, wgt)
+    for img, (x, y) in overlays:
+        out.paste(img, (x, y), img)
+    return out.tobytes()
+
+
+def frames(shots, open_source, captions=None, hook=None, fps=FPS, threads=THREADS):
+    """RGB24 frame bytes, in order, for the whole video. open_source(shot) -> the 2x picture. Pictures are loaded
+    in order as they are needed and dropped once their shot (and any dissolve out of it) is done."""
+    total = shots[-1]["f0"] + shots[-1]["n"] if shots else 0
+    loaded = {}
+    pool = concurrent.futures.ThreadPoolExecutor(max_workers=max(1, threads))
+    pending = collections.deque()
+    try:
+        for f in range(total):
+            layers = frame_layers(shots, f, fps)
+            need = {i for i, _k, _w in layers}
+            for i in need:
+                if i not in loaded:
+                    loaded[i] = open_source(shots[i])
+            for i in [i for i in loaded if i < min(need)]:
+                del loaded[i]                         # in-flight frames keep their own reference
+            t = f / float(fps)
+            overlays = []
+            if hook is not None:
+                h = hook.at(t)
+                if h:
+                    overlays.append(h)
+            if captions is not None:
+                c = captions.at(t)
+                if c is not None:
+                    overlays.append((c, (0, CAPTION_STRIP[0])))
+            pending.append(pool.submit(_render, {i: loaded[i] for i in need}, layers, overlays, shots))
+            if len(pending) >= LOOKAHEAD:
+                yield pending.popleft().result()
+        while pending:
+            yield pending.popleft().result()
+    finally:
+        for p in pending:
+            p.cancel()
+        pool.shutdown(wait=True)

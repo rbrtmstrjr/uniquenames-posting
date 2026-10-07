@@ -114,19 +114,6 @@ class ComfyAudioTest(unittest.TestCase):
 
 
 class MixTest(unittest.TestCase):
-    def test_mix_filter(self):
-        f = music.mix_filter("3:a", "4:a", 0.18, 20.0)
-        chains = f.split(";\n")
-        self.assertEqual(len(chains), 4)
-        self.assertTrue(chains[0].startswith("[3:a]aformat="))
-        self.assertIn(",apad,asplit=2[voice][key]", chains[0])                  # voice + key never end early
-        self.assertTrue(chains[1].startswith("[4:a]aformat="))
-        self.assertIn("apad,atrim=0:20.000,asetpts=PTS-STARTPTS,loudnorm=I=-16:TP=-1.5:LRA=7,aresample=48000,volume=0.18", chains[1])
-        self.assertIn("afade=t=in:st=0:d=0.05,afade=t=out:st=18.000:d=2[bed]", chains[1])
-        self.assertEqual(chains[2], "[bed][key]sidechaincompress=threshold=0.02:ratio=8:attack=20:release=400:makeup=1[ducked]")
-        self.assertEqual(chains[3], "[voice][ducked]amix=inputs=2:duration=shortest:normalize=0,atrim=0:20.000[aout]")
-        self.assertIn("afade=t=out:st=0.000", music.mix_filter("0:a", "1:a", 0.1, 1.0))  # a very short reel
-
     def test_volume_and_choice(self):
         self.assertEqual([music.clamp_volume(v) for v in (18, 2, 99, "25", None, "x")], [18, 5, 40, 25, 18, 18])
         on = {"reel_music": True, "reel_music_volume": 25}
@@ -136,22 +123,6 @@ class MixTest(unittest.TestCase):
         self.assertEqual(rr.music_choice(dict(on, reel_music=False), {"music_path": "m.flac"}), (None, 0.0))
         self.assertEqual(rr.music_choice({}, {"music_path": "m.flac"}), (None, 0.0))      # no 006 settings
         self.assertEqual(rr.music_choice({"reel_music": True}, {"music_path": "m"})[1], 0.18)
-
-    def test_ffmpeg_args_with_and_without_music(self):
-        scenes = [{"image": "a.jpg", "duration": 1.0}, {"image": "b.jpg", "duration": 1.5}]
-        plain = rr.ffmpeg_args("ff", scenes, "voice.wav", "c.ass", "out.mp4")
-        self.assertEqual(plain[plain.index("[vout]") + 2], "2:a")
-        self.assertNotIn("music.flac", plain)
-        mixed = rr.ffmpeg_args("ff", scenes, "voice.wav", "c.ass", "out.mp4", music="music.flac", music_volume=0.2)
-        self.assertEqual(mixed[mixed.index("music.flac") - 1], "-i")
-        self.assertEqual(mixed.index("music.flac"), mixed.index("voice.wav") + 2)        # input 3, after the voice
-        self.assertEqual(mixed[mixed.index("[vout]") + 2], "[aout]")
-        graph = mixed[mixed.index("-filter_complex") + 1]
-        self.assertIn("[2:a]aformat", graph)
-        self.assertIn("[3:a]aformat", graph)
-        self.assertIn("volume=0.20", graph)
-        self.assertIn("atrim=0:2.500", graph)                                          # = the video's frames / fps
-        self.assertIn("-shortest", mixed)
 
 
 class VoiceHelpersTest(unittest.TestCase):
@@ -221,19 +192,6 @@ class RealAudioTest(unittest.TestCase):
         with wave.open(io.BytesIO(out), "rb") as w:
             self.assertEqual((w.getnchannels(), w.getsampwidth(), w.getframerate()), (1, 2, 24000))
             self.assertAlmostEqual(w.getnframes() / 24000.0, 2.0, delta=0.03)
-
-    def test_real_mix_is_as_long_as_the_video(self):
-        with open(os.path.join(self.d, "voice.wav"), "wb") as fh:
-            fh.write(tone_wav(2.0))
-        subprocess.run([FFMPEG, "-v", "error", "-f", "lavfi", "-i", "sine=frequency=440:duration=1.5:sample_rate=48000",
-                        "-ac", "2", os.path.join(self.d, "music.flac")], check=True)   # shorter than the voice
-        f = music.mix_filter("0:a", "1:a", 0.18, 3.0)
-        r = subprocess.run([FFMPEG, "-v", "error", "-i", "voice.wav", "-i", "music.flac", "-filter_complex", f,
-                            "-map", "[aout]", "-c:a", "pcm_s16le", "out.wav"], cwd=self.d, capture_output=True)
-        self.assertEqual(r.returncode, 0, r.stderr.decode("utf-8", "replace")[-500:])
-        with wave.open(os.path.join(self.d, "out.wav"), "rb") as w:
-            self.assertEqual((w.getnchannels(), w.getframerate()), (2, 48000))
-            self.assertAlmostEqual(w.getnframes() / 48000.0, 3.0, delta=0.05)
 
 
 if __name__ == "__main__":
