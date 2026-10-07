@@ -178,15 +178,15 @@ describe("scenePrompt v2: front-loaded token order", () => {
     expect(undoll("both dolls hug; the mom doll's lap")).toBe("both of them hug; the mom's lap");
   });
 
-  it("scene 1 keeps the top fifth calm (room for the hook card), faces and action below it; only scene 1", () => {
+  it("scene 1 keeps the top quarter calm (room for the hook card), faces and action below it; only scene 1", () => {
     for (const id of REEL_THEME_IDS) {
       const p = scenePrompt(STATIC_THEMES[id], DOLLS, line, 0);
       expect(p, id).toContain(HOOK_ROOM);
       expect(p.indexOf(HOOK_ROOM)).toBeGreaterThan(p.indexOf(STYLE_TAG[id]));
       expect(p.trim().endsWith(NO_TEXT)).toBe(true);
     }
-    expect(HOOK_ROOM).toMatch(/top fifth of the frame is calm and simple/);
-    expect(HOOK_ROOM).toMatch(/faces and the action sit below it/);
+    expect(HOOK_ROOM).toMatch(/top quarter of the frame is calm and simple/);
+    expect(HOOK_ROOM).toMatch(/faces and the action sit in the lower three quarters/);
     expect(HOOK_ROOM).not.toMatch(/\b(?:no|not|never|without|avoid|empty of|free of)\b|camera|text/i);
     expect(scenePrompt(STATIC_THEMES.anime, PEOPLE, line, 1)).not.toContain(HOOK_ROOM);
   });

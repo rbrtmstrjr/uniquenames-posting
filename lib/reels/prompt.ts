@@ -209,7 +209,7 @@ export function positiveOnly(s: string, dolls = false): string {
 
 /** The opening picture carries the hook card up top: that band stays calm so the card never covers a face (positive wording). */
 export const HOOK_ROOM =
-  "Composition: the top fifth of the frame is calm and simple, a soft stretch of the scene's own background; the faces and the action sit below it, in the middle of the frame.";
+  "Composition: the top quarter of the frame is calm and simple, a soft stretch of the scene's own background; the faces and the action sit in the lower three quarters of the frame.";
 
 const HANDS: Record<"mom" | "baby" | "both", string> = {
   mom: "the parent's hands", baby: "the child's small hands", both: "the parent's and the child's hands",
