@@ -11,7 +11,9 @@ import os
 import re
 import shutil
 import subprocess
+import queue
 import tempfile
+import threading
 import time
 
 from PIL import Image
@@ -28,6 +30,7 @@ FPS = reel_frames.FPS
 WIDTH, HEIGHT = reel_frames.WIDTH, reel_frames.HEIGHT
 MIN_SCENE_S = 0.8              # a picture is never on screen for less than this
 RENDER_TIMEOUT = 900
+PIPE_QUEUE = 4                 # frames waiting for ffmpeg's stdin
 AUDIO_TIMEOUT = 300
 PREVIEW_TIMEOUT = 300
 HEARTBEAT_S = 60
@@ -99,12 +102,34 @@ def video_args(ffmpeg, audio, out_path, width=WIDTH, height=HEIGHT, fps=FPS):
 
 def pipe_ffmpeg(args, cwd, frames, timeout, what, beat=None, beat_every=HEARTBEAT_S, log=None):
     """Run ffmpeg in `cwd` feeding it `frames` (bytes, in order) on stdin, with the same timeout / heartbeat /
-    error handling as run_ffmpeg. An error while making a frame stops ffmpeg and is raised as is."""
+    error handling as run_ffmpeg. The frames are written by a helper thread through a small queue, so the timeout
+    and the heartbeat keep running even if ffmpeg stops reading (a hung ffmpeg is killed at the timeout). An
+    error while making a frame stops ffmpeg and is raised as is."""
     log_path = os.path.join(cwd, "ffmpeg-%s.log" % re.sub(r"\W+", "-", what))
     with open(log_path, "wb") as errf:
         p = subprocess.Popen(args, cwd=cwd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=errf,
                              creationflags=_NO_WINDOW)
         t0 = last = time.time()
+        q = queue.Queue(maxsize=PIPE_QUEUE)
+        broken = threading.Event()
+
+        def writer():
+            while True:
+                buf = q.get()
+                if buf is None:
+                    break
+                try:
+                    p.stdin.write(buf)
+                except (OSError, ValueError):   # ffmpeg stopped reading (or was killed): its exit code says why
+                    broken.set()
+                    break
+            try:
+                p.stdin.close()
+            except (OSError, ValueError):
+                pass
+
+        th = threading.Thread(target=writer, name="ffmpeg-stdin", daemon=True)
+        th.start()
 
         def tick():
             nonlocal last
@@ -115,22 +140,31 @@ def pipe_ffmpeg(args, cwd, frames, timeout, what, beat=None, beat_every=HEARTBEA
                 last = now
                 beat()
 
+        def put(item):
+            """True once queued; False if the writer has stopped."""
+            while True:
+                tick()
+                if broken.is_set() or not th.is_alive():
+                    return False
+                try:
+                    q.put(item, timeout=0.5)
+                    return True
+                except queue.Full:
+                    pass
+
         try:
             try:
                 for buf in frames:
-                    tick()
-                    try:
-                        p.stdin.write(buf)
-                    except OSError:      # ffmpeg stopped reading: its exit code says why
+                    if not put(buf):
                         break
             finally:
                 close = getattr(frames, "close", None)
                 if close:
                     close()
-            try:
-                p.stdin.close()
-            except OSError:
-                pass
+            put(None)
+            while th.is_alive():
+                tick()
+                th.join(timeout=0.5)
             while True:
                 try:
                     p.wait(timeout=1.0)
@@ -141,6 +175,11 @@ def pipe_ffmpeg(args, cwd, frames, timeout, what, beat=None, beat_every=HEARTBEA
             if p.poll() is None:
                 p.kill()
                 p.wait()
+            th.join(timeout=5)                      # a write blocked on the dead pipe has failed by now
+            try:
+                p.stdin.close()
+            except (OSError, ValueError):
+                pass
     if p.returncode != 0:
         with open(log_path, "rb") as fh:
             err = fh.read().decode("utf-8", "replace").strip()
@@ -311,7 +350,7 @@ def render_reel(runner, reel, scenes):
             len(items), total, ", music at %d%%" % round(volume * 100) if bed else "", len(punches),
             sum(len(s["reframes"]) for s in shots),
             sum(1 for s in shots if s["dissolve"]), ", hook card" if has_hook else ""))
-        reel_audio.make_audio(ffmpeg, work, "voice.wav", video_s, reel_audio.sfx_events(has_hook, punches, total),
+        reel_audio.make_audio(ffmpeg, work, "voice.wav", video_s, reel_audio.sfx_events(has_hook, punches, total, video_s),
                               lambda args, what: run_ffmpeg(args, work, AUDIO_TIMEOUT, what, beat, log=runner.log),
                               music=bed, volume=volume or reel_audio.MUSIC_DEFAULT_VOLUME, log=runner.log)
         beat()

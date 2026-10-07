@@ -48,13 +48,15 @@ SFX = {
 
 
 # ---------------------------------------------------------------- pure pieces
-def sfx_events(has_hook, punch_times, voice_seconds):
+def sfx_events(has_hook, punch_times, voice_seconds, reel_seconds=None):
     """[(name, seconds)]: a whoosh at 0, a pop when the hook card appears (frame 0), and a soft impact on the
-    first punch-in after TURN of the voice (none if there is no such punch)."""
+    first punch-in after TURN of the voice that leaves room for the whole impact before the reel ends
+    (reel_seconds; none if there is no such punch: it is never cut off)."""
     ev = [("whoosh", 0.0)]
     if has_hook:
         ev.append(("pop", 0.0))
-    turn = [t for t in sorted(punch_times or []) if t >= TURN * float(voice_seconds)]
+    end = float("inf") if reel_seconds is None else float(reel_seconds)
+    turn = [t for t in sorted(punch_times or []) if t >= TURN * float(voice_seconds) and t + SFX["impact"][0] <= end]
     if turn:
         ev.append(("impact", round(turn[0], 3)))
     return ev

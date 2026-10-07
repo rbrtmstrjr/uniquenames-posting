@@ -279,6 +279,37 @@ class RealRenderTest(unittest.TestCase):
         self.assertEqual(len(calls), 3)
         self.assertGreaterEqual(len(beats), 5)            # 2 around the render + one before each upload try
 
+    def test_a_hung_ffmpeg_that_stops_reading_is_killed_at_the_timeout(self):
+        import sys
+        import time as _t
+        hung = [sys.executable, "-c", "import time; time.sleep(60)"]       # never reads stdin, never exits
+        frames = (b"\x00" * (1 << 20) for _ in range(1000))                   # far more than a pipe buffer holds
+        beats = []
+        t0 = _t.time()
+        with self.assertRaises(rr.JobError) as cm:
+            rr.pipe_ffmpeg(hung, self.root, frames, 2.0, "video", lambda: beats.append(1), beat_every=0.5)
+        self.assertIn("took over 2 seconds", str(cm.exception))
+        self.assertLess(_t.time() - t0, 15)
+        self.assertGreaterEqual(len(beats), 2)                                # the heartbeat kept running
+
+    def test_a_frame_error_stops_ffmpeg_and_closes_its_input(self):
+        import sys
+
+        def frames():
+            yield b"\x00" * 100
+            raise ValueError("broken frame")
+        procs = []
+        real = rr.subprocess.Popen
+
+        def spy(*a, **kw):
+            procs.append(real(*a, **kw))
+            return procs[-1]
+        with mock.patch.object(rr.subprocess, "Popen", side_effect=spy):
+            with self.assertRaises(ValueError):
+                rr.pipe_ffmpeg([sys.executable, "-c", "import time; time.sleep(60)"], self.root, frames(), 30, "video")
+        self.assertIsNotNone(procs[0].poll())                                 # killed
+        self.assertTrue(procs[0].stdin.closed)
+
     def test_probe_timeout_is_a_job_error(self):
         with mock.patch.object(rr.subprocess, "run", side_effect=subprocess.TimeoutExpired("ff", 60)):
             with self.assertRaises(JobError):

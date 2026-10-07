@@ -273,6 +273,13 @@ class CaptionDrawTest(unittest.TestCase):
         rows = [y for y in range(a.height) if a.crop((0, y, a.width, y + 1)).getextrema()[1] > 200]
         self.assertAlmostEqual(rf.CAPTION_STRIP[0] + rows[-1], 1180, delta=8)       # baseline ~ y 1180
 
+    def test_a_freak_long_word_still_fits(self):
+        cap = rf.Captions(words_of("A" * 34), self.font, self.weight)
+        for scale in (1.0, 1.10):
+            x0, _y0, x1, _y1 = ink_box(cap.draw(0, 0, scale))
+            self.assertGreaterEqual(x0, 65)
+            self.assertLessEqual(x1, 1015)
+
     def test_long_chunk_shrinks_to_870(self):
         cap = rf.Captions(words_of("WWWWWWWWWWWWWWWWWW"), self.font, self.weight)
         size, items = cap.layout(0)
@@ -313,8 +320,8 @@ class HookTest(unittest.TestCase):
                 with self.subTest(text=text, band=band):
                     box = ink_box(card, 200)                          # the white card itself
                     self.assertAlmostEqual(y + box[1], band[0], delta=2)  # top edge on the band's top
-                    self.assertLessEqual(box[3] - box[1], rf.HOOK_MAX_H + 1)
-                    self.assertLessEqual(y + box[3], band[1] + 1)
+                    self.assertLessEqual(box[3] - box[1], rf.HOOK_MAX_H3 + 1)      # up to 3 lines
+                    self.assertLess(y + box[3], rf.CAPTION_STRIP[0])               # clear of the captions
                     self.assertLessEqual(box[2] - box[0], rf.HOOK_MAX_W)
                     self.assertAlmostEqual(x + (box[0] + box[2]) / 2.0, 540, delta=2)
                     self.assertLess(y + card.height, rf.SAFE_BOTTOM)
@@ -328,6 +335,27 @@ class HookTest(unittest.TestCase):
         self.assertIsNone(rf.hook_card("", self.font))
         self.assertIsNone(rf.hook_card(None, self.font))
         self.assertEqual(rf.hook_words('"Hold   them"'), ["Hold", "them"])
+
+    def test_every_word_of_a_long_hook_is_kept(self):
+        font_for = lambda s: rf._font(self.font, 800, s)  # noqa: E731
+        for text in ("Nobody warned you about the loneliness of 3 a.m. feedings",
+                     "What your toddler really means when she screams No",
+                     "Every single night you wonder whether you did enough for them",     # 11 words, 62 chars
+                     "x" * 10 + " " + "y" * 70):                                          # 80 chars, absurd words
+            size, lines, w, h = rf.hook_layout(text, font_for)
+            with self.subTest(text=text):
+                self.assertEqual(" ".join(lines).replace("- ", "").split(), text.split())   # nothing dropped
+                self.assertGreaterEqual(size, rf.HOOK_MIN_SIZE)
+                self.assertLessEqual(w, rf.HOOK_MAX_W)
+                f = font_for(size)
+                self.assertTrue(all(f.getlength(l) <= rf.HOOK_MAX_W - 2 * rf.HOOK_PAD[0] for l in lines))
+                for band in rf.HOOK_BANDS:
+                    self.assertLess(band[0] + h, rf.CAPTION_STRIP[0])
+        size, lines, _w, h = rf.hook_layout("Nobody warned you about the loneliness of 3 a.m. feedings", font_for)
+        self.assertLessEqual(len(lines), 3)
+        self.assertLessEqual(h, rf.HOOK_MAX_H3)
+        self.assertEqual(rf.break_word("abcdef", font_for(60), font_for(60).getlength("abc-") + 1),
+                         ["abc-", "def"])
 
     def test_the_calmer_band_is_picked(self):
         import random
@@ -445,6 +473,10 @@ class AudioPureTest(unittest.TestCase):
         self.assertEqual(ra.sfx_events(True, [3.0, 29.0, 33.5, 36.0], 40.0),
                          [("whoosh", 0.0), ("pop", 0.0), ("impact", 29.0)])   # first punch after 70% (28 s)
         self.assertEqual(ra.sfx_events(True, [3.0, 10.0], 40.0), [("whoosh", 0.0), ("pop", 0.0)])
+        # the impact (0.8 s) is never cut by the reel's end: a later punch that leaves room is used, else none
+        self.assertEqual(ra.sfx_events(False, [29.0, 39.5], 40.0, 40.0), [("whoosh", 0.0), ("impact", 29.0)])
+        self.assertEqual(ra.sfx_events(False, [39.5], 40.0, 40.0), [("whoosh", 0.0)])
+        self.assertEqual(ra.sfx_events(False, [39.0], 40.0, 42.0), [("whoosh", 0.0), ("impact", 39.0)])
         self.assertLessEqual(len(ra.sfx_events(True, [30, 31, 32], 40)), 5)
 
     def test_parse_loudnorm(self):

@@ -39,6 +39,7 @@ LOOKAHEAD = 12                     # frames in flight
 
 # ---- captions (1-3 words, <= 18 characters, the spoken word yellow with a 110% pop)
 CAPTION_SIZE = 68
+CAPTION_MIN_SIZE = 12               # a freak long word keeps shrinking rather than leave the frame
 CAPTION_BASELINE = 1180
 CAPTION_MAX_CHARS = 18
 CAPTION_MAX_W = 870                # centred: x 105-975, inside the shared safe box
@@ -52,19 +53,21 @@ POP_S = 0.12                       # ... and settles to 100% over 120 ms
 LINGER_S = 0.6                     # a group stays up into a pause this short
 
 # ---- hook card (reels.hook_text, 008): top safe band, or a little lower when the top is busy (a face)
-HOOK_SIZE, HOOK_MIN_SIZE = 80, 60   # 80 px on one line; two lines shrink to fit the height (~72 px)
+HOOK_SIZE, HOOK_MIN_SIZE = 80, 52   # 80 px on one line; two lines shrink to fit 170 px (~72 px); a longer hook
+                                     # goes to three lines (<= 240 px tall). Words are never dropped.
 HOOK_BANDS = ((280, 450), (600, 770))  # the card's top edge sits at a band's top: the calmer band of the first
                                      # picture is used (fewest edges), so the card avoids faces where it can
-HOOK_MAX_H = 170
+HOOK_MAX_H = 170                   # one or two lines
+HOOK_MAX_H3 = 240                  # three lines (280 + 240 and 600 + 240 both stay clear of the captions at 1000)
 HOOK_MAX_W = 870
 HOOK_PAD = (34, 12)
 HOOK_LINE = 1.0                    # line height / font size
 HOOK_RADIUS = 26
-HOOK_LINES = 2
+HOOK_LINES = 3
 HOOK_END_S = 3.5
 HOOK_OUT_S = 0.15                  # a quick fade at the end (the start is instant: frame 0, no fade)
 HOOK_POP = ((0.0, 0.86), (0.12, 1.04), (0.18, 1.0))   # pop-in done in 180 ms
-HOOK_MAX_WORDS = 12
+HOOK_MAX_WORDS = 24                # (the web allows 10 words / 80 characters)
 HOOK_INK = (17, 17, 17)
 
 
@@ -375,14 +378,14 @@ class Captions:
         instead of running into them."""
         texts = [w["text"] for w in self.chunks[ci]]
         size = CAPTION_SIZE
-        for _ in range(8):
+        for _ in range(12):
             f = self.font(size)
             widths = [f.getlength(t) for t in texts]
             total = sum(widths) + f.getlength(" ") * (len(texts) - 1) + 2 * OUTLINE
             need = total + POP * max(widths)                    # room for the spoken word's pop
-            if need <= CAPTION_MAX_W or size <= 40:
+            if need <= CAPTION_MAX_W or size <= CAPTION_MIN_SIZE:
                 break
-            size = max(40, int(size * CAPTION_MAX_W / need))
+            size = max(CAPTION_MIN_SIZE, min(size - 1, int(size * CAPTION_MAX_W / need)))
         f = self.font(size)
         space = f.getlength(" ")
         if 0 <= active < len(texts) and scale != 1.0:
@@ -459,40 +462,53 @@ def hook_words(text, limit=HOOK_MAX_WORDS):
     return t.split(" ")[:limit] if t else []
 
 
+def break_word(word, font, max_w):
+    """A word wider than max_w split into hyphenated pieces that each fit (never cut off at the card's edge)."""
+    pieces, rest = [], word
+    while font.getlength(rest) > max_w and len(rest) > 1:
+        k = len(rest) - 1
+        while k > 1 and font.getlength(rest[:k] + "-") > max_w:
+            k -= 1
+        pieces.append(rest[:k] + "-")
+        rest = rest[k:]
+    return pieces + [rest]
+
+
 def wrap(words, font, max_w):
     lines, cur = [], []
-    for w in words:
-        if cur and font.getlength(" ".join(cur + [w])) > max_w:
-            lines.append(" ".join(cur))
-            cur = []
-        cur.append(w)
+    for word in words:
+        for w in (break_word(word, font, max_w) if font.getlength(word) > max_w else [word]):
+            if cur and font.getlength(" ".join(cur + [w])) > max_w:
+                lines.append(" ".join(cur))
+                cur = []
+            cur.append(w)
     if cur:
         lines.append(" ".join(cur))
     return lines
 
 
 def hook_layout(text, font_for_size):
-    """(size, lines, box w, box h) for the hook card: HOOK_SIZE px, shrunk (to HOOK_MIN_SIZE) until it fits in
-    HOOK_LINES lines, HOOK_MAX_W wide and HOOK_MAX_H tall."""
+    """(size, lines, box w, box h) for the hook card. Every word is kept: one or two lines from HOOK_SIZE down to
+    HOOK_MIN_SIZE within HOOK_MAX_H, else three lines within HOOK_MAX_H3, else (an extreme hook) as many lines as it
+    takes at HOOK_MIN_SIZE; a word too wide for the card is hyphen-broken."""
     words = hook_words(text)
     if not words:
         return None
-    max_h = HOOK_MAX_H
-    size = HOOK_SIZE
-    while True:
+    max_text_w = HOOK_MAX_W - 2 * HOOK_PAD[0]
+
+    def measure(size):
         f = font_for_size(size)
-        lines = wrap(words, f, HOOK_MAX_W - 2 * HOOK_PAD[0])
-        line_h = int(round(size * HOOK_LINE))
+        lines = wrap(words, f, max_text_w)
         w = int(max(f.getlength(l) for l in lines)) + 2 * HOOK_PAD[0]
-        h = line_h * len(lines) + 2 * HOOK_PAD[1]
-        if len(lines) <= HOOK_LINES and w <= HOOK_MAX_W and h <= max_h:
-            return size, lines, w, h
-        if size > HOOK_MIN_SIZE:
-            size -= 2
-        elif len(words) > 1:
-            words = words[:-1]              # too long for two lines even at the smallest size: drop the tail
-        else:
-            return size, lines, min(w, HOOK_MAX_W), min(h, max_h)
+        h = int(round(size * HOOK_LINE)) * len(lines) + 2 * HOOK_PAD[1]
+        return size, lines, min(w, HOOK_MAX_W), h
+
+    for max_lines, max_h in ((2, HOOK_MAX_H), (3, HOOK_MAX_H3)):
+        for size in range(HOOK_SIZE, HOOK_MIN_SIZE - 1, -2):
+            lay = measure(size)
+            if len(lay[1]) <= max_lines and lay[3] <= max_h:
+                return lay
+    return measure(HOOK_MIN_SIZE)
 
 
 def band_energy(img, band):
