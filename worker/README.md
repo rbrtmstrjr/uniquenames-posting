@@ -71,8 +71,10 @@ Steps, in order: voice → timing → music → images → render.
   - **Punch-ins** (008 `punch`): an instant +15 % on the punch word's Whisper start (normalized match inside the line),
     held to the end of the shot; at most 4 a reel, never in a shot's first 0.3 s or last 0.35 s.
   - **Cuts**: hard cuts; a 0.4 s dissolve only into a scene with `time_jump` (008).
-  - **Hook card** (008 `reels.hook_text`): white rounded card, Montserrat ExtraBold 92 px (shrinks to fit 3 lines),
-    centred in y 350–650, on from frame 0 (86 % → 104 % → 100 % in 180 ms, no fade-in), gone at 3.5 s.
+  - **Hook card** (008 `reels.hook_text`): white rounded card, Montserrat ExtraBold 80 px (two lines shrink to fit,
+    ~72 px; card <= 170 px tall, <= 870 wide), its top edge at y 280, or at y 600 when that band of the first picture
+    is calmer (fewer edges: the card avoids faces where it can); on from frame 0 (86 % → 104 % → 100 % in 180 ms,
+    no fade-in), gone at 3.5 s.
   - **Captions**: Montserrat ExtraBold 68 px (`fonts.reel_caption_font`: the catalog's Montserrat at wght 800 →
     Poppins Bold → Poppins SemiBold), ALL CAPS, 1–3 words / <= 18 characters per chunk, white + 4 px black outline + soft
     shadow, the spoken word #FFD60A popping 110 % → 100 % over 120 ms (it pushes its neighbours aside), baseline

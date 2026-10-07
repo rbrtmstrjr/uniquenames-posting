@@ -42,13 +42,16 @@ POP = 0.10                         # the spoken word starts at 110% ...
 POP_S = 0.12                       # ... and settles to 100% over 120 ms
 LINGER_S = 0.6                     # a group stays up into a pause this short
 
-# ---- hook card (reels.hook_text, 008)
-HOOK_SIZE, HOOK_MIN_SIZE = 92, 64
-HOOK_BOX = (350, 650)              # the card sits inside y 350-650
+# ---- hook card (reels.hook_text, 008): top safe band, or a little lower when the top is busy (a face)
+HOOK_SIZE, HOOK_MIN_SIZE = 80, 60   # 80 px on one line; two lines shrink to fit the height (~72 px)
+HOOK_BANDS = ((280, 450), (600, 770))  # the card's top edge sits at a band's top: the calmer band of the first
+                                     # picture is used (fewest edges), so the card avoids faces where it can
+HOOK_MAX_H = 170
 HOOK_MAX_W = 870
-HOOK_PAD = (38, 24)
-HOOK_RADIUS = 30
-HOOK_LINES = 3
+HOOK_PAD = (34, 12)
+HOOK_LINE = 1.0                    # line height / font size
+HOOK_RADIUS = 26
+HOOK_LINES = 2
 HOOK_END_S = 3.5
 HOOK_OUT_S = 0.15                  # a quick fade at the end (the start is instant: frame 0, no fade)
 HOOK_POP = ((0.0, 0.86), (0.12, 1.04), (0.18, 1.0))   # pop-in done in 180 ms
@@ -410,25 +413,48 @@ def wrap(words, font, max_w):
 
 def hook_layout(text, font_for_size):
     """(size, lines, box w, box h) for the hook card: HOOK_SIZE px, shrunk (to HOOK_MIN_SIZE) until it fits in
-    HOOK_LINES lines, HOOK_MAX_W wide and the y 350-650 band."""
+    HOOK_LINES lines, HOOK_MAX_W wide and HOOK_MAX_H tall."""
     words = hook_words(text)
     if not words:
         return None
-    max_h = HOOK_BOX[1] - HOOK_BOX[0]
+    max_h = HOOK_MAX_H
     size = HOOK_SIZE
     while True:
         f = font_for_size(size)
         lines = wrap(words, f, HOOK_MAX_W - 2 * HOOK_PAD[0])
-        line_h = int(round(size * 1.12))
+        line_h = int(round(size * HOOK_LINE))
         w = int(max(f.getlength(l) for l in lines)) + 2 * HOOK_PAD[0]
         h = line_h * len(lines) + 2 * HOOK_PAD[1]
-        if (len(lines) <= HOOK_LINES and w <= HOOK_MAX_W and h <= max_h) or size <= HOOK_MIN_SIZE:
+        if len(lines) <= HOOK_LINES and w <= HOOK_MAX_W and h <= max_h:
+            return size, lines, w, h
+        if size > HOOK_MIN_SIZE:
+            size -= 2
+        elif len(words) > 1:
+            words = words[:-1]              # too long for two lines even at the smallest size: drop the tail
+        else:
             return size, lines, min(w, HOOK_MAX_W), min(h, max_h)
-        size -= 4
 
 
-def hook_card(text, font_path=None, weight=800):
-    """(RGBA card, (x, y)) placed centred in the y 350-650 band, or None without hook text."""
+def band_energy(img, band):
+    """Mean edge strength (0-255) of a picture (1080x1920 frame coordinates) inside a y band, over the card's
+    x span: busy detail and faces score high, sky / wall / blur low."""
+    small = img.convert("L").resize((WIDTH // 4, HEIGHT // 4), Image.BILINEAR)
+    edges = small.filter(ImageFilter.FIND_EDGES)
+    x0, x1 = (WIDTH - HOOK_MAX_W) // 2 // 4, (WIDTH + HOOK_MAX_W) // 2 // 4
+    region = edges.crop((x0 + 1, band[0] // 4, x1 - 1, band[1] // 4))
+    data = region.tobytes()
+    return sum(data) / float(max(1, len(data)))
+
+
+def pick_band(img):
+    """The calmest hook band of the first picture (ties: the top band); the top band without a picture."""
+    if img is None:
+        return HOOK_BANDS[0]
+    return min(HOOK_BANDS, key=lambda b: (round(band_energy(img, b), 1), HOOK_BANDS.index(b)))
+
+
+def hook_card(text, font_path=None, weight=800, band=HOOK_BANDS[0]):
+    """(RGBA card, (x, y)) with the white card's top edge on band[0], centred across, or None without hook text."""
     fonts = {}
 
     def font_for(size):
@@ -441,7 +467,7 @@ def hook_card(text, font_path=None, weight=800):
         return None
     size, lines, w, h = lay
     f = font_for(size)
-    line_h = int(round(size * 1.12))
+    line_h = int(round(size * HOOK_LINE))
     sh = 14                                                   # soft drop shadow around the card
     card = Image.new("RGBA", (w + 2 * sh, h + 2 * sh), (0, 0, 0, 0))
     shadow = Image.new("L", card.size, 0)
@@ -457,7 +483,7 @@ def hook_card(text, font_path=None, weight=800):
         d.text((sh + w / 2.0, slot_mid - (asc[1] + asc[3]) / 2.0), line, font=f, anchor="ms", fill=HOOK_INK)
     card = Image.alpha_composite(card, box)
     x = (WIDTH - card.width) // 2
-    y = (HOOK_BOX[0] + HOOK_BOX[1]) // 2 - card.height // 2
+    y = band[0] - sh
     return card, (x, y)
 
 
@@ -481,8 +507,12 @@ def hook_alpha(t):
 
 
 class Hook:
-    def __init__(self, text, font_path=None, weight=800):
-        made = hook_card(text, font_path, weight)
+    def __init__(self, text, font_path=None, weight=800, first_picture=None):
+        """first_picture: the opening picture (1080x1920 or its 2x copy) to choose the calmer band on."""
+        if first_picture is not None and first_picture.size != (WIDTH, HEIGHT):
+            first_picture = first_picture.resize((WIDTH, HEIGHT), Image.BILINEAR)
+        self.band = pick_band(first_picture)
+        made = hook_card(text, font_path, weight, self.band)
         self.card, self.pos = made if made else (None, None)
         self._cache = {}
 

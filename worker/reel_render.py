@@ -317,7 +317,7 @@ def render_reel(runner, reel, scenes):
 
         font, weight = caption_font(runner.log)
         captions = reel_frames.Captions(words, font, weight)
-        hook = reel_frames.Hook(hook_text, font, weight)
+        hook = reel_frames.Hook(hook_text, font, weight, first_picture=first_picture(work, items, has_hook))
         frames = reel_frames.frames(shots, lambda shot: open_picture(work, shot, items), captions, hook, FPS)
         pipe_ffmpeg(video_args(ffmpeg, "audio.wav", "full.mp4"), work, frames, RENDER_TIMEOUT, "video", beat,
                     log=runner.log)
@@ -381,6 +381,18 @@ def caption_font(log=print):
     except Exception as e:
         log("caption font unavailable (%s); using the built-in font" % e)
         return None, 800
+
+
+def first_picture(work, items, has_hook):
+    """The opening picture at frame size (the hook card picks its band on it); None if unneeded or unreadable
+    (the broken picture is reported by the frames)."""
+    if not has_hook or not items:
+        return None
+    try:
+        with Image.open(os.path.join(work, items[0]["image"])) as im:
+            return im.convert("RGB").resize((WIDTH, HEIGHT), Image.BILINEAR)
+    except (OSError, ValueError, Image.DecompressionBombError):
+        return None
 
 
 def scene_item(scene, image, seconds):

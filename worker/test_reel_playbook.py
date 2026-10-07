@@ -273,21 +273,46 @@ class HookTest(unittest.TestCase):
         cls.font, cls.weight = fonts.reel_caption_font(log=lambda m: None)
 
     def test_card_fits_the_band(self):
-        for text in ("Nobody tells you this part", "The last time you carry them, you won't know it",
-                     "Why?", "  one  two   three  four five six seven eight nine ten eleven twelve thirteen "):
-            card, (x, y) = rf.hook_card(text, self.font, self.weight)
-            with self.subTest(text=text):
-                box = ink_box(card, 200)                              # the white card itself
-                self.assertGreaterEqual(y + box[1], 350)
-                self.assertLessEqual(y + box[3], 650)
-                self.assertLessEqual(box[2] - box[0], rf.HOOK_MAX_W)
-                self.assertAlmostEqual(x + (box[0] + box[2]) / 2.0, 540, delta=2)
-        size, lines, _w, _h = rf.hook_layout("Nobody tells you this part", lambda s: rf._font(self.font, 800, s))
-        self.assertEqual(size, 92)
-        self.assertLessEqual(len(lines), 3)
+        for band in rf.HOOK_BANDS:
+            for text in ("Nobody tells you this part", "The last time you carry them, you won't know it",
+                         "Why?", "  one  two   three  four five six seven eight nine ten eleven twelve thirteen "):
+                card, (x, y) = rf.hook_card(text, self.font, self.weight, band)
+                with self.subTest(text=text, band=band):
+                    box = ink_box(card, 200)                          # the white card itself
+                    self.assertAlmostEqual(y + box[1], band[0], delta=2)  # top edge on the band's top
+                    self.assertLessEqual(box[3] - box[1], rf.HOOK_MAX_H + 1)
+                    self.assertLessEqual(y + box[3], band[1] + 1)
+                    self.assertLessEqual(box[2] - box[0], rf.HOOK_MAX_W)
+                    self.assertAlmostEqual(x + (box[0] + box[2]) / 2.0, 540, delta=2)
+                    self.assertLess(y + card.height, rf.SAFE_BOTTOM)
+        font_for = lambda s: rf._font(self.font, 800, s)  # noqa: E731
+        size, lines, _w, _h = rf.hook_layout("Nobody tells you", font_for)
+        self.assertEqual((size, len(lines)), (80, 1))
+        size, lines, _w, h = rf.hook_layout("Nobody tells you how fast it goes", font_for)
+        self.assertEqual(len(lines), 2)
+        self.assertTrue(70 <= size <= 76, size)
+        self.assertLessEqual(h, rf.HOOK_MAX_H)
         self.assertIsNone(rf.hook_card("", self.font))
         self.assertIsNone(rf.hook_card(None, self.font))
         self.assertEqual(rf.hook_words('"Hold   them"'), ["Hold", "them"])
+
+    def test_the_calmer_band_is_picked(self):
+        import random
+        rnd = random.Random(1)
+        busy = Image.new("L", (1080, 1920), 128)
+        noise = Image.frombytes("L", (1080, 200), bytes(rnd.randrange(256) for _ in range(1080 * 200)))
+        top_busy = busy.copy()
+        top_busy.paste(noise, (0, 270))                              # a face-like busy patch in the top band
+        self.assertGreater(rf.band_energy(top_busy, rf.HOOK_BANDS[0]), rf.band_energy(top_busy, rf.HOOK_BANDS[1]))
+        self.assertEqual(rf.pick_band(top_busy), rf.HOOK_BANDS[1])
+        low_busy = busy.copy()
+        low_busy.paste(noise, (0, 590))
+        self.assertEqual(rf.pick_band(low_busy), rf.HOOK_BANDS[0])
+        self.assertEqual(rf.pick_band(busy), rf.HOOK_BANDS[0])         # a tie keeps the top band
+        self.assertEqual(rf.pick_band(None), rf.HOOK_BANDS[0])
+        h = rf.Hook("Nobody tells you", self.font, self.weight, first_picture=top_busy.convert("RGB").resize((2160, 3840)))
+        self.assertEqual(h.band, rf.HOOK_BANDS[1])
+        self.assertAlmostEqual(h.pos[1] + 14, 600, delta=1)
 
     def test_on_frame_0_pops_in_under_200_ms_and_goes_at_3_5_s(self):
         self.assertEqual(rf.hook_alpha(0.0), 1.0)                     # no fade-in: visible on frame 0
@@ -321,7 +346,7 @@ class FramesTest(unittest.TestCase):
         r, g, b = img(out[30]).getpixel((5, 5))                     # mid-dissolve: half and half
         self.assertTrue(80 < r < 120 and 80 < b < 120, (r, g, b))
         self.assertEqual(img(out[50]).getpixel((5, 5)), (0, 0, 200))
-        self.assertTrue(all(v > 235 for v in img(out[0]).getpixel((540, 500))))   # the white hook card on frame 0
+        self.assertTrue(all(v > 235 for v in img(out[0]).getpixel((540, 340))))   # the white hook card on frame 0
 
     def test_a_failing_picture_stops_cleanly(self):
         items = [{"image": "a", "duration": 1.0}, {"image": "b", "duration": 1.0}]
