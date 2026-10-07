@@ -98,7 +98,7 @@ export const STILL_STYLE_TAG: Record<ReelThemeId, string> = {
   papercraft: "layered cut-paper diorama, thick cardstock layers, soft depth shadows between layers",
   anime: "soft slice-of-life anime background art, clean line art, gentle cel shading",
   sketch: "black-and-white graphite pencil drawing on white sketchbook paper, soft cross-hatching",
-  cinematic: "cinematic real-life film still, 35mm film grain, shallow depth of field",
+  cinematic: "cinematic real-life film still, fine film grain, shallow depth of field",
 };
 
 /** The short style tag of a theme (unknown id → the default theme's); `still` = the people-free variant. */

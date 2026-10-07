@@ -39,8 +39,23 @@ export const SHOT_FRAMES: Record<ReelShotSize, readonly string[]> = {
   pov: ["first-person point of view looking down, 24mm lens", "first-person point of view at arm's length, 24mm lens"],
   broll: ["quiet cutaway shot from directly above, 50mm lens", "quiet cutaway shot from a high angle, 50mm lens", "quiet cutaway shot from the side, 50mm lens"],
 };
-/** A line's framing phrase. */
-export const frameOf = (size: ReelShotSize, index: number) => SHOT_FRAMES[size][Math.max(0, index) % SHOT_FRAMES[size].length];
+/**
+ * The framings for pictures with nobody in them: optics without "lens" / "mm" words (with no people in frame, Z-Image
+ * draws the named lens itself, e2e e76f1506). Same rotation; every phrase unique and distinct from SHOT_FRAMES.
+ */
+export const STILL_FRAMES: Record<ReelShotSize, readonly string[]> = {
+  wide: ["wide view at eye level, deep focus", "wide view from a high angle, deep focus", "wide view from a low angle, deep focus"],
+  medium: ["natural medium framing at eye level, soft background blur", "natural medium framing from a slightly high angle, soft background blur", "natural medium framing from a low angle, soft background blur"],
+  close: ["close view at eye level, shallow depth of field, soft background blur", "close view from a slightly high angle, shallow depth of field, soft background blur", "close view from a low angle, shallow depth of field, soft background blur"],
+  detail: ["macro close-up from directly above, very shallow depth of field, soft background blur", "macro close-up at eye level, very shallow depth of field, soft background blur", "macro close-up from the side, very shallow depth of field, soft background blur"],
+  pov: ["first-person view looking down, soft background blur", "first-person view at arm's length, soft background blur"],
+  broll: ["quiet cutaway view from directly above, soft background blur", "quiet cutaway view from a high angle, soft background blur", "quiet cutaway view from the side, soft background blur"],
+};
+/** A line's framing phrase (`still` = nobody in frame: no lens words). */
+export const frameOf = (size: ReelShotSize, index: number, still = false) => {
+  const f = (still ? STILL_FRAMES : SHOT_FRAMES)[size];
+  return f[Math.max(0, index) % f.length];
+};
 
 /** Lines written before 008 carry a 007 framing (or none): the nearest shot size. */
 const LEGACY_SIZE: Record<ReelShot, ReelShotSize> = {
@@ -319,7 +334,7 @@ export function scenePrompt(theme: ReelTheme, cast: ReelCast, scene: PromptScene
   const still = moment.replace(/^(A|An|The|One|Some|Two|Three)\b/, (w) => w.toLowerCase());
   const shown = !person ? `a quiet still life, ${still}, a calm, peaceful space` : index === 0 ? `a striking, high-emotion moment: ${moment}` : moment;
   const slots = [
-    `Vertical 9:16 ${frameOf(size, index)}`,
+    `Vertical 9:16 ${frameOf(size, index, !person)}`,
     [shown, action, feeling].filter(Boolean).join(", "),
     who,
     setting,

@@ -310,6 +310,24 @@ describe("no strangers, no faces on objects, a fixed child age (e2e 4cc98904)", 
     expect(styleTag(STATIC_THEMES.knitted, true)).toBe(STILL_STYLE_TAG.knitted);
   });
 
+  it("pictures with nobody in them carry no lens / mm words (they summon a lens in frame); people shots keep them", async () => {
+    const { STILL_FRAMES } = await import("@/lib/reels/prompt");
+    const block = { ...line, idea: "a wooden blue block tipping off a small stack — the play mat at noon" };
+    for (const id of REEL_THEME_IDS) for (const subject of ["object", "none"]) for (const shot_size of REEL_SHOT_SIZES) for (let i = 1; i < 4; i++) {
+      const p = scenePrompt(STATIC_THEMES[id], CAST, { ...block, subject, shot_size }, i);
+      expect(p, `${id}/${subject}/${shot_size}`).not.toMatch(/\blens\b|\d+\s?mm\b|camera/i);
+    }
+    expect(scenePrompt(STATIC_THEMES.cinematic, CAST, { ...block, subject: "object", shot_size: "detail" }, 1))
+      .toMatch(/^Vertical 9:16 macro close-up at eye level, very shallow depth of field, soft background blur, a quiet still life, a wooden blue block/);
+    expect(scenePrompt(STATIC_THEMES.cinematic, CAST, { ...line, subject: "mom", shot_size: "close" }, 1)).toMatch(/85mm lens/);
+    expect(scenePrompt(STATIC_THEMES.cinematic, CAST, { ...line, subject: "mom", shot_size: "detail" }, 1)).toMatch(/100mm macro lens/);
+    const all = REEL_SHOT_SIZES.flatMap((s) => [...STILL_FRAMES[s], ...SHOT_FRAMES[s]]);
+    expect(new Set(all).size).toBe(all.length);
+    for (const a of REEL_SHOT_SIZES) for (const b of REEL_SHOT_SIZES) for (let i = 0; i < 6; i++) {
+      expect(frameOf(a, i, true)).not.toBe(frameOf(b, i + 1, true));
+    }
+  });
+
   it("every prompt says who is in frame, positively", () => {
     const p = (subject: string, shot_size = "medium") => scenePrompt(STATIC_THEMES.animated3d, CAST, { ...line, subject, shot_size }, 3);
     expect(p("both")).toContain("The only people in the picture are the mom and her baby.");
