@@ -146,11 +146,16 @@ describe("scenePrompt v2: front-loaded token order", () => {
     expect(p).not.toMatch(/daylight/);
   });
 
-  it("feelings: faces themes on faces (medium / close / POV), through pose in a wide; faceless themes always through pose", () => {
+  it("feelings: faces themes on faces; pose only in a wide line without its own action; faceless themes always through pose", () => {
     expect(scenePrompt(STATIC_THEMES.anime, PEOPLE, { ...line, shot_size: "close" }, 1)).toContain(EMOTION_FACE.teary);
-    expect(scenePrompt(STATIC_THEMES.anime, PEOPLE, { ...line, shot_size: "wide" }, 1)).toContain(EMOTION_POSE.teary);
+    expect(scenePrompt(STATIC_THEMES.anime, PEOPLE, { ...line, shot_size: "wide", action: "" }, 1)).toContain(EMOTION_POSE.teary);
+    // a line with an action: only the facial wording, so the pose can't contradict it (e2e: arms up + "head bowed")
+    const acted = scenePrompt(STATIC_THEMES.animated3d, PEOPLE, { ...line, shot_size: "wide", subject: "baby", emotion: "teary", action: "reaches both arms high, crying" }, 1);
+    expect(acted).toContain(`reaches both arms high, crying, ${EMOTION_FACE.teary}`);
+    expect(acted).not.toContain(EMOTION_POSE_ONE.teary);
+    expect(acted).not.toMatch(/head bowed|hand over the heart/);
     // one person alone never gets "each other"
-    const one = scenePrompt(STATIC_THEMES.anime, PEOPLE, { ...line, shot_size: "wide", subject: "baby", emotion: "playful" }, 1);
+    const one = scenePrompt(STATIC_THEMES.anime, PEOPLE, { ...line, shot_size: "wide", subject: "baby", emotion: "playful", action: "" }, 1);
     expect(one).toContain(EMOTION_POSE_ONE.playful);
     for (const x of Object.values(EMOTION_POSE_ONE)) expect(x).not.toMatch(/each other|together|they /);
     for (const t of [STATIC_THEMES.knitted, STATIC_THEMES.papercraft]) {

@@ -301,7 +301,9 @@ export function scenePrompt(theme: ReelTheme, cast: ReelCast, scene: PromptScene
   const moment = fix(rawMoment) || fallback;
   const action = person ? fix(scene.action) : "";
   const feeling = !emotion || faceFree ? ""
-    : theme.faces && size !== "wide" ? EMOTION_FACE[emotion] : (subject === "both" ? EMOTION_POSE : EMOTION_POSE_ONE)[emotion];
+    // faces themes: a line with its own action gets only the facial wording (a pose could contradict the action);
+    // without an action, a wide shot shows the feeling through pose. Faceless themes: pose is the only channel.
+    : theme.faces && (action || size !== "wide") ? EMOTION_FACE[emotion] : (subject === "both" ? EMOTION_POSE : EMOTION_POSE_ONE)[emotion];
 
   let who = "";
   if (person && faceFree) {
