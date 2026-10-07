@@ -1,5 +1,5 @@
 -- Unique Names posting: database. Paste the whole file into the Supabase SQL editor and run it once.
--- A project created before v2 runs supabase/migrations/002_v2.sql, 003_post_fonts.sql, 004_subject_age.sql, 005_reels.sql, 006_reel_voices.sql then 007_reel_themes.sql instead (this file already includes them).
+-- A project created before v2 runs supabase/migrations/002_v2.sql, 003_post_fonts.sql, 004_subject_age.sql, 005_reels.sql, 006_reel_voices.sql, 007_reel_themes.sql then 008_reel_playbook.sql instead (this file already includes them).
 -- Status 'pending' = an AI-suggested name/theme waiting for approval; nothing here ever plans it (only 'available').
 
 -- ---------------------------------------------------------------- tables
@@ -212,6 +212,8 @@ create table if not exists public.reels (
   music_path text,
   -- 007: the visual theme; the app pins it on every new reel (null = legacy / theme deleted -> knitted)
   theme_id text references public.reel_themes (id) on delete set null,
+  -- 008: the hook card shown over the first 3.5 s (null = none)
+  hook_text text,
   duration_s numeric,
   version int not null default 1,
   claimed_at timestamptz, started_at timestamptz, finished_at timestamptz,
@@ -244,7 +246,12 @@ create table if not exists public.reel_scenes (
   shot text,
   key_moment boolean not null default false,
   motion text constraint reel_scenes_motion_check
-    check (motion in ('push_in', 'pull_out', 'pan_left', 'pan_right', 'tilt_up', 'tilt_down', 'punch')),
+    check (motion in ('push_in', 'pull_out', 'pan_left', 'pan_right', 'tilt_up', 'tilt_down', 'punch', 'hold')),
+  -- 008: the shot size, who is in the picture, a stressed word for a punch-in, a time jump before the line
+  shot_size text constraint reel_scenes_shot_size_check check (shot_size in ('wide', 'medium', 'close', 'detail', 'pov', 'broll')),
+  subject text constraint reel_scenes_subject_check check (subject in ('mom', 'baby', 'both', 'object', 'none')),
+  punch text,
+  time_jump boolean not null default false,
   unique (reel_id, position)
 );
 alter table public.themes drop constraint if exists themes_preview_fk;

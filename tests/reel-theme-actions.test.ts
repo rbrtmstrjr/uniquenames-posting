@@ -153,11 +153,16 @@ describe("theme + line label helpers", () => {
     expect(themeName(null)).toBe("🧶 Knitted Doll");
     expect(themeName("gone")).toBe("🧶 Knitted Doll");
   });
-  it("lineMood: emotion chip + shot/motion words; null without an emotion", () => {
+  it("lineMood: emotion chip + shot/motion words; null without an emotion or a shot size", () => {
     expect(lineMood({ emotion: "Teary", shot: "low_angle", motion: "pull_out", key_moment: true }))
-      .toEqual({ emotion: "teary", emoji: "😢", shot: "Low angle", motion: "Pull back", key: true });
-    expect(lineMood({ emotion: "proud", shot: null, motion: "spin" })).toEqual({ emotion: "proud", emoji: "🥹", shot: null, motion: null, key: false });
+      .toEqual({ emotion: "teary", emoji: "😢", size: null, shot: "Low angle", motion: "Pull back", punch: null, key: true });
+    expect(lineMood({ emotion: "proud", shot: null, motion: "spin" })).toEqual({ emotion: "proud", emoji: "🥹", size: null, shot: null, motion: null, punch: null, key: false });
     expect(lineMood({ emotion: null })).toBeNull();
     expect(lineMood({ emotion: "angry" })).toBeNull();
+  });
+  it("lineMood (008): the shot-size chip, the punch word (instead of 'key'), the hold move", () => {
+    expect(lineMood({ emotion: "teary", shot_size: "broll", motion: "hold", punch: " last time ", key_moment: true }))
+      .toEqual({ emotion: "teary", emoji: "😢", size: "B-roll", shot: null, motion: "Hold", punch: "last time", key: false });
+    expect(lineMood({ shot_size: "close" })).toMatchObject({ emotion: null, emoji: null, size: "Close-up" });
   });
 });

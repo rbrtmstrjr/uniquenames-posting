@@ -55,6 +55,22 @@ export const STATIC_THEMES: Record<ReelThemeId, ReelTheme> = {
   },
 };
 
+/**
+ * The short style tag per theme (playbook v2, ≤ 12 words) that ends every reel image prompt: the long style block is
+ * condensed so the shot, the moment and the characters lead the prompt. The long block stays for theme previews.
+ * Positive-only, never "camera", no lighting (the prompt sets the light per line).
+ */
+export const STYLE_TAG: Record<ReelThemeId, string> = {
+  knitted: "handmade amigurumi crochet doll photography, visible stitches, felt and yarn set",
+  animated3d: "stylized 3D animated family-film still, expressive faces, warm cream and honey palette",
+  watercolor: "storybook watercolor illustration on textured paper, soft washes, fine ink lines",
+  clay: "handmade clay stop-motion still, matte clay with fingerprints, miniature tabletop set",
+  papercraft: "layered cut-paper diorama, thick cardstock layers, soft depth shadows between layers",
+  anime: "soft slice-of-life anime illustration, clean line art, gentle cel shading",
+  sketch: "black-and-white graphite pencil drawing on white sketchbook paper, soft cross-hatching",
+  cinematic: "cinematic real-life film still, natural skin texture, 35mm film grain",
+};
+
 export const isThemeId = (x: unknown): x is ReelThemeId =>
   typeof x === "string" && (REEL_THEME_IDS as readonly string[]).includes(x);
 
@@ -69,6 +85,9 @@ export function themeOf(row: unknown, id?: string | null): ReelTheme {
   }
   return staticTheme(isThemeId(r.id) ? r.id : id);
 }
+
+/** The short style tag of a theme (unknown id → the default theme's). */
+export const styleTag = (t: Pick<ReelTheme, "id">) => STYLE_TAG[isThemeId(t.id) ? t.id : DEFAULT_THEME_ID];
 
 /** Knitted Doll draws every character as a crocheted doll: the cast and ideas are written as dolls. */
 export const isDollTheme = (t: Pick<ReelTheme, "id">) => t.id === "knitted";

@@ -1,126 +1,159 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { KNIT_STYLE, scenePrompt } from "@/lib/reels/prompt";
-import { STATIC_THEMES } from "@/lib/reels/themes";
-import { NO_TEXT } from "@/lib/planner/prompt";
+import { shotListIssues } from "@/lib/reels/shots";
+import { splitIdea } from "@/lib/reels/prompt";
 
 const { generateJson } = vi.hoisted(() => ({ generateJson: vi.fn() }));
 vi.mock("@/lib/ai/gemini", () => ({ generateJson }));
-const { reelScriptPrompt, writeReelScript, REEL_SCRIPT_MODEL, REEL_SCRIPT_TIMEOUT_MS, ALREADY_MADE_CAP } = await import("@/lib/ai/reel-script");
+const {
+  reelScriptPrompt, writeReelScript, reelWordBudget, REEL_SCRIPT_MODEL, REEL_SCRIPT_TIMEOUT_MS, ALREADY_MADE_CAP, LINE_MAX_WORDS,
+} = await import("@/lib/ai/reel-script");
 
 beforeEach(() => generateJson.mockReset());
 
 const cast = {
   adult: "the mom doll: a crocheted mother doll with chunky dark-brown yarn hair in a low bun, a mustard cardigan",
   child: "the baby doll: a small crocheted baby doll with soft tufts of brown yarn hair, a rust romper",
+  adult_tag: "mom doll, tan wool skin, yarn bun, mustard cardigan",
+  child_tag: "baby doll, tan wool skin, rust romper",
 };
-const HOOK = "Stop rushing the last time you carry them.";
-const scene = (n: number, narration = n === 0 ? HOOK : `Line number ${n} is a short spoken phrase for mama.`) =>
-  ({ beat: n === 0 ? "hook" : "build", narration, idea: `The mom doll rocks the baby doll by a window, moment ${n}.`,
-    emotion: "tender", action: "rocks gently, both arms wrapped around the baby doll", shot: n % 2 ? "wide" : "medium", key: false });
-const KNIT = STATIC_THEMES.knitted;
+const HOOK = "You'll carry them for the very last time.";
+const HOOK_TEXT = "And you won't know it's the last";
+// a shot list that already follows every rule (10 lines)
+const SHOTS = [
+  ["close", "both"], ["wide", "both"], ["detail", "object"], ["medium", "mom"], ["close", "baby"],
+  ["detail", "mom"], ["medium", "both"], ["broll", "none"], ["medium", "baby"], ["close", "both"],
+] as const;
+const scene = (n: number, narration = n === 0 ? HOOK : `Line number ${n} is a short spoken phrase for mama.`) => ({
+  beat: n === 0 ? "hook" : "build", narration, idea: `The mom doll rocks the baby doll, moment ${n}.`, setting: n === 0 ? "the nursery at 3 a.m." : `the sala, moment ${n}`,
+  emotion: "tender", action: "rocks gently, both arms wrapped around the baby doll",
+  shot_size: SHOTS[n % 10][0], subject: SHOTS[n % 10][1], punch: "", time_jump: false,
+});
 const script = (count: number, over: Record<string, unknown> = {}) =>
-  ({ title: "The Last Time You Carry Them", stage: "baby", cast, scenes: Array.from({ length: count }, (_, i) => scene(i)), ...over });
-const NEGATIVE = /\b(avoid|not a|no (blur|watermark|people))\b/i;
+  ({ title: "The Last Time You Carry Them", stage: "baby", hook_text: HOOK_TEXT, cast, scenes: Array.from({ length: count }, (_, i) => scene(i)), ...over });
+const input10 = { maxScenes: 10, alreadyMade: [] };
+const input30 = { maxScenes: 30, alreadyMade: [] };
 
 describe("reelScriptPrompt", () => {
   it("carries the topic and the max scenes", () => {
     const { system, prompt } = reelScriptPrompt({ topic: "teething at night", maxScenes: 32, alreadyMade: [] });
     expect(prompt).toContain("teething at night");
-    expect(prompt).toContain("32");
-    expect(system).toMatch(/FILIPINO MOMS/);
-    expect(system).toMatch(/EARLY YEARS/);
+    expect(prompt).toContain("-32 lines");
+    expect(system).toMatch(/Filipino moms/);
+    expect(system).toMatch(/early years/);
   });
 
   it("a blank topic asks Gemini to choose a fresh early-years topic", () => {
     const { prompt } = reelScriptPrompt({ topic: "  ", maxScenes: 40, alreadyMade: [] });
-    expect(prompt).toMatch(/CHOOSE a fresh/);
+    expect(prompt).toMatch(/CHOOSE one fresh/);
     expect(prompt).toMatch(/NEWBORN/);
   });
 
-  it("lists every already-made title with its stage, or says none yet", () => {
+  it("lists every already-made title with its stage, or says none yet; capped at the newest", () => {
     const made = [{ title: "The Last Time You Carry Them", stage: "baby" }, { title: "Tiny Socks, Big Love" }];
     const { prompt } = reelScriptPrompt({ maxScenes: 40, alreadyMade: made });
     expect(prompt).toContain("- The Last Time You Carry Them (baby)\n");
     expect(prompt).toContain("- Tiny Socks, Big Love\n");
     expect(prompt).toMatch(/newborn\|baby\|toddler\|preschooler/);
     expect(reelScriptPrompt({ maxScenes: 40, alreadyMade: [] }).prompt).toContain("(none yet");
+    const many = Array.from({ length: ALREADY_MADE_CAP + 5 }, (_, i) => ({ title: `Reel title ${i}` }));
+    const p = reelScriptPrompt({ maxScenes: 40, alreadyMade: many }).prompt;
+    expect(p).toContain(`- Reel title ${ALREADY_MADE_CAP - 1}\n`);
+    expect(p).not.toContain(`- Reel title ${ALREADY_MADE_CAP}\n`);
   });
 
-  it("caps the already-made list at the newest titles", () => {
-    const made = Array.from({ length: ALREADY_MADE_CAP + 5 }, (_, i) => ({ title: `Reel title ${i}` }));
-    const { prompt } = reelScriptPrompt({ maxScenes: 40, alreadyMade: made });
-    expect(prompt).toContain(`- Reel title ${ALREADY_MADE_CAP - 1}\n`);
-    expect(prompt).not.toContain(`- Reel title ${ALREADY_MADE_CAP}\n`);
-  });
-
-  it("asks for the spoken-word budget and short lines, and keeps idea free of style words", () => {
-    const { prompt } = reelScriptPrompt({ maxScenes: 40, alreadyMade: [] });
-    expect(prompt).toContain("330-420 words");
-    expect(prompt).toMatch(/8-12 words/);
-    expect(prompt).toMatch(/14 words/);
-    expect(prompt).toMatch(/ACTION and SETTING/);
-    expect(prompt).toContain("EXACTLY 30-40 scenes");
+  it("the 45-75 s length: word budget, line count, short lines, never 'camera'", () => {
+    const { prompt } = reelScriptPrompt(input30);
+    expect(prompt).toContain("narration for a 45-75 second reel at about 3.8 words per second = 171-285 words");
+    expect(prompt).toContain("18-30 lines");
+    expect(prompt).toMatch(/Sentences of 4-12 words \(never more than 15\)/);
     expect(prompt).toMatch(/BEFORE ANSWERING, COUNT/);
-    expect(reelScriptPrompt({ maxScenes: 10, alreadyMade: [] }).prompt).toContain("EXACTLY 8-10 scenes");
-    expect(prompt).toMatch(/Only the first 1-2 lines are the 'hook' beat/);
     expect(prompt).not.toMatch(/\bcamera\b/i);
   });
 
-  it("a small max shrinks the word budget so lines stay short", () => {
-    const { prompt } = reelScriptPrompt({ maxScenes: 10, alreadyMade: [] });
-    expect(prompt).toContain("100-120 words");
+  it("playbook script rules: hook, banned openers, stakes, re-hooks, identity line, turn at 70-80 %, loop, no CTA", () => {
+    const { prompt } = reelScriptPrompt(input10);
+    expect(prompt).toMatch(/LINE 1 is the hook, spoken in the first half-second: at most 12 words/);
+    expect(prompt).toMatch(/TENSION, a TIME-JUMP, 'you', or a SPECIFIC SURPRISING DETAIL/);
+    expect(prompt).toMatch(/BANNED openers: .*'Welcome back'.*'Today I want to talk about'.*'In this video'.*'Let me tell you'.*backstory first/);
+    expect(prompt).toMatch(/STAKES within the first ~5 seconds/);
+    expect(prompt).toMatch(/RE-HOOK every 10-15 seconds/);
+    expect(prompt).toMatch(/identity line/);
+    expect(prompt).toMatch(/EMOTIONAL TURN lands at 70-80%/);
+    expect(prompt).toMatch(/never pure sadness/);
+    expect(prompt).toMatch(/LAST line is the payoff in at most 10 words and loops back to line 1/);
+    expect(prompt).toMatch(/NEVER ask viewers to follow, like, comment, tag, share or save/);
+    expect(prompt).not.toMatch(/follow the page for more/);
+    expect(prompt).toMatch(/"hook_text".*at most 10 words, it COMPLEMENTS line 1/);
+    // examples are patterns: Gemini copied them word for word in a smoke run
+    expect(prompt).toMatch(/PATTERNS only: write fresh words for THIS story and never reuse an example sentence/);
+    expect(prompt).toMatch(/Fresh words for this story, never an example sentence/);
+  });
+
+  it("asks for a varied shot list: sizes, subjects, the mix, adjacency, line 1 face, establishing wide, mirrored end", async () => {
+    const { REEL_SHOT_SIZES, REEL_SUBJECTS } = await import("@/lib/reels/shots");
+    const { prompt } = reelScriptPrompt(input10);
+    expect(prompt).toContain(`exactly one of ${REEL_SHOT_SIZES.join("|")}`);
+    expect(prompt).toContain(`exactly one of ${REEL_SUBJECTS.join("|")}`);
+    expect(prompt).toMatch(/about 2 wide, 3 medium, 2 close, 2 detail .* and 1 pov .* or broll/);
+    expect(prompt).toMatch(/'both' on at most 4 lines in 10/);
+    expect(prompt).toMatch(/LINE 1 shows a FACE .* close or medium/);
+    expect(prompt).toMatch(/Line 2 or 3 is the establishing WIDE/);
+    expect(prompt).toMatch(/Never the same shot_size with the same subject on two lines in a row; never more than 2 face shots in a row/);
+    expect(prompt).toMatch(/LAST line mirrors line 1/);
+    expect(prompt).toMatch(/"punch".*at most 3 words, copied EXACTLY.*at most 4 lines/);
+    expect(prompt).toMatch(/"time_jump": true only/);
+    expect(prompt).toMatch(/"setting": the place \+ time of day/);
+  });
+
+  it("knitted (default): doll cast, emotion through pose only, never a lift; other themes a people cast", () => {
+    const k = reelScriptPrompt(input10).prompt;
+    expect(k).toMatch(/describe the recurring cast AS TEXTILE DOLLS/);
+    expect(k).toMatch(/EVERY emotion must show through POSE and HANDS/);
+    expect(k).toMatch(/Never have a doll lift, raise, toss or hold the child doll up/);
+    expect(k).toMatch(/"adult_tag" \/ "child_tag": the SAME doll in at most 7 words/);
+    const a = reelScriptPrompt({ ...input10, theme: { id: "animated3d", faces: true } }).prompt;
+    expect(a).toMatch(/describe the recurring cast as REAL PEOPLE/);
+    expect(a).not.toMatch(/TEXTILE DOLLS|the mom doll/);
+    expect(a).toMatch(/emotion should be readable on the faces/);
+    const p = reelScriptPrompt({ ...input10, theme: { id: "papercraft", faces: false } }).prompt;
+    expect(p).toMatch(/simple fixed faces, so EVERY emotion must show through POSE/);
   });
 });
 
-describe("scenePrompt", () => {
-  const p = scenePrompt(KNIT, cast, { idea: "The mom doll sits with the baby doll in a sunny felt garden.", beat: "build" }, 3);
-  it("carries the idea, the cast, the style and the no-text line", () => {
-    expect(p).toContain("sits with the baby doll");
-    expect(p).toContain(cast.adult);
-    expect(p).toContain(cast.child);
-    expect(p).toContain(KNIT_STYLE);
-    expect(p).toContain(NO_TEXT);
-    expect(p).toMatch(/9:16/);
-    expect(p).toMatch(/every setting is built from felt and linen/);
-    expect(p).toMatch(/band just below the middle is calm and uncluttered/);
-    expect(p).not.toMatch(/upper third/);
-    expect(p).not.toMatch(/caption/i);
-  });
-  it("gives the hook treatment only to the opening picture", () => {
-    expect(scenePrompt(KNIT, cast, { idea: "The mom doll gasps.", beat: "hook" }, 0)).toMatch(/high-emotion moment/);
-    expect(scenePrompt(KNIT, cast, { idea: "The mom doll gasps.", beat: "hook" }, 1)).not.toMatch(/high-emotion/);
-    expect(scenePrompt(KNIT, cast, { idea: "The mom doll gasps.", beat: "hook" }, 1)).toMatch(/one tender moment/);
-  });
-  it("is positive-only (apart from NO_TEXT) and never says camera", () => {
-    for (const beat of ["hook", "build", "turn", "close", "other"]) {
-      const q = scenePrompt(KNIT, cast, { idea: "The dad doll reads to the toddler doll on a felt sofa.", beat }, beat === "hook" ? 0 : 2);
-      expect(q).not.toMatch(/\bcamera\b/i);
-      expect(q.replace(NO_TEXT, "")).not.toMatch(NEGATIVE);
-    }
-    expect(KNIT_STYLE).not.toMatch(NEGATIVE);
+describe("reelWordBudget (45-75 s at 3.8 words/s × speed)", () => {
+  it("1×: 171-285 words; few images shrink it, never under 18 s of speech", () => {
+    expect(reelWordBudget(30)).toEqual({ lo: 171, hi: 285, minScenes: 18, minWords: 137, secLo: 45, secHi: 75, wps: 3.8 });
+    expect(reelWordBudget(40)).toMatchObject({ lo: 171, hi: 285, minScenes: 18 });
+    expect(reelWordBudget(10)).toMatchObject({ lo: 70, hi: 100, minScenes: 7, minWords: 57 });
+    const fast = reelWordBudget(10, 1.25);
+    expect(fast.lo).toBe(86);   // 18 s at 4.75 words/s
+    expect(fast.minWords / (3.8 * 1.25)).toBeGreaterThanOrEqual(15);
+    expect(reelWordBudget(30, 1.12)).toMatchObject({ lo: 192, hi: 300, secLo: 45, secHi: 70, wps: 4.3 });   // hi capped at 10 words a line
   });
 });
 
 describe("writeReelScript", () => {
-  const input = { maxScenes: 40, alreadyMade: [] };
-  const input10 = { maxScenes: 10, alreadyMade: [] };
-
-  it("uses the script model with the ported prompt and returns a typed script", async () => {
-    generateJson.mockResolvedValueOnce({ ok: true, data: script(30) });
-    const r = await writeReelScript(input);
+  it("uses the script model and returns a typed script with the hook card, tags and the v2 per-line fields", async () => {
+    generateJson.mockResolvedValueOnce({ ok: true, data: script(20) });
+    const r = await writeReelScript(input30);
     expect(r.ok).toBe(true);
-    if (r.ok) {
-      expect(r.script.title).toBe("The Last Time You Carry Them");
-      expect(r.script.stage).toBe("baby");
-      expect(r.script.cast).toEqual(cast);
-      expect(r.script.scenes).toHaveLength(30);
-      expect(r.script.scenes[0]).toEqual(scene(0));
-    }
+    if (!r.ok) return;
+    expect(r.script).toMatchObject({ title: "The Last Time You Carry Them", stage: "baby", hook_text: HOOK_TEXT, cast });
+    expect(r.script.scenes).toHaveLength(20);
+    expect(r.script.scenes[0]).toEqual({
+      beat: "hook", narration: HOOK, idea: "The mom doll rocks the baby doll, moment 0 — the nursery at 3 a.m", emotion: "tender",
+      action: "rocks gently, both arms wrapped around the baby doll", shot_size: "close", subject: "both", punch: null, time_jump: false,
+    });
     const arg = generateJson.mock.calls[0][0];
     expect(arg.model).toBe(REEL_SCRIPT_MODEL);
-    expect(arg.prompt).toContain("40");
     expect(arg.timeoutMs).toBe(REEL_SCRIPT_TIMEOUT_MS);
-    expect(REEL_SCRIPT_TIMEOUT_MS).toBe(120_000);
+    const items = arg.schema.properties.scenes.items;
+    expect(items.required).toEqual(["beat", "narration", "idea", "setting", "shot_size", "subject", "emotion", "action", "punch", "time_jump"]);
+    expect(items.properties.shot_size.enum).toHaveLength(6);
+    expect(items.properties.subject.enum).toHaveLength(5);
+    expect(items.properties.time_jump.type).toBe("BOOLEAN");
+    expect(arg.schema.required).toContain("hook_text");
+    expect(arg.schema.properties.cast.required).toEqual(["adult", "child", "adult_tag", "child_tag"]);
   });
 
   it("uses the caller's remaining time budget when given", async () => {
@@ -129,197 +162,101 @@ describe("writeReelScript", () => {
     expect(generateJson.mock.calls[0][0].timeoutMs).toBe(70_000);
   });
 
-  it("rejects a missing or unknown stage", async () => {
-    generateJson.mockResolvedValueOnce({ ok: true, data: script(10, { stage: "teen" }) });
-    expect(await writeReelScript(input10)).toMatchObject({ ok: false });
-    generateJson.mockResolvedValueOnce({ ok: true, data: script(10, { stage: undefined }) });
-    expect(await writeReelScript(input10)).toMatchObject({ ok: false });
+  it("rejects a missing / unknown stage, a missing cast member, a missing or too-long title", async () => {
+    for (const over of [{ stage: "teen" }, { stage: undefined }, { cast: { adult: cast.adult, child: " " } }, { cast: undefined }, { title: "" }, { title: "x".repeat(81) }]) {
+      generateJson.mockResolvedValueOnce({ ok: true, data: script(10, over) });
+      expect(await writeReelScript(input10), JSON.stringify(over)).toMatchObject({ ok: false });
+    }
   });
 
-  it("trims scenes beyond the max", async () => {
-    generateJson.mockResolvedValueOnce({ ok: true, data: script(45) });
-    const r = await writeReelScript(input);
-    expect(r.ok && r.script.scenes.length).toBe(40);
+  it("missing short tags are fine (the prompt builder cuts one from the description)", async () => {
+    generateJson.mockResolvedValueOnce({ ok: true, data: script(10, { cast: { adult: cast.adult, child: cast.child } }) });
+    const r = await writeReelScript(input10);
+    expect(r.ok && r.script.cast).toEqual({ adult: cast.adult, child: cast.child });
   });
 
-  it("rejects a script under 75% of the max scenes", async () => {
-    generateJson.mockResolvedValueOnce({ ok: true, data: script(29) });
-    expect(await writeReelScript(input)).toEqual({ ok: false, error: "Script too short: 29 scenes (needs at least 30)." });
-    const eight = script(8);
-    eight.scenes[1] = scene(1, "Line number 1 is a slightly longer spoken phrase for you mama.");   // 8 + 12 + 6 × 10 = 80 words
-    generateJson.mockResolvedValueOnce({ ok: true, data: eight });
-    expect(await writeReelScript(input10)).toMatchObject({ ok: true });
-  });
-
-  it("rejects a script under 80% of the word-budget minimum", async () => {
-    const s = script(32);
-    s.scenes = s.scenes.map((x, i) => (i === 0 ? x : { ...x, narration: "You hold them close, mama." }));
+  it("trims scenes beyond the max; rejects too few scenes or words", async () => {
+    generateJson.mockResolvedValueOnce({ ok: true, data: script(35) });
+    const r = await writeReelScript(input30);
+    expect(r.ok && r.script.scenes.length).toBe(30);
+    generateJson.mockResolvedValueOnce({ ok: true, data: script(17) });
+    expect(await writeReelScript(input30)).toEqual({ ok: false, error: "Script too short: 17 scenes (needs at least 18)." });
+    const s = script(20);
+    s.scenes = s.scenes.map((x, i) => (i === 0 ? x : { ...x, narration: "You hold them close." }));
     generateJson.mockResolvedValueOnce({ ok: true, data: s });
-    expect(await writeReelScript(input)).toEqual({ ok: false, error: "Script too short: 163 words (needs at least 264)." });
-  });
-
-  it("rejects too few scenes", async () => {
+    expect(await writeReelScript(input30)).toEqual({ ok: false, error: "Script too short: 84 words (needs at least 137)." });
     generateJson.mockResolvedValueOnce({ ok: true, data: script(1) });
     expect(await writeReelScript(input10)).toMatchObject({ ok: false });
   });
 
-  it("rejects an empty narration line", async () => {
-    const s = script(10);
-    s.scenes[3] = scene(3, "   ");
-    generateJson.mockResolvedValueOnce({ ok: true, data: s });
+  it("rejects an empty line, a line over 15 words, an empty idea", async () => {
+    const bad = (i: number, patch: Record<string, unknown>) => { const s = script(10); s.scenes[i] = { ...s.scenes[i], ...patch }; return s; };
+    generateJson.mockResolvedValueOnce({ ok: true, data: bad(3, { narration: "   " }) });
     expect(await writeReelScript(input10)).toMatchObject({ ok: false, error: expect.stringMatching(/line 4/i) });
+    const sixteen = Array.from({ length: LINE_MAX_WORDS + 1 }, (_, i) => `w${i}`).join(" ");
+    generateJson.mockResolvedValueOnce({ ok: true, data: bad(2, { narration: sixteen }) });
+    expect(await writeReelScript(input10)).toEqual({ ok: false, error: "Line 3 is longer than 15 words." });
+    generateJson.mockResolvedValueOnce({ ok: true, data: bad(2, { idea: " " }) });
+    expect(await writeReelScript(input10)).toEqual({ ok: false, error: "Line 3 has no image idea." });
   });
 
-  it("rejects a line longer than 14 words", async () => {
-    const s = script(10);
-    s.scenes[2] = scene(2, "one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen");
-    generateJson.mockResolvedValueOnce({ ok: true, data: s });
-    expect(await writeReelScript(input10)).toMatchObject({ ok: false });
+  it("line 1: at most 12 words, never a banned opener", async () => {
+    const first = (narration: string) => { const s = script(10); s.scenes[0] = scene(0, narration); return s; };
+    generateJson.mockResolvedValueOnce({ ok: true, data: first("One day you will carry them in your arms for the very last time.") });
+    expect(await writeReelScript(input10)).toEqual({ ok: false, error: "Line 1 is too long for a hook (14 words; at most 12)." });
+    for (const opener of ["Hey mga mommies, listen up.", "Hello there, tired mama.", "Welcome back to the page, mama.", "Today I want to talk about sleep.",
+      "In this video, three sleep tips.", "Let me tell you about my son.", "Unique Names here with a story."]) {
+      generateJson.mockResolvedValueOnce({ ok: true, data: first(opener) });
+      expect(await writeReelScript(input10), opener).toEqual({ ok: false, error: "Line 1 is a greeting, not a hook." });
+    }
+    generateJson.mockResolvedValueOnce({ ok: true, data: first("Why does 3 a.m. feel this long, mama?") });
+    expect((await writeReelScript(input10)).ok).toBe(true);
   });
 
-  it("rejects a missing cast member, a missing title or a too-long title", async () => {
-    generateJson.mockResolvedValueOnce({ ok: true, data: script(10, { cast: { adult: cast.adult, child: " " } }) });
-    expect(await writeReelScript(input10)).toMatchObject({ ok: false });
-    generateJson.mockResolvedValueOnce({ ok: true, data: script(10, { cast: undefined }) });
-    expect(await writeReelScript(input10)).toMatchObject({ ok: false });
-    generateJson.mockResolvedValueOnce({ ok: true, data: script(10, { title: "" }) });
-    expect(await writeReelScript(input10)).toMatchObject({ ok: false });
-    generateJson.mockResolvedValueOnce({ ok: true, data: script(10, { title: "x".repeat(81) }) });
-    expect(await writeReelScript(input10)).toMatchObject({ ok: false });
+  it("no spoken call to action on any line", async () => {
+    for (const cta of ["Follow the page for more stories like this.", "Comment below if this is you, mama.", "Tag a mom who needs this today.",
+      "Share this with a tired mom tonight.", "Save this for the hard nights ahead."]) {
+      const s = script(10);
+      s.scenes[9] = scene(9, cta);
+      generateJson.mockResolvedValueOnce({ ok: true, data: s });
+      expect(await writeReelScript(input10), cta).toEqual({ ok: false, error: "Line 10 asks viewers to follow, comment, tag or share." });
+    }
+    const ok = script(10);
+    ok.scenes[5] = scene(5, "You share your last spoonful of rice with her.");
+    generateJson.mockResolvedValueOnce({ ok: true, data: ok });
+    expect((await writeReelScript(input10)).ok).toBe(true);
+  });
+
+  it("the hook card: required, at most 10 words, never a greeting, never line 1 again", async () => {
+    const cases: [unknown, string][] = [
+      ["", "The script has no hook card."],
+      ["one two three four five six seven eight nine ten eleven", "The hook card is longer than 10 words."],
+      ["Hey mama, watch this", "The hook card is a greeting or a call to action, not a hook."],
+      ["you'll carry them for the very last time", "The hook card repeats line 1 instead of adding to it."],
+    ];
+    for (const [hook_text, error] of cases) {
+      generateJson.mockResolvedValueOnce({ ok: true, data: script(10, { hook_text }) });
+      expect(await writeReelScript(input10), String(hook_text)).toEqual({ ok: false, error });
+    }
   });
 
   it("passes a Gemini failure through and never throws", async () => {
     generateJson.mockResolvedValueOnce({ ok: false, error: "Gemini timed out." });
-    expect(await writeReelScript(input)).toEqual({ ok: false, error: "Gemini timed out." });
+    expect(await writeReelScript(input10)).toEqual({ ok: false, error: "Gemini timed out." });
     generateJson.mockRejectedValueOnce(new Error("boom"));
     expect(await writeReelScript(input10)).toMatchObject({ ok: false });
   });
 
   it("turns 'at/into/toward the camera' into 'toward the viewer' in ideas and cast", async () => {
-    const s = script(10, { cast: { adult: `${cast.adult}, smiling into the camera`, child: cast.child } });
-    s.scenes[1] = { ...scene(1), narration: "You hold them close.", idea: "The mom doll smiles at the camera." };
-    s.scenes[2] = { ...scene(2), narration: "You hold them close.", idea: "The baby doll crawls toward a camera." };
+    const s = script(10, { cast: { ...cast, adult: `${cast.adult}, smiling into the camera` } });
+    s.scenes[1] = { ...scene(1), idea: "The mom doll smiles at the camera." };
     generateJson.mockResolvedValueOnce({ ok: true, data: s });
     const r = await writeReelScript(input10);
     expect(r.ok).toBe(true);
     if (r.ok) {
-      expect(r.script.scenes[1].idea).toBe("The mom doll smiles toward the viewer.");
-      expect(r.script.scenes[2].idea).toBe("The baby doll crawls toward the viewer.");
+      expect(splitIdea(r.script.scenes[1].idea).moment).toBe("The mom doll smiles toward the viewer");
       expect(r.script.cast.adult).toMatch(/smiling toward the viewer$/);
     }
-  });
-});
-
-describe("narration speed scales the word target", () => {
-  it("1× keeps the old budget; 1.12× asks for more words in the same 90-120 s", async () => {
-    const { reelWordBudget } = await import("@/lib/ai/reel-script");
-    expect(reelWordBudget(40)).toMatchObject({ lo: 330, hi: 420, secLo: 94, secHi: 120 });
-    const fast = reelWordBudget(40, 1.12);
-    expect(fast).toMatchObject({ lo: 370, hi: 470, minWords: 296, wpsLo: 3.9, wpsHi: 4.5 });
-    expect(fast.secLo).toBe(94);
-    expect(fast.secHi).toBe(120);
-    // few images: lines stay at most 10-12 words each, whatever the speed
-    expect(reelWordBudget(10, 1.25)).toMatchObject({ lo: 100, hi: 120 });
-  });
-
-  it("the prompt and the validation use the speed", async () => {
-    const { prompt } = reelScriptPrompt({ maxScenes: 40, alreadyMade: [], speed: 1.12 });
-    expect(prompt).toContain("370-470 words");
-    expect(prompt).toContain("about 3.9-4.5 words per second");
-    // an 8-word hook + 29 lines of 10 words = 298: enough at 1× (264) and at 1.12× (296)
-    generateJson.mockResolvedValueOnce({ ok: true, data: script(30) });
-    expect((await writeReelScript({ maxScenes: 40, alreadyMade: [], speed: 1.12 })).ok).toBe(true);
-    // 1.25×: lo = min(413, 40 × 10) = 400, needs 320
-    generateJson.mockResolvedValueOnce({ ok: true, data: script(30) });
-    expect(await writeReelScript({ maxScenes: 40, alreadyMade: [], speed: 1.25 })).toEqual({ ok: false, error: "Script too short: 298 words (needs at least 320)." });
-  });
-});
-
-describe("ad-style script: emotion, action, shot, key + hook / mini-hook / loop (007)", () => {
-  const input10 = { maxScenes: 10, alreadyMade: [] };
-
-  it("the prompt asks for a scroll-stopper line 1 (never a greeting), mini-hooks every 4-6 lines and a loop back", () => {
-    const { prompt } = reelScriptPrompt(input10);
-    expect(prompt).toMatch(/LINE 1 IS A SCROLL-STOPPER spoken in under 2 seconds: at most 7 words/);
-    expect(prompt).toMatch(/bold claim/);
-    expect(prompt).toMatch(/'stop doing X'/);
-    expect(prompt).toMatch(/open question/);
-    expect(prompt).toMatch(/NEVER a greeting/);
-    expect(prompt).toMatch(/Every 4-6 lines, drop a MINI-HOOK/);
-    expect(prompt).toMatch(/LAST line LOOPS BACK to the opening/);
-    expect(prompt).not.toMatch(/\bcamera\b/i);
-  });
-
-  it("the prompt lists the fixed emotions and shots, no repeated shots, at most 3 key lines", async () => {
-    const { REEL_EMOTIONS, REEL_SHOTS } = await import("@/lib/reels/motion");
-    const { prompt } = reelScriptPrompt(input10);
-    expect(prompt).toContain(`exactly one of ${REEL_EMOTIONS.join("|")}`);
-    expect(prompt).toContain(`exactly one of ${REEL_SHOTS.join("|")}`);
-    expect(prompt).toMatch(/NEVER the same shot on two lines in a row/);
-    expect(prompt).toMatch(/AT MOST 3 lines/);
-    expect(prompt).toMatch(/"action".*never mention what is absent/);
-    expect(REEL_EMOTIONS.length).toBe(12);
-    expect(REEL_SHOTS.length).toBe(6);
-  });
-
-  it("knitted (default): doll cast, emotion through pose only, and never a lift", () => {
-    const { prompt } = reelScriptPrompt(input10);
-    expect(prompt).toMatch(/describe the recurring cast AS TEXTILE DOLLS/);
-    expect(prompt).toMatch(/EVERY emotion must show through POSE and HANDS/);
-    expect(prompt).toMatch(/sitting, standing, kneeling, lying or cuddling together/);
-    expect(prompt).toMatch(/Never have a doll lift, raise, toss or hold the child doll up/);
-  });
-
-  it("other themes: a people cast; faces themes read the emotion on faces, papercraft through pose", () => {
-    const a = reelScriptPrompt({ ...input10, theme: { id: "animated3d", faces: true } }).prompt;
-    expect(a).toMatch(/describe the recurring cast as REAL PEOPLE/);
-    expect(a).not.toMatch(/TEXTILE DOLLS|the mom doll/);
-    expect(a).toMatch(/emotion should be readable on both faces/);
-    expect(a).not.toMatch(/lift, raise/);
-    const p = reelScriptPrompt({ ...input10, theme: { id: "papercraft", faces: false } }).prompt;
-    expect(p).toMatch(/REAL PEOPLE/);
-    expect(p).toMatch(/simple fixed faces, so EVERY emotion must show through POSE/);
-  });
-
-  it("the schema requires emotion (enum), action, shot (enum) and key (boolean)", async () => {
-    generateJson.mockResolvedValueOnce({ ok: true, data: script(10) });
-    await writeReelScript(input10);
-    const items = generateJson.mock.calls[0][0].schema.properties.scenes.items;
-    expect(items.required).toEqual(["beat", "narration", "idea", "emotion", "action", "shot", "key"]);
-    expect(items.properties.emotion.enum).toHaveLength(12);
-    expect(items.properties.shot.enum).toHaveLength(6);
-    expect(items.properties.key.type).toBe("BOOLEAN");
-  });
-
-  it("keeps each line's emotion, action, shot and key", async () => {
-    const s = script(10);
-    s.scenes[4] = { ...scene(4), emotion: "teary", action: "hugs the baby doll close at the camera", shot: "over-the-shoulder", key: true };
-    generateJson.mockResolvedValueOnce({ ok: true, data: s });
-    const r = await writeReelScript(input10);
-    expect(r.ok && r.script.scenes[4]).toEqual({ ...scene(4), emotion: "teary", action: "hugs the baby doll close toward the viewer", shot: "over-the-shoulder", key: true });
-  });
-
-  it("line 1 longer than 9 words is rejected (a hook is under 2 s)", async () => {
-    const s = script(10);
-    s.scenes[0] = scene(0, "One day you will carry them for the very last time.");
-    generateJson.mockResolvedValueOnce({ ok: true, data: s });
-    expect(await writeReelScript(input10)).toEqual({ ok: false, error: "Line 1 is too long for a hook (11 words; at most 9)." });
-    s.scenes[0] = scene(0, "One day you'll carry them for the last time.");   // 9 words: fine
-    generateJson.mockResolvedValueOnce({ ok: true, data: s });
-    expect((await writeReelScript(input10)).ok).toBe(true);
-  });
-
-  it("line 1 that greets is rejected", async () => {
-    for (const hello of ["Hey mama, stop rushing bedtime tonight.", "Hello there, tired mama.", "Good morning, mama!", "Welcome back to the page."]) {
-      const s = script(10);
-      s.scenes[0] = scene(0, hello);
-      generateJson.mockResolvedValueOnce({ ok: true, data: s });
-      expect(await writeReelScript(input10), hello).toEqual({ ok: false, error: "Line 1 is a greeting, not a hook." });
-    }
-    const s = script(10);
-    s.scenes[0] = scene(0, "Why do babies fight sleep so hard?");
-    generateJson.mockResolvedValueOnce({ ok: true, data: s });
-    expect((await writeReelScript(input10)).ok).toBe(true);
   });
 
   it("an unknown emotion becomes tender; a missing action becomes ''; long actions are cut", async () => {
@@ -335,40 +272,48 @@ describe("ad-style script: emotion, action, shot, key + hook / mini-hook / loop 
       expect(r.script.scenes[3].action).toHaveLength(200);
     }
   });
+});
 
-  it("never the same shot on two lines in a row; unknown shots are filled", async () => {
+describe("the shot list, punches, time jumps and the loop (playbook v2)", () => {
+  it("Gemini's drift (every line a medium of mom + baby) is repaired into a list that follows every rule", async () => {
+    const s = script(20);
+    s.scenes = s.scenes.map((x) => ({ ...x, shot_size: "medium", subject: "both" }));
+    generateJson.mockResolvedValueOnce({ ok: true, data: s });
+    const r = await writeReelScript(input30);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const shots = r.script.scenes.map((x) => ({ shot_size: x.shot_size, subject: x.subject }));
+    expect(shotListIssues(shots, r.script.scenes.map((x) => splitIdea(x.idea).setting))).toEqual([]);
+    expect(new Set(shots.map((x) => x.shot_size)).size).toBeGreaterThanOrEqual(4);
+  });
+
+  it("the last line is set where line 1 is and mirrors its shot", async () => {
     const s = script(10);
-    const shots = ["medium", "medium", "Over the shoulder", "nope", "wide", "wide", "wide", "eye-level", "eye_level", "low-angle"];
-    s.scenes = s.scenes.map((x, i) => ({ ...x, shot: shots[i] }));
+    s.scenes[9] = { ...s.scenes[9], setting: "the kitchen at noon", shot_size: "wide", subject: "object" };
     generateJson.mockResolvedValueOnce({ ok: true, data: s });
     const r = await writeReelScript(input10);
     expect(r.ok).toBe(true);
-    if (r.ok) {
-      const got = r.script.scenes.map((x) => x.shot);
-      for (let i = 1; i < got.length; i++) expect(got[i], `line ${i + 1}`).not.toBe(got[i - 1]);
-      expect(got[0]).toBe("medium");
-      expect(got[2]).toBe("over-the-shoulder");
-      expect(got[4]).toBe("wide");
-      expect(got[7]).toBe("eye-level");
-      expect(got[9]).toBe("low-angle");
-    }
+    if (!r.ok) return;
+    const last = r.script.scenes[9];
+    expect(splitIdea(last.idea).setting).toBe("the nursery at 3 a.m");
+    expect({ shot_size: last.shot_size, subject: last.subject }).toEqual({ shot_size: "close", subject: "both" });
   });
 
-  it("at most 3 key lines (the first ones marked)", async () => {
+  it("punch: verbatim from its line, at most 4 per reel; time_jump never on line 1", async () => {
     const s = script(10);
-    s.scenes = s.scenes.map((x, i) => ({ ...x, key: i % 2 === 1 }));
+    s.scenes = s.scenes.map((x, i) => ({ ...x, punch: i === 0 ? "last time" : i < 7 ? "short" : "spoken phrase", time_jump: i < 2 }));
+    s.scenes[3] = { ...s.scenes[3], punch: "not in the line" };
     generateJson.mockResolvedValueOnce({ ok: true, data: s });
     const r = await writeReelScript(input10);
-    expect(r.ok && r.script.scenes.map((x) => x.key)).toEqual([false, true, false, true, false, true, false, false, false, false]);
-    // line 1 never counts as key (it punches anyway), so it does not use up a slot
-    s.scenes = s.scenes.map((x, i) => ({ ...x, key: i < 5 }));
-    generateJson.mockResolvedValueOnce({ ok: true, data: s });
-    const r2 = await writeReelScript(input10);
-    expect(r2.ok && r2.script.scenes.map((x) => x.key).slice(0, 5)).toEqual([false, true, true, true, false]);
-    // a key mark on a hook line (line 2 with the hook beat) is dropped and does not use up a slot either
-    s.scenes = s.scenes.map((x, i) => ({ ...x, beat: i < 2 ? "hook" : "build", key: i < 6 }));
-    generateJson.mockResolvedValueOnce({ ok: true, data: s });
-    const r3 = await writeReelScript(input10);
-    expect(r3.ok && r3.script.scenes.map((x) => x.key).slice(0, 6)).toEqual([false, false, true, true, true, false]);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const p = r.script.scenes.map((x) => x.punch);
+    expect(p.filter(Boolean)).toHaveLength(4);
+    expect(p[0]).toBe("last time");
+    expect(p[3]).toBeNull();
+    // the kept ones include one in the last 30 % (the turn)
+    expect(p.slice(7).some(Boolean)).toBe(true);
+    for (const [i, x] of r.script.scenes.entries()) if (x.punch) expect(x.narration, `${i}`).toContain(x.punch);
+    expect(r.script.scenes.map((x) => x.time_jump).slice(0, 3)).toEqual([false, true, false]);
   });
 });

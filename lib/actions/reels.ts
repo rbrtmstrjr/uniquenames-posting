@@ -2,9 +2,12 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import type { ReelRow, ReelSceneRow, ReelSceneStatus, ReelStatus, SettingsRow } from "@/lib/db/types";
-import { ACTION_MAX, LINE_MAX_WORDS, lightClean, TITLE_MAX, writeReelScript, type MadeReel, type ReelScript } from "@/lib/ai/reel-script";
+import {
+  ACTION_MAX, HOOK_TEXT_MAX, HOOK_TEXT_MAX_WORDS, LINE_MAX_WORDS, lightClean, TITLE_MAX, writeReelScript, type MadeReel, type ReelScript,
+} from "@/lib/ai/reel-script";
 import { assignMotion, emotionOf, shotOf } from "@/lib/reels/motion";
 import { scenePrompt } from "@/lib/reels/prompt";
+import { punchIn } from "@/lib/reels/shots";
 import { DEFAULT_THEME_ID, isThemeId, staticTheme, THEME_PARTIAL, themeOf, type ReelTheme } from "@/lib/reels/themes";
 import { speedOf } from "@/lib/reels/voices";
 import { generateLockReason } from "./generate-guard";
@@ -28,6 +31,7 @@ const BUCKET = "reels";
 
 const NEEDS_005 = "Run supabase/migrations/005_reels.sql first.";
 const NEEDS_007 = "Visual themes need the database update first (run supabase/migrations/007_reel_themes.sql).";
+const NEEDS_008 = "The hook card needs the database update first (run supabase/migrations/008_reel_playbook.sql).";
 const STALE = "This reel just changed. Reload the page and try again.";
 const NOT_FOUND = "Reel not found.";
 const SCRIPT_CHANGED = "The script changed in another tab. Try again.";
@@ -40,14 +44,22 @@ const missing005 = (e: DbError) =>
   e.code === "42P01" || e.code === "PGRST205" || e.code === "PGRST204" || e.code === "42703" ||
   /relation .* does not exist|schema cache/i.test(e.message);
 const dbFail = (e: DbError) => fail(missing005(e) ? NEEDS_005 : e.message);
-/** The per-line columns migration 007 adds to reel_scenes (and reels.theme_id). */
-const SCENE_007 = ["emotion", "action", "shot", "key_moment", "motion"] as const;
-/** A write naming a 007 column that the database does not have yet (PGRST204 / 42703). */
-const missing007Column = (e: DbError) =>
+/** The columns migration 007 adds (reel_scenes + reels.theme_id) and the ones 008 adds (reel_scenes + reels.hook_text). */
+const COLS_007 = ["emotion", "action", "shot", "key_moment", "motion", "theme_id"] as const;
+const COLS_008 = ["shot_size", "subject", "punch", "time_jump", "hook_text"] as const;
+const missingColumn = (e: DbError, cols: readonly string[]) =>
   (e.code === "PGRST204" || e.code === "42703" || /schema cache/i.test(e.message)) &&
-  /\b(emotion|action|shot|key_moment|motion|theme_id)\b/.test(e.message);
-const without007 = <T extends Record<string, unknown>>(row: T) =>
-  Object.fromEntries(Object.entries(row).filter(([k]) => !(SCENE_007 as readonly string[]).includes(k) && k !== "theme_id"));
+  new RegExp(`\\b(${cols.join("|")})\\b`).test(e.message);
+/** A write naming a 007 column that the database does not have yet (PGRST204 / 42703). */
+const missing007Column = (e: DbError) => missingColumn(e, COLS_007);
+const missing008Column = (e: DbError) => missingColumn(e, COLS_008);
+const drop = (row: Record<string, unknown>, cols: readonly string[]) => Object.fromEntries(Object.entries(row).filter(([k]) => !cols.includes(k)));
+/** Before 008: no shot list / punch / hook card, and 'hold' is not a valid move yet (it plays as a push-in). */
+const without008 = (row: Record<string, unknown>) => {
+  const r = drop(row, COLS_008);
+  return r.motion === "hold" ? { ...r, motion: "push_in" } : r;
+};
+const without007 = (row: Record<string, unknown>) => drop(row, [...COLS_007, ...COLS_008]);
 
 const oneLine = (s: unknown) => (typeof s === "string" ? s.replace(/\s+/g, " ").trim() : "");
 /** Case- and space-insensitive title key ("Old  Title" = "old title" = "OldTitle"). */
@@ -131,25 +143,33 @@ async function draftScript(sb: SB, topic: string | undefined, reelThemeId?: stri
   return fail(last.startsWith("Gemini kept") ? last : `Could not write the script: ${last}`);
 }
 
-/** The scenes of a new script: built image prompts, fresh seeds; after 007 also each line's feeling, framing and move. */
+/**
+ * The scenes of a new script: built image prompts, fresh seeds; after 007 also each line's feeling, body language and
+ * move, and (008) its shot size, subject, punch word and time jump (key_moment = has a punch, for the 007 worker).
+ */
 const sceneRows = (reelId: string, s: ReelScript, theme: ReelTheme, has007: boolean) => {
   const motions = assignMotion(s.scenes);
   return s.scenes.map((x, i) => ({
     reel_id: reelId, position: i + 1, beat: x.beat, idea: x.idea, narration: x.narration,
     image_prompt: scenePrompt(theme, s.cast, x, i), seed: randomSeed(), status: "pending" as const,
-    ...(has007 ? { emotion: x.emotion, action: x.action || null, shot: x.shot, key_moment: x.key, motion: motions[i] } : {}),
+    ...(has007 ? {
+      emotion: x.emotion, action: x.action || null, key_moment: !!x.punch, motion: motions[i],
+      shot_size: x.shot_size, subject: x.subject, punch: x.punch, time_jump: x.time_jump,
+    } : {}),
   }));
 };
 
-/** Insert rows; a database still missing a 007 column gets them without the 007 fields. */
-async function insert007(sb: SB, table: "reels" | "reel_scenes", rows: Record<string, unknown> | Record<string, unknown>[], select?: string) {
+/** Insert rows; a database still missing a 008 column gets them without the 008 fields, one missing a 007 column without both. */
+async function insertCompat(sb: SB, table: "reels" | "reel_scenes", rows: Record<string, unknown> | Record<string, unknown>[], select?: string) {
   const run = (r: typeof rows) => {
     const q = sb.from(table).insert(r);
     return select ? q.select(select).single() : q;
   };
-  const first = await run(rows);
-  if (!first.error || !missing007Column(first.error)) return first;
-  return run(Array.isArray(rows) ? rows.map(without007) : without007(rows));
+  const map = (f: (r: Record<string, unknown>) => Record<string, unknown>) => (Array.isArray(rows) ? rows.map(f) : f(rows));
+  let res = await run(rows);
+  if (res.error && missing008Column(res.error)) res = await run(map(without008));
+  if (res.error && missing007Column(res.error)) res = await run(map(without007));
+  return res;
 }
 
 async function getReel(sb: SB, id: string): Promise<{ reel: ReelRow | null; error?: DbError }> {
@@ -172,13 +192,13 @@ export async function writeReelScriptAction(input: { topic?: string }): Promise<
   if (!d.ok) return d;
   const s = d.script;
   // The theme is pinned on the reel: its image prompts are built with it (and the PC reads it, e.g. grayscale).
-  const { data, error } = await insert007(sb, "reels", {
+  const { data, error } = await insertCompat(sb, "reels", {
     title: s.title, topic: topic ?? null, stage: s.stage, doll_cast: s.cast, status: "script",
-    ...(d.has007 ? { theme_id: d.theme.id } : {}),
+    ...(d.has007 ? { theme_id: d.theme.id, hook_text: s.hook_text } : {}),
   }, "id");
   if (error || !data) return error ? dbFail(error) : fail("Could not save the reel.");
   const reelId = (data as unknown as { id: string }).id;
-  const { error: se } = await insert007(sb, "reel_scenes", sceneRows(reelId, s, d.theme, d.has007));
+  const { error: se } = await insertCompat(sb, "reel_scenes", sceneRows(reelId, s, d.theme, d.has007));
   if (se) {
     await sb.from("reels").delete().eq("id", reelId);
     return fail(missing005(se) ? NEEDS_005 : `Could not save the script: ${se.message}`);
@@ -201,23 +221,27 @@ export async function rewriteReelScriptAction(reelId: string): Promise<ActionRes
   if (!d.ok) return d;
   const s = d.script;
   const { data, error: ue } = await sb.from("reels")
-    .update({ title: s.title, stage: s.stage, doll_cast: s.cast, ...(d.has007 && "theme_id" in reel ? { theme_id: d.theme.id } : {}), version: reel.version + 1 })
+    .update({
+      title: s.title, stage: s.stage, doll_cast: s.cast, ...(d.has007 && "theme_id" in reel ? { theme_id: d.theme.id } : {}),
+      ...("hook_text" in reel ? { hook_text: s.hook_text } : {}), version: reel.version + 1,
+    })
     .eq("id", reelId).eq("version", reel.version).eq("status", "script").select("id");
   if (ue) return dbFail(ue);
   if (!data?.length) return fail(STALE);
   const { error: de } = await sb.from("reel_scenes").delete().eq("reel_id", reelId);
   if (de) return fail(`Could not replace the script: ${de.message}`);
-  const { error: ie } = await insert007(sb, "reel_scenes", sceneRows(reelId, s, d.theme, d.has007));
+  const { error: ie } = await insertCompat(sb, "reel_scenes", sceneRows(reelId, s, d.theme, d.has007));
   if (ie) return fail(`The new script's lines could not be saved (${ie.message}). Tap New script again.`);
   return done();
 }
 
 /**
  * The review page's edits. `emotion`, `action` and `shot` are optional (after 007): leave them out to keep the line's
- * own; an emotion change also re-picks the camera moves of the whole reel.
+ * own. `hookText` (after 008) is the hook card: leave it out to keep it, '' removes it.
  */
 export interface ReelScriptEdit {
   title: string;
+  hookText?: string;
   lines: { id: string; narration: string; idea: string; emotion?: string; action?: string; shot?: string }[];
 }
 
@@ -226,6 +250,11 @@ function badEdit(e: ReelScriptEdit): string | null {
   if (!title) return "Give the reel a title.";
   if (title.length > TITLE_MAX) return `Keep the title under ${TITLE_MAX} characters.`;
   if (!Array.isArray(e.lines) || e.lines.length > 40) return "Bad script. Reload the page and try again.";
+  if (e.hookText !== undefined) {
+    if (typeof e.hookText !== "string") return "Bad hook card. Reload the page and try again.";
+    const h = oneLine(e.hookText);
+    if (wordCount(h) > HOOK_TEXT_MAX_WORDS || h.length > HOOK_TEXT_MAX) return `Keep the hook card to ${HOOK_TEXT_MAX_WORDS} words or fewer.`;
+  }
   const seen = new Set<string>();
   for (const l of e.lines) {
     if (!l || typeof l.id !== "string" || !UUID_RE.test(l.id) || seen.has(l.id)) return "Bad line id. Reload the page and try again.";
@@ -252,8 +281,9 @@ function badLines(lines: ReelScriptEdit["lines"], positionOf: (id: string) => nu
 }
 
 /**
- * Review page "Save": the title and any edited lines. An edited picture idea / feeling / body language / framing
- * rebuilds that line's image prompt with the reel's theme; an edited feeling re-picks the camera moves.
+ * Review page "Save": the title, the hook card and any edited lines. An edited picture idea / feeling / body language /
+ * framing rebuilds that line's image prompt with the reel's theme (its shot size and subject stay); edited words drop a
+ * punch word that is no longer in the line. The camera moves depend only on the number of lines, so they stay.
  */
 export async function saveReelScriptAction(reelId: string, edit: ReelScriptEdit): Promise<ActionResult> {
   await requireOwner();
@@ -272,6 +302,9 @@ export async function saveReelScriptAction(reelId: string, edit: ReelScriptEdit)
   if (badLine) return fail(badLine);
   const has007 = scenes.length > 0 && scenes.every((s) => "emotion" in s);
   if (!has007 && edit.lines.some((l) => l.emotion !== undefined || l.action !== undefined || l.shot !== undefined)) return fail(NEEDS_007);
+  const hook = edit.hookText === undefined ? undefined : (oneLine(edit.hookText) || null);
+  const hookChanged = hook !== undefined && hook !== (reel.hook_text ?? null);
+  if (hookChanged && !("hook_text" in reel)) return fail(NEEDS_008);
   const title = oneLine(edit.title);
   if (titleKey(title) !== titleKey(reel.title) && made.rows.some((m) => m.id !== reelId && titleKey(m.title ?? "") === titleKey(title))) return fail(DUP_TITLE);
 
@@ -287,9 +320,6 @@ export async function saveReelScriptAction(reelId: string, edit: ReelScriptEdit)
       shot: l.shot !== undefined ? shotOf(l.shot) : (s.shot ?? null),
     };
   });
-  const motions = has007 && next.some((n) => n.emotion !== (n.s.emotion ?? null))
-    ? assignMotion(next.map((n) => ({ beat: n.s.beat, emotion: n.emotion, key: n.s.key_moment })))
-    : null;
   const needsPrompt = (n: (typeof next)[number]) => n.idea !== n.s.idea || n.emotion !== (n.s.emotion ?? null) ||
     n.action !== (n.s.action ?? null) || n.shot !== (n.s.shot ?? null);
   // The theme is read only when a prompt must be rebuilt.
@@ -300,12 +330,12 @@ export async function saveReelScriptAction(reelId: string, edit: ReelScriptEdit)
     theme = await loadTheme(sb, reel.theme_id ?? DEFAULT_THEME_ID, set.has007);
   }
 
-  const { data, error: ue } = await sb.from("reels").update({ title, version: reel.version + 1 })
+  const { data, error: ue } = await sb.from("reels").update({ title, ...(hookChanged ? { hook_text: hook } : {}), version: reel.version + 1 })
     .eq("id", reelId).eq("version", reel.version).eq("status", "script").select("id");
   if (ue) return dbFail(ue);
   if (!data?.length) return fail(STALE);
 
-  const changes = next.flatMap((n, i) => {
+  const changes = next.flatMap((n) => {
     const s = n.s;
     const patch: Record<string, unknown> = {};
     if (n.edited && (n.narration !== s.narration || needsPrompt(n))) {
@@ -314,9 +344,11 @@ export async function saveReelScriptAction(reelId: string, edit: ReelScriptEdit)
       if (n.emotion !== (s.emotion ?? null)) patch.emotion = n.emotion;
       if (n.action !== (s.action ?? null)) patch.action = n.action;
       if (n.shot !== (s.shot ?? null)) patch.shot = n.shot;
-      if (needsPrompt(n)) patch.image_prompt = scenePrompt(theme!, reel.doll_cast, n, s.position - 1);
+      if (needsPrompt(n)) {
+        patch.image_prompt = scenePrompt(theme!, reel.doll_cast, { ...n, beat: s.beat, shot_size: s.shot_size, subject: s.subject }, s.position - 1);
+      }
+      if (s.punch && !punchIn(n.narration, s.punch)) { patch.punch = null; patch.key_moment = false; }
     }
-    if (motions && motions[i] !== (s.motion ?? null)) patch.motion = motions[i];
     if (!Object.keys(patch).length) return [];
     patch.version = s.version + 1;
     return [sb.from("reel_scenes").update(patch).eq("id", s.id).eq("version", s.version).eq("status", "pending").select("id")];

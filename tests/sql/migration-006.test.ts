@@ -15,6 +15,7 @@ const m005 = stripSupabase(read("supabase", "migrations", "005_reels.sql"));
 const m006raw = read("supabase", "migrations", "006_reel_voices.sql");
 const m006 = stripSupabase(m006raw);
 const m007 = stripSupabase(read("supabase", "migrations", "007_reel_themes.sql"));
+const m008 = read("supabase", "migrations", "008_reel_playbook.sql");
 
 const GEMINI = [
   ["zephyr", "Bright"], ["puck", "Upbeat"], ["charon", "Informative"], ["kore", "Firm"], ["fenrir", "Excitable"],
@@ -292,8 +293,8 @@ describe("claim_next_voice_sample", () => {
   });
 });
 
-// schema.sql also holds 007 (new columns, requeue_stuck_reels): compare with it applied too.
-describe("fresh schema.sql matches v1 + 002..006 (+ 007)", () => {
+// schema.sql also holds 007 (new columns, requeue_stuck_reels) and 008 (columns): compare with them applied too.
+describe("fresh schema.sql matches v1 + 002..006 (+ 007, 008)", () => {
   const TABLES = "('settings','reels','reel_scenes','reel_voices','cards','posts')";
   const FUNCS = "('create_post','claim_next_card','requeue_stuck_cards','claim_next_reel_step','requeue_stuck_reels','reel_next_step','claim_next_voice_sample')";
   const shape = async (db: PGlite) => ({
@@ -313,6 +314,7 @@ describe("fresh schema.sql matches v1 + 002..006 (+ 007)", () => {
   it("has the same columns, constraints, indexes, triggers, function bodies and voice rows", async () => {
     const migrated = await migratedDb();
     await migrated.exec(m007);
+    await migrated.exec(m008);
     const want = await shape(migrated);
     expect(want.functions).toHaveLength(7);
     expect(want.voices).toHaveLength(31);

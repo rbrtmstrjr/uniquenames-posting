@@ -4,7 +4,9 @@ import type { ReelRow, ReelSceneRow, ReelSceneStatus, ReelStatus } from "@/lib/d
 // per-image labels, and the review page's word counts. Shared by the list, review and progress views.
 
 /** Same limit as the server (lib/ai/reel-script LINE_MAX_WORDS, which is server-only). */
-export const LINE_MAX_WORDS = 14;
+export const LINE_MAX_WORDS = 15;
+/** Same limit as the server (lib/ai/reel-script HOOK_TEXT_MAX_WORDS): the hook card. */
+export const HOOK_TEXT_MAX_WORDS = 10;
 export const TITLE_MAX = 80;
 /** Chatterbox speaks about 3.8 words a second (the spike measured ~4). */
 export const WORDS_PER_SECOND = 3.8;
@@ -30,10 +32,10 @@ export function clock(seconds: number): string {
 /** Spoken length of a script, from its word count (the voice is sped up by `speed`). */
 export const estimateSeconds = (words: number, speed = 1) => words / (WORDS_PER_SECOND * (speed > 0 ? speed : 1));
 
-/** The script length the prompt aims for: 330–420 words at 1×, more when the voice is sped up (lib/ai/reel-script). */
+/** The script length the prompt aims for: 45–75 s of speech (171–285 words at 1×), more words when the voice is sped up (lib/ai/reel-script). */
 export const wordTarget = (speed = 1) => {
   const x = speed > 0 ? speed : 1;
-  return { lo: Math.round(330 * x), hi: Math.round(420 * x) };
+  return { lo: Math.round(45 * WORDS_PER_SECOND * x), hi: Math.round(75 * WORDS_PER_SECOND * x) };
 };
 
 export function imageCounts(scenes: SceneLike[]) {

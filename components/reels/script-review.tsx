@@ -16,7 +16,7 @@ import { canGenerate } from "@/lib/status/worker-health";
 import { approveReelAction, deleteReelAction, rewriteReelScriptAction, saveReelScriptAction } from "@/lib/actions/reels";
 import { callAction } from "@/lib/actions/call";
 import { useNow } from "@/lib/realtime/hooks";
-import { LINE_MAX_WORDS, TITLE_MAX, clock, estimateSeconds, wordCount, wordTarget } from "@/lib/reels/status";
+import { HOOK_TEXT_MAX_WORDS, LINE_MAX_WORDS, TITLE_MAX, clock, estimateSeconds, wordCount, wordTarget } from "@/lib/reels/status";
 import type { Narrator } from "@/lib/data/voices";
 import type { ThemeChoice } from "@/lib/data/reel-themes";
 import { lineMood } from "@/lib/reels/labels";
@@ -39,9 +39,10 @@ function Elapsed({ since }: { since: number }) {
 const NO_LINES = "This script has no lines. Tap New script.";
 
 /** The first thing that would make Save fail, worded like the server ("Line N …"). */
-function firstProblem(title: string, lines: (Text & { position: number })[]): string | null {
+function firstProblem(title: string, lines: (Text & { position: number })[], hook = ""): string | null {
   if (!oneLine(title)) return "Give the reel a title.";
   if (oneLine(title).length > TITLE_MAX) return `Keep the title under ${TITLE_MAX} characters.`;
+  if (wordCount(hook) > HOOK_TEXT_MAX_WORDS) return `Keep the hook card to ${HOOK_TEXT_MAX_WORDS} words or fewer.`;
   if (!lines.length) return NO_LINES;
   for (const l of lines) {
     const at = `Line ${l.position}`;
@@ -57,16 +58,24 @@ function firstProblem(title: string, lines: (Text & { position: number })[]): st
  * live word count, the picture idea in a disclosure), totals at the top, and one action bar —
  * sticky above the tab bar on phones, in the side panel on desktop.
  */
-/** A line's feeling (chip) + framing and camera move (subtle text); read-only, set by the script engine. */
+/** A line's shot size + feeling (chips), punch word, framing and camera move (subtle text); read-only, set by the script engine. */
 function LineMood({ scene }: { scene: ReelSceneRow }) {
   const m = lineMood(scene);
   if (!m) return null;
   const extra = [m.shot, m.motion].filter(Boolean).join(" · ");
   return (
     <div data-testid={`mood-${scene.position}`} className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs">
-      <span className="inline-flex items-center gap-1 rounded-full bg-accent-soft px-2 py-0.5 font-semibold text-accent">
-        <span aria-hidden>{m.emoji}</span> {m.emotion}
-      </span>
+      {m.size && (
+        <span data-testid={`size-${scene.position}`} className="rounded-full border border-line bg-surface-2 px-2 py-0.5 font-semibold text-ink">
+          <span className="sr-only">Shot: </span>{m.size}
+        </span>
+      )}
+      {m.emotion && (
+        <span className="inline-flex items-center gap-1 rounded-full bg-accent-soft px-2 py-0.5 font-semibold text-accent">
+          <span aria-hidden>{m.emoji}</span> {m.emotion}
+        </span>
+      )}
+      {m.punch && <span className="rounded-full bg-warn/15 px-2 py-0.5 font-semibold text-warn-text">Punch: “{m.punch}”</span>}
       {m.key && <span className="rounded-full bg-warn/15 px-2 py-0.5 font-semibold text-warn-text">Key moment</span>}
       {extra && <span className="min-w-0 text-muted">{extra}</span>}
     </div>
@@ -83,6 +92,10 @@ export function ScriptReview({ reel, scenes, onApproved, narrator = null, themes
   const [saved, setSaved] = useState<Record<string, Text>>({});
   const [titleEdit, setTitleEdit] = useState<string | null>(null);
   const [savedTitle, setSavedTitle] = useState<string | null>(null);
+  // the hook card (008): shown only when the reel row has the column
+  const hasHook = reel.hook_text !== undefined;
+  const [hookEdit, setHookEdit] = useState<string | null>(null);
+  const [savedHook, setSavedHook] = useState<string | null>(null);
   const [busy, setBusy] = useState<null | "save" | "approve" | "rewrite" | "delete">(null);
   const [confirm, setConfirm] = useState<null | "rewrite" | "delete">(null);
   const [rewriteStart, setRewriteStart] = useState(0);
@@ -96,10 +109,13 @@ export function ScriptReview({ reel, scenes, onApproved, narrator = null, themes
   }), [scenes, edits, saved]);
   const dirtyLines = lines.filter((l) => l.dirty);
   const titleDirty = oneLine(title) !== oneLine(baseTitle);
-  const dirty = titleDirty || dirtyLines.length > 0;
-  const problem = firstProblem(title, lines);
+  const baseHook = savedHook ?? reel.hook_text ?? "";
+  const hook = hookEdit ?? baseHook;
+  const hookDirty = hasHook && oneLine(hook) !== oneLine(baseHook);
+  const dirty = titleDirty || hookDirty || dirtyLines.length > 0;
+  const problem = firstProblem(title, lines, hasHook ? hook : "");
   const totalWords = lines.reduce((n, l) => n + wordCount(l.narration), 0);
-  // The script length the prompt aims for (90–120 s of speech at the narration speed).
+  // The script length the prompt aims for (45–75 s of speech at the narration speed).
   const speed = narrator?.speed ?? 1;
   const TARGET = wordTarget(speed);
   const secs = estimateSeconds(totalWords, speed);
@@ -109,10 +125,13 @@ export function ScriptReview({ reel, scenes, onApproved, narrator = null, themes
     const l = lines.find((x) => x.id === id)!;
     return { ...prev, [id]: { narration: l.narration, idea: l.idea, ...patch } };
   });
-  const discard = () => { setEdits({}); setTitleEdit(null); };
+  const discard = () => { setEdits({}); setTitleEdit(null); setHookEdit(null); };
 
   const save = async (quiet = false): Promise<boolean> => {
-    const payload = { title: oneLine(title), lines: dirtyLines.map((l) => ({ id: l.id, narration: oneLine(l.narration), idea: oneLine(l.idea) })) };
+    const payload = {
+      title: oneLine(title), ...(hookDirty ? { hookText: oneLine(hook) } : {}),
+      lines: dirtyLines.map((l) => ({ id: l.id, narration: oneLine(l.narration), idea: oneLine(l.idea) })),
+    };
     const r = await callAction(() => saveReelScriptAction(reel.id, payload));
     if (!r.ok) { toast.error(r.error); return false; }
     const sent: Record<string, Text> = Object.fromEntries(payload.lines.map((l) => [l.id, { narration: l.narration, idea: l.idea }]));
@@ -121,6 +140,11 @@ export function ScriptReview({ reel, scenes, onApproved, narrator = null, themes
     // Only drop edits that are exactly what was saved: anything typed while saving stays (and stays dirty).
     setEdits((prev) => Object.fromEntries(Object.entries(prev).filter(([id, e]) => !(sent[id] && same(e, sent[id])))));
     setTitleEdit((prev) => (prev !== null && oneLine(prev) === payload.title ? null : prev));
+    if (payload.hookText !== undefined) {
+      const sentHook = payload.hookText;
+      setSavedHook(sentHook);
+      setHookEdit((prev) => (prev !== null && oneLine(prev) === sentHook ? null : prev));
+    }
     if (!quiet) toast.success("Script saved");
     return true;
   };
@@ -141,7 +165,7 @@ export function ScriptReview({ reel, scenes, onApproved, narrator = null, themes
     const r = await callAction(() => rewriteReelScriptAction(reel.id));
     setBusy(null);
     if (!r.ok) { toast.error(r.error); return; }
-    setEdits({}); setSaved({}); setTitleEdit(null); setSavedTitle(null);
+    setEdits({}); setSaved({}); setTitleEdit(null); setSavedTitle(null); setHookEdit(null); setSavedHook(null);
     toast.success("New script written");
     router.refresh();
   };
@@ -194,7 +218,7 @@ export function ScriptReview({ reel, scenes, onApproved, narrator = null, themes
               ))}
             </div>
             <p className={cn("mt-2 text-xs", lengthOk ? "text-muted" : "text-warn-text")}>
-              {lengthOk ? `Good length (aim ${TARGET.lo}–${TARGET.hi} words).` : `Aim for ${TARGET.lo}–${TARGET.hi} words (about 1:30–2:00).`}
+              {lengthOk ? `Good length (aim ${TARGET.lo}–${TARGET.hi} words).` : `Aim for ${TARGET.lo}–${TARGET.hi} words (about 0:45–1:15).`}
             </p>
             {themes && reel.theme_id !== undefined && (
               <div className="mt-3 border-t border-line pt-3" data-testid="theme">
@@ -245,6 +269,21 @@ export function ScriptReview({ reel, scenes, onApproved, narrator = null, themes
               <span>Gemini is writing a new script… usually 1–3 minutes.</span>
               <Elapsed since={rewriteStart} />
             </p>
+          )}
+          {hasHook && (
+            <div data-testid="hook-card" className={cn("mb-3 rounded-2xl border bg-surface p-3 shadow-soft sm:p-4", hookDirty ? "border-accent/50" : "border-line",
+              busy === "rewrite" && "pointer-events-none opacity-50")}>
+              <div className="mb-1.5 flex items-center justify-between gap-2 text-xs">
+                <label htmlFor="reel-hook" className="font-semibold uppercase tracking-[.06em] text-muted">Hook card</label>
+                <span className={cn("tabular-nums", wordCount(hook) > HOOK_TEXT_MAX_WORDS ? "font-bold text-bad" : "text-muted")}>
+                  {wordCount(hook)} / {HOOK_TEXT_MAX_WORDS} words{hookDirty ? " · edited" : ""}
+                </span>
+              </div>
+              <Input id="reel-hook" value={hook} maxLength={80} disabled={locked} placeholder="Big words on screen for the first 3.5 seconds"
+                aria-invalid={wordCount(hook) > HOOK_TEXT_MAX_WORDS || undefined}
+                onChange={(e) => setHookEdit(e.target.value)} className="text-base font-semibold" />
+              <p className="mt-1 text-xs text-muted">Shown big over the first 3.5 seconds, above line 1. Leave it empty for no card.</p>
+            </div>
           )}
           <ol className={cn("space-y-2.5", busy === "rewrite" && "pointer-events-none opacity-50")}>
             {lines.map((l) => {

@@ -310,3 +310,40 @@ describe("ReelProgress header", () => {
     expect(screen.queryByTestId("reel-theme")).toBeNull();
   });
 });
+
+describe("ScriptReview: playbook v2 (hook card + shot-size chips)", () => {
+  it("each 008 line shows its shot-size chip and punch word; older lines show none", () => {
+    render(<ScriptReview reel={reel({ theme_id: "knitted", hook_text: "And nobody warned you" })} scenes={[
+      scene(1, { emotion: "worried", shot_size: "close", subject: "both", motion: "push_in" }),
+      scene(2, { emotion: "teary", shot_size: "broll", subject: "none", motion: "hold", punch: "last time", key_moment: true }),
+      scene(3),
+    ]} />);
+    expect(screen.getByTestId("size-1").textContent).toMatch(/Close-up/);
+    const m2 = screen.getByTestId("mood-2");
+    expect(within(m2).getByTestId("size-2").textContent).toMatch(/B-roll/);
+    expect(m2.textContent).toMatch(/Punch: “last time”/);
+    expect(m2.textContent).toMatch(/Hold/);
+    expect(within(m2).queryByText("Key moment")).toBeNull();
+    expect(screen.queryByTestId("size-3")).toBeNull();
+  });
+
+  it("the hook card is editable: word count, a 10-word limit, saved with the script", async () => {
+    reelActions.saveReelScriptAction.mockResolvedValueOnce({ ok: true });
+    render(<ScriptReview reel={reel({ theme_id: "knitted", hook_text: "And nobody warned you" })} scenes={[scene(1), scene(2)]} />);
+    const box = screen.getByRole("textbox", { name: "Hook card" }) as HTMLInputElement;
+    expect(box.value).toBe("And nobody warned you");
+    expect(screen.getByTestId("hook-card").textContent).toMatch(/4 \/ 10 words/);
+    fireEvent.change(box, { target: { value: "one two three four five six seven eight nine ten eleven" } });
+    expect(screen.getAllByText(/Keep the hook card to 10 words or fewer/).length).toBeGreaterThan(0);
+    expect((screen.getByRole("button", { name: /^Save/ }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(box, { target: { value: "  It never comes back " } });
+    fireEvent.click(screen.getByRole("button", { name: /^Save/ }));
+    await waitFor(() => expect(reelActions.saveReelScriptAction).toHaveBeenCalledTimes(1));
+    expect(reelActions.saveReelScriptAction).toHaveBeenCalledWith(RID, { title: "Why toddlers say no", hookText: "It never comes back", lines: [] });
+  });
+
+  it("before 008 (no hook_text on the reel) there is no hook card field", () => {
+    render(<ScriptReview reel={reel({ theme_id: "knitted" })} scenes={[scene(1)]} />);
+    expect(screen.queryByTestId("hook-card")).toBeNull();
+  });
+});

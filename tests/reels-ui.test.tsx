@@ -125,12 +125,12 @@ describe("ScriptReview", () => {
     expect(btn(/^Save/)).toBeTruthy(); // still something to save
   });
 
-  it("warns on a line over 14 words and blocks Save with the reason", () => {
+  it("warns on a line over 15 words and blocks Save with the reason", () => {
     render(<ScriptReview reel={reel()} scenes={scenes(2)} />);
     fireEvent.change(screen.getByRole("textbox", { name: "Line 1 narration" }), { target: { value: Array(16).fill("word").join(" ") } });
     expect(screen.getByTestId("words-1").textContent).toMatch(/16 words/);
     expect(btn(/^Save/).disabled).toBe(true);
-    expect(screen.getAllByText(/Line 1 is longer than 14 words/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Line 1 is longer than 15 words/).length).toBeGreaterThan(0);
   });
 
   it("a script with no lines: Approve is disabled and says to tap New script", () => {

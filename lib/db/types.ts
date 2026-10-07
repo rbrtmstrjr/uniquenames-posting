@@ -108,13 +108,25 @@ export interface ReelThemeRow {
 }
 /** What claim_next_theme_preview() returns to the PC (null = nothing to do). */
 export interface ThemePreviewClaim { theme: ReelThemeRow }
-/** The camera move per line (migration 007, reel_scenes_motion_check); no AI motion this round. */
-export const REEL_MOTIONS = ["push_in", "pull_out", "pan_left", "pan_right", "tilt_up", "tilt_down", "punch"] as const;
+/**
+ * The camera move per line (reel_scenes_motion_check). New scripts only use push_in / pull_out / hold (008); the pans,
+ * tilts and punch stay valid for rows written before 008 (the render plays them as push_in / pull_out).
+ */
+export const REEL_MOTIONS = ["push_in", "pull_out", "pan_left", "pan_right", "tilt_up", "tilt_down", "punch", "hold"] as const;
 export type ReelMotion = (typeof REEL_MOTIONS)[number];
+/** The moves the script engine assigns from migration 008 on. */
+export const REEL_MOTIONS_V2 = ["push_in", "pull_out", "hold"] as const;
+/** A line's shot size (migration 008, reel_scenes_shot_size_check). */
+export const REEL_SHOT_SIZES = ["wide", "medium", "close", "detail", "pov", "broll"] as const;
+export type ReelShotSize = (typeof REEL_SHOT_SIZES)[number];
+/** Who is in a line's picture (migration 008, reel_scenes_subject_check): mom = the parent, baby = the child. */
+export const REEL_SUBJECTS = ["mom", "baby", "both", "object", "none"] as const;
+export type ReelSubject = (typeof REEL_SUBJECTS)[number];
 /** Reel lifecycle (migration 005). script = waiting for review; queued..rendering = the PC is working on it. */
 export type ReelStatus = "script" | "queued" | "voicing" | "imaging" | "rendering" | "ready" | "needs_attention" | "failed";
 export type ReelSceneStatus = "pending" | "queued" | "generating" | "done" | "failed" | "skipped";
-export interface ReelCast { adult: string; child: string }
+/** The script's two characters (reels.doll_cast); the short tags (playbook v2) are absent on older reels. */
+export interface ReelCast { adult: string; child: string; adult_tag?: string; child_tag?: string }
 /** One Whisper word with its times in seconds. */
 export interface ReelWord { word: string; start: number; end: number }
 export interface ReelRow {
@@ -131,6 +143,8 @@ export interface ReelRow {
   music_path?: string | null;
   /** Migration 007 (absent before it runs): the visual theme (null = settings.reel_theme_id). */
   theme_id?: ReelThemeId | null;
+  /** Migration 008 (absent before it runs): the hook card shown over the first 3.5 s (null = none). */
+  hook_text?: string | null;
   version: number; claimed_at: string | null; started_at: string | null; finished_at: string | null;
   created_at: string; updated_at: string;
 }
@@ -147,6 +161,12 @@ export interface ReelSceneRow {
   key_moment?: boolean;
   /** Migration 007: the camera move the render uses; null = the render picks one. */
   motion?: ReelMotion | null;
+  /** Migration 008 (absent before it runs): the shot size and who is in the picture (null on older lines). */
+  shot_size?: ReelShotSize | null; subject?: ReelSubject | null;
+  /** Migration 008: a stressed word / short phrase of the narration (verbatim) that gets an instant punch-in; null = none. */
+  punch?: string | null;
+  /** Migration 008: a time jump before this line (the render dissolves into it); default false. */
+  time_jump?: boolean;
   created_at: string; updated_at: string;
 }
 /** What claim_next_reel_step(p_no_comfy) returns to the PC (null = nothing to do). */

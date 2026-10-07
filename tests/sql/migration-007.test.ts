@@ -17,6 +17,7 @@ const m005 = stripSupabase(read("supabase", "migrations", "005_reels.sql"));
 const m006 = stripSupabase(read("supabase", "migrations", "006_reel_voices.sql"));
 const m007raw = read("supabase", "migrations", "007_reel_themes.sql");
 const m007 = stripSupabase(m007raw);
+const m008 = read("supabase", "migrations", "008_reel_playbook.sql");
 
 // The final style blocks from the PC spike, verbatim.
 const spike = read("docs", "reference", "reel-themes-motion-spike.md").replace(/\r\n/g, "\n");
@@ -129,8 +130,11 @@ describe("007_reel_themes.sql on the live schema (v1 + 002..006)", () => {
     await db.query(`delete from reel_themes where id='cinematic'`);
     expect(await one(db, `select theme_id from reels where id=$1`, [reel])).toEqual({ theme_id: null });
 
-    expect([...REEL_MOTIONS]).toEqual(["push_in", "pull_out", "pan_left", "pan_right", "tilt_up", "tilt_down", "punch"]);
-    for (const m of REEL_MOTIONS) await db.query(`update reel_scenes set motion=$1 where reel_id=$2`, [m, reel]);
+    // 007's presets (008 adds 'hold')
+    const M007 = REEL_MOTIONS.filter((m) => m !== "hold");
+    expect(M007).toEqual(["push_in", "pull_out", "pan_left", "pan_right", "tilt_up", "tilt_down", "punch"]);
+    await expect(db.query(`update reel_scenes set motion='hold' where reel_id=$1`, [reel])).rejects.toThrow(/check/i);
+    for (const m of M007) await db.query(`update reel_scenes set motion=$1 where reel_id=$2`, [m, reel]);
     await db.query(`update reel_scenes set motion=null where reel_id=$1`, [reel]);
     for (const bad of ["ai", "zoom", ""]) {
       await expect(db.query(`update reel_scenes set motion=$1 where reel_id=$2`, [bad, reel]), bad).rejects.toThrow(/check/i);
@@ -258,7 +262,8 @@ describe("claim_next_theme_preview", () => {
   });
 });
 
-describe("fresh schema.sql matches v1 + 002..007", () => {
+// schema.sql also holds 008 (columns only): compare with it applied too.
+describe("fresh schema.sql matches v1 + 002..007 (+ 008)", () => {
   const TABLES = "('settings','reels','reel_scenes','reel_voices','reel_themes','cards','posts')";
   const FUNCS = "('create_post','claim_next_card','requeue_stuck_cards','claim_next_reel_step','requeue_stuck_reels','reel_next_step','claim_next_voice_sample','claim_next_theme_preview')";
   const shape = async (db: PGlite) => ({
@@ -276,7 +281,9 @@ describe("fresh schema.sql matches v1 + 002..007", () => {
   });
 
   it("has the same columns, constraints, indexes, triggers, function bodies and theme rows", async () => {
-    const want = await shape(await migratedDb());
+    const migrated = await migratedDb();
+    await migrated.exec(m008);
+    const want = await shape(migrated);
     expect(want.functions).toHaveLength(8);
     expect(want.themes).toHaveLength(8);
     expect(want.triggers.filter((t) => (t as { t: string }).t === "reel_themes")).toHaveLength(1);

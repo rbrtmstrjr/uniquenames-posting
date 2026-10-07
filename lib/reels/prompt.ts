@@ -1,37 +1,121 @@
 import { NO_TEXT } from "@/lib/planner/prompt";
+import type { ReelCast } from "@/lib/db/types";
 import { emotionOf, shotOf, type ReelEmotion, type ReelShot } from "./motion";
-import { isDollTheme, KNIT_STYLE, type ReelTheme } from "./themes";
+import { hasFace, isFaceFree, sizeOf, subjectOf, type ReelShotSize, type ReelSubject } from "./shots";
+import { isDollTheme, KNIT_STYLE, styleTag, type ReelTheme } from "./themes";
 
 export { KNIT_STYLE };
+export type { ReelCast };
 
 // Z-Image runs at cfg 1 with no negative prompt: naming an unwanted thing summons it, so every
 // line here only describes what should be in frame (NO_TEXT is the one proven exception).
-// Never the word "camera"; framing is set with a lens line, as in the photoshoot planner.
+// Never the word "camera"; framing is set with shot size + angle + lens words.
+//
+// Playbook v2 token order (front-loaded: the model weighs the first tokens most):
+//   [shot size + angle + lens], [moment, body language, feeling], [character tag], [setting + time of day],
+//   [lighting], [style tag]
+// then NO_TEXT. Detail / B-roll / object / empty shots carry no face description (hands: skin tone + wardrobe only).
 
-/** The script's two recurring characters (stored as `reels.doll_cast`). */
-export interface ReelCast { adult: string; child: string }
-
-/** What scenePrompt needs from a line (emotion / action / shot are null on reels written before migration 007). */
+/** What scenePrompt needs from a line (the 007 / 008 fields are null on lines written before them). */
 export interface PromptScene {
   idea: string; beat?: string | null;
-  emotion?: string | null; action?: string | null; shot?: string | null;
+  emotion?: string | null; action?: string | null;
+  /** 007 framing (older lines only; mapped to a shot size). */
+  shot?: string | null;
+  /** 008: shot size + who is in frame. */
+  shot_size?: string | null; subject?: string | null;
 }
 
-/** Lines written before 007 have no shot: the old lens choice (opening = medium full of emotion). */
-const lensOld = (who: string, hook: boolean, beat?: string | null) =>
-  hook ? `50mm lens at f/2.8, a medium shot full of strong emotion, the ${who} sharp`
-    : beat === "close" ? `35mm lens at f/4, a warm medium-wide view, the ${who} sharp`
-      : `35mm lens at f/4, the whole cozy setting in view, the ${who} sharp`;
-
-/** The framing per shot, as a lens line (positive-only, never "camera"). */
-export const SHOT_LENS: Record<ReelShot, (who: string) => string> = {
-  wide: (who) => `24mm lens at f/5.6, a wide view of the whole setting, the ${who} clear and sharp within it`,
-  medium: (who) => `50mm lens at f/2.8, a medium view of the ${who} from the waist up, the ${who} sharp`,
-  "over-the-shoulder": () => "35mm lens at f/2.8, a view over the parent's shoulder toward the child, the shoulder soft in the foreground, the child sharp",
-  "low-angle": (who) => `28mm lens at f/4, a low-angle view looking up at the ${who}, the ${who} sharp`,
-  "hands-detail": () => "85mm lens at f/2.8, a close medium view centred on the hands and what they hold, the faces still in frame, the hands sharp",
-  "eye-level": (who) => `35mm lens at f/4, an eye-level view at the child's height, the cozy setting around them, the ${who} sharp`,
+/**
+ * The framings per shot size, each a [size + angle + lens] phrase; a line takes option (index mod count), so two lines
+ * in a row never share the same lens + angle (every phrase is unique, and each size has at least 2).
+ * Lenses: wide 24-35 mm, medium 50 mm, close 85 mm, detail 100 mm macro, POV 24 mm first-person, B-roll 50 mm.
+ */
+export const SHOT_FRAMES: Record<ReelShotSize, readonly string[]> = {
+  wide: ["wide establishing shot at eye level, 24mm lens", "wide shot from a high angle, 35mm lens", "wide shot from a low angle, 28mm lens"],
+  medium: ["medium shot at eye level, 50mm lens", "medium shot from a slightly high angle, 50mm lens", "medium shot from a low angle, 50mm lens"],
+  close: ["close-up at eye level, 85mm lens, shallow focus", "close-up from a slightly high angle, 85mm lens, shallow focus", "close-up from a low angle, 85mm lens, shallow focus"],
+  detail: ["extreme close-up detail from directly above, 100mm macro lens", "extreme close-up detail at eye level, 100mm macro lens", "extreme close-up detail from the side, 100mm macro lens"],
+  pov: ["first-person point of view looking down, 24mm lens", "first-person point of view at arm's length, 24mm lens"],
+  broll: ["quiet cutaway shot from directly above, 50mm lens", "quiet cutaway shot from a high angle, 50mm lens", "quiet cutaway shot from the side, 50mm lens"],
 };
+/** A line's framing phrase. */
+export const frameOf = (size: ReelShotSize, index: number) => SHOT_FRAMES[size][Math.max(0, index) % SHOT_FRAMES[size].length];
+
+/** Lines written before 008 carry a 007 framing (or none): the nearest shot size. */
+const LEGACY_SIZE: Record<ReelShot, ReelShotSize> = {
+  wide: "wide", medium: "medium", "over-the-shoulder": "medium", "low-angle": "medium", "hands-detail": "detail", "eye-level": "medium",
+};
+
+/** The light per feeling (warm for joy and comfort, cooler and dimmer for worry), when the setting names no time of day. */
+export const EMOTION_LIGHT: Record<ReelEmotion, string> = {
+  laughing: "bright warm light", playful: "bright cheerful light", surprised: "clear soft light",
+  curious: "clear soft light with a gentle glow", determined: "warm golden backlight", proud: "warm golden backlight",
+  relieved: "soft warm light", tender: "soft golden window light", cuddly: "soft golden lamp light",
+  teary: "gentle dim light with a warm lamp glow", worried: "cool dim light with one warm lamp",
+  exhausted: "cool dim light with one warm lamp",
+};
+/** Feelings that keep their cooler, dimmer light whatever the time of day. */
+const LOW_MOODS: ReadonlySet<ReelEmotion> = new Set(["teary", "worried", "exhausted"]);
+/** The setting's time of day wins over the feeling's light (no "bright daylight" in "the sala at night"). */
+const TIME_LIGHT: [RegExp, string, string][] = [
+  [/\b(?:night|midnight|\d+(?::\d+)?\s*a\.?\s?m\b|bedtime|dark|moonlight|lamp ?light)/i, "warm dim lamp light at night", "cool dim night light with one warm lamp"],
+  [/\b(?:dusk|sunset|evening|twilight|golden hour)\b/i, "warm golden dusk light", "fading blue dusk light with a warm lamp"],
+  [/\b(?:dawn|sunrise|early morning)\b/i, "soft pale dawn light", "cool pale dawn light"],
+  [/\b(?:rain|rainy|raining|storm|stormy)\b/i, "soft grey rainy-day light with a warm lamp", "soft grey rainy-day light"],
+  [/\b(?:morning|breakfast)\b/i, "fresh soft morning light", "pale soft morning light"],
+  [/\b(?:noon|midday|afternoon|sunny|daytime|daylight)\b/i, "bright warm daylight", "soft hazy daylight"],
+];
+/** The lighting slot: the setting's time of day (with the feeling's warmth), else the feeling's own light. */
+export function lightFor(emotion: ReelEmotion | null, setting: string): string {
+  const low = !!emotion && LOW_MOODS.has(emotion);
+  for (const [re, warm, cool] of TIME_LIGHT) if (re.test(setting)) return low ? cool : warm;
+  return emotion ? EMOTION_LIGHT[emotion] : "soft warm light";
+}
+
+/** Separates the moment from its setting in a stored idea ("the mom kneels by the crib — the nursery at 3 a.m."). */
+export const IDEA_SETTING_SEP = " — ";
+const trimEnd = (s: string) => s.replace(/\s+/g, " ").trim().replace(/[\s.;,]+$/, "");
+/** The stored idea: the moment, then (if any) its setting. */
+export const joinIdea = (moment: string, setting?: string | null) =>
+  trimEnd(setting ?? "") ? `${trimEnd(moment)}${IDEA_SETTING_SEP}${trimEnd(setting!)}` : trimEnd(moment);
+/** A stored idea back into its moment and setting (an idea without the separator is all moment). */
+export function splitIdea(idea: string): { moment: string; setting: string } {
+  const s = (idea ?? "").replace(/\s+/g, " ").trim();
+  const at = s.lastIndexOf(IDEA_SETTING_SEP.trim());
+  if (at <= 0) return { moment: trimEnd(s), setting: "" };
+  return { moment: trimEnd(s.slice(0, at)), setting: trimEnd(s.slice(at + 1)) };
+}
+
+const wordsOf = (s: string) => s.split(" ").filter(Boolean);
+const DANGLING = /(?:\s+(?:a|an|the|in|on|with|of|and|or|at|to|by|for|her|his|their))+$/i;
+/** At most n words, cut at the last comma inside them when that keeps 3+ words (never ending on "in a"). */
+export function capWords(s: string, n: number): string {
+  const t = s.replace(/\s+/g, " ").trim();
+  const w = wordsOf(t);
+  if (w.length <= n) return trimEnd(t);
+  const head = w.slice(0, n).join(" ");
+  const comma = head.lastIndexOf(",");
+  return trimEnd(trimEnd(comma > 0 && wordsOf(head.slice(0, comma)).length >= 3 ? head.slice(0, comma) : head).replace(DANGLING, ""));
+}
+/** Longest character tag (one person); two people stay within ~15 words. */
+export const TAG_MAX_WORDS = 8;
+/**
+ * A cast member's short tag: the script's own, else the description after its name, cut to TAG_MAX_WORDS (`map`, e.g.
+ * undoll, runs before the cut so it sees whole phrases).
+ */
+export function castTag(cast: ReelCast, who: "adult" | "child", map: (s: string) => string = (s) => s): string {
+  const own = map((who === "adult" ? cast.adult_tag : cast.child_tag) ?? "");
+  if (own.trim()) return capWords(own, TAG_MAX_WORDS);
+  const full = map((who === "adult" ? cast.adult : cast.child) ?? "");
+  const at = full.indexOf(":");
+  return capWords(at >= 0 ? full.slice(at + 1) : full, TAG_MAX_WORDS);
+}
+const IDENTITY = /\b(?:mom|mother|mama|dad|father|papa|parent|baby|toddler|newborn|infant|boy|girl|child|kid|preschooler|years?|months?|old|hair|bun|ponytail|braids?|curls?|curly|tufts?|bald|eyes?|face|smile|cheeks?|lashes|brows?|eyebrows?|freckles?|beard|glasses|young|filipin[oa]|doll|head|nose|mouth)\b/i;
+/** Skin tone + wardrobe from a tag, for hands-only shots ("young mom, warm tan skin, low bun, mustard cardigan" → "warm tan skin, mustard cardigan"). */
+export function wardrobeCue(tag: string): string {
+  return tag.split(",").map((x) => x.trim()).filter((x) => x && (/\bskin\b/i.test(x) || !IDENTITY.test(x))).join(", ");
+}
 
 /** A feeling as a visible facial expression (themes with expressive faces). */
 export const EMOTION_FACE: Record<ReelEmotion, string> = {
@@ -63,6 +147,22 @@ export const EMOTION_POSE: Record<ReelEmotion, string> = {
   teary: "heads bowed close together, holding each other near, a hand over the heart",
   worried: "hunched forward, hands clasped tight, leaning close to the child",
   exhausted: "slumped low on the seat, head resting back, arms heavy and still",
+};
+
+/** A feeling as body language for ONE person in frame (mom or baby alone). */
+export const EMOTION_POSE_ONE: Record<ReelEmotion, string> = {
+  laughing: "body tipped back with joy, arms flung wide",
+  playful: "bouncy and mid-play, arms out wide",
+  surprised: "leaning back all of a sudden, hands up at the cheeks",
+  curious: "leaning forward, head tilted toward what is in view",
+  determined: "standing tall, chest forward, one hand in a small brave fist",
+  proud: "standing upright, chest high, arms open wide",
+  relieved: "shoulders dropped, leaning back softly, a hand resting on the chest",
+  tender: "head gently tipped, hands soft and open",
+  cuddly: "curled up snug and cozy",
+  teary: "head bowed, a hand over the heart",
+  worried: "hunched forward, hands clasped tight",
+  exhausted: "slumped low, head resting back, arms heavy and still",
 };
 
 /** Knitted dolls: a lifted baby doll turns into two babies (spike), so the dolls stay grounded (positive wording). */
@@ -107,36 +207,57 @@ export function positiveOnly(s: string, dolls = false): string {
   return clean(kept.join(" ").replace(/\bcamera\b/gi, "viewer"));
 }
 
+const HANDS: Record<"mom" | "baby" | "both", string> = {
+  mom: "the parent's hands", baby: "the child's small hands", both: "the parent's and the child's hands",
+};
+
 /**
- * One line's image prompt: moment + feeling + lens first (order matters), then the theme's style, the cast,
- * composition, NO_TEXT. The feeling is a visible facial expression for themes with faces and body language only
- * for the others. Only the opening picture (index 0) gets the hook treatment.
+ * One line's image prompt (playbook v2), front-loaded:
+ * `[shot size + angle + lens], [moment, body language, feeling], [character tag], [setting], [lighting], [style tag]`,
+ * then NO_TEXT on its own line. Faces themes show the feeling on faces in medium / close / POV shots and through pose
+ * in wide shots; faceless themes (knitted, papercraft) always through pose. Detail / B-roll / object / empty shots
+ * carry no face: a person there is only their hands (skin tone + wardrobe). Only the opening picture (index 0) gets
+ * the hook treatment. Lines from before 008 map their 007 framing to a size and show both characters.
  */
 export function scenePrompt(theme: ReelTheme, cast: ReelCast, scene: PromptScene, index: number): string {
   const dolls = isDollTheme(theme);
   // Doll wording becomes people wording only when the cast was written as dolls (a Knitted Doll script).
   const people = !dolls && isDollCast(cast);
   const fix = (s: string | null | undefined, lift = dolls) => positiveOnly(people ? undoll(s ?? "") : (s ?? ""), lift);
-  const who = dolls ? "dolls" : "characters";
-  const hook = index === 0;
-  const moment = hook ? "one striking, high-emotion moment" : "one tender moment";
+  const tag = (who: "adult" | "child") => positiveOnly(castTag(cast, who, people ? undoll : undefined));
+  const legacy = shotOf(scene.shot);
+  const size: ReelShotSize = sizeOf(scene.shot_size) ?? (legacy ? LEGACY_SIZE[legacy] : "medium");
+  const subject: ReelSubject = subjectOf(scene.subject) ?? (size === "broll" ? "none" : "both");
+  const person = hasFace(subject);
+  const faceFree = isFaceFree({ shot_size: size, subject });
   const emotion = emotionOf(scene.emotion);
-  const action = fix(scene.action);
+  const { moment: rawMoment, setting: rawSetting } = splitIdea(scene.idea);
   // An idea with nothing left (every clause named something absent, or a knitted lift) falls back to a calm moment.
-  const idea = fix(scene.idea) || (dolls ? "the two dolls cuddle close together" : "the two of them share a quiet, close moment");
-  const feeling = !emotion ? "" : theme.faces
-    ? ` Emotion: ${EMOTION_FACE[emotion]}.`
-    : ` Feeling: ${emotion}, shown through pose: ${EMOTION_POSE[emotion]}.`;
-  const body = action ? ` Body language: ${action}.` : "";
-  const shot = shotOf(scene.shot);
-  let lens = shot ? SHOT_LENS[shot](who) : lensOld(who, hook, scene.beat);
-  if (hook && shot) lens += ", full of strong emotion";
-  const characters = dolls ? "the same two dolls in every picture" : "the same two people in every picture";
-  const set = dolls ? "the handmade set" : "the scene";
-  return [
-    `A single full-bleed vertical 9:16 picture of ${moment}. Moment: ${idea}.${feeling}${body} Lens: ${lens}.`,
-    `${theme.style} Characters (${characters}): ${fix(cast.adult, false)}; ${fix(cast.child, false)}.${dolls ? ` ${KNIT_POSE}` : ""}`,
-    `Composition: ${set} fills the whole frame edge to edge; the ${who} and their action sit in the upper and middle part of the frame, and the band just below the middle is calm and uncluttered — a soft, simple, evenly lit stretch of the scene's own floor, blanket or background.`,
-    NO_TEXT,
-  ].join("\n");
+  const fallback = !person ? "a quiet, cozy still moment"
+    : dolls ? "the two dolls cuddle close together" : "the two of them share a quiet, close moment";
+  const moment = fix(rawMoment) || fallback;
+  const action = person ? fix(scene.action) : "";
+  const feeling = !emotion || faceFree ? ""
+    : theme.faces && size !== "wide" ? EMOTION_FACE[emotion] : (subject === "both" ? EMOTION_POSE : EMOTION_POSE_ONE)[emotion];
+
+  let who = "";
+  if (person && faceFree) {
+    const tags = [subject !== "baby" ? tag("adult") : "", subject !== "mom" ? tag("child") : ""].filter(Boolean);
+    const cue = wardrobeCue(tags.join(", "));
+    who = `${HANDS[subject as "mom" | "baby" | "both"]}${cue ? `, ${cue}` : ""}`;
+  } else if (person) {
+    const a = tag("adult"), c = tag("child");
+    who = subject === "mom" ? a : subject === "baby" ? c : `${a} with ${c}`;
+  }
+  const setting = fix(rawSetting);
+  const slots = [
+    `Vertical 9:16 ${frameOf(size, index)}`,
+    [index === 0 ? `a striking, high-emotion moment: ${moment}` : moment, action, feeling].filter(Boolean).join(", "),
+    who,
+    setting,
+    lightFor(emotion, setting),
+    styleTag(theme),
+  ].filter(Boolean);
+  const pose = dolls && subject === "both" && !faceFree ? ` ${KNIT_POSE}` : "";
+  return `${slots.join(", ")}.${pose}\n${NO_TEXT}`;
 }

@@ -3,7 +3,7 @@ import type { ReelRow, ReelSceneRow } from "@/lib/db/types";
 import type { ReelScript, ReelScriptInput, ReelScriptResult } from "@/lib/ai/reel-script";
 import { scenePrompt } from "@/lib/reels/prompt";
 import { assignMotion } from "@/lib/reels/motion";
-import { STATIC_THEMES } from "@/lib/reels/themes";
+import { STATIC_THEMES, STYLE_TAG } from "@/lib/reels/themes";
 import { fakeSupabase, isUpdate, op, type Query, type Respond } from "./helpers/fake-supabase";
 
 let respond: Respond = () => undefined;
@@ -22,12 +22,14 @@ const S2 = "33333333-3333-4333-8333-333333333332";
 const S3 = "33333333-3333-4333-8333-333333333333";
 const CAST = { adult: "the mom doll: a crocheted mom", child: "the toddler doll: a crocheted toddler" };
 
+const SIZES = ["close", "wide", "detail", "medium"] as const;
+const SUBJECTS = ["both", "mom", "object", "baby"] as const;
 const script = (title = "The Quiet Hour", n = 3): ReelScript => ({
-  title, stage: "toddler", cast: CAST,
+  title, stage: "toddler", cast: CAST, hook_text: "And nobody warned you",
   scenes: Array.from({ length: n }, (_, i) => ({
-    beat: i === 0 ? "hook" : "build", narration: `Line ${i + 1} is spoken softly to you mama.`, idea: `The mom doll does thing ${i + 1}.`,
+    beat: i === 0 ? "hook" : "build", narration: `Line ${i + 1} is spoken softly to you mama.`, idea: `The mom doll does thing ${i + 1} — the sala at dusk`,
     emotion: (["surprised", "teary", "relieved", "curious"] as const)[i % 4], action: `leans in, hands open ${i + 1}`,
-    shot: i % 2 ? "wide" : "medium", key: i === 2,
+    shot_size: SIZES[i % 4], subject: SUBJECTS[i % 4], punch: i === 2 ? "softly" : null, time_jump: i === 1,
   })),
 });
 const ok = (s: ReelScript): ReelScriptResult => ({ ok: true, script: s });
@@ -57,6 +59,8 @@ interface World {
   themes?: Record<string, unknown>; themesError?: { message: string; code?: string };
   /** 007 not on reel_scenes yet: an insert naming a 007 column fails with PGRST204. */
   scene007Missing?: boolean;
+  /** 008 not on the database yet: an insert naming a 008 column fails with PGRST204. */
+  scene008Missing?: boolean;
 }
 let w: World = {};
 function world(o: World = {}) {
@@ -75,7 +79,10 @@ function world(o: World = {}) {
       return { data: w.themes ? (w.themes[id] ?? null) : (STATIC_THEMES[id as keyof typeof STATIC_THEMES] ?? null) };
     }
     if (q.table === "reels") {
-      if (has("insert")) return { data: { id: NEW } };
+      if (has("insert")) {
+        if (w.scene008Missing && "hook_text" in (op(q, "insert")![1] as Record<string, unknown>)) return { error: { code: "PGRST204", message: "Could not find the 'hook_text' column of 'reels' in the schema cache" } };
+        return { data: { id: NEW } };
+      }
       if (has("update")) return { data: w.reelUpdated ? [{ id: REEL }] : [] };
       if (has("delete")) return { data: w.deleted ? [{ id: REEL }] : [] };
       if (eqv("id")) return { data: w.reel };
@@ -84,6 +91,7 @@ function world(o: World = {}) {
     if (q.table === "reel_scenes") {
       if (has("insert")) {
         const rows = op(q, "insert")![1] as Record<string, unknown>[];
+        if (w.scene008Missing && rows.some((r) => "shot_size" in r)) return { error: { code: "PGRST204", message: "Could not find the 'shot_size' column of 'reel_scenes' in the schema cache" } };
         if (w.scene007Missing && rows.some((r) => "emotion" in r)) return { error: { code: "PGRST204", message: "Could not find the 'action' column of 'reel_scenes' in the schema cache" } };
         return w.sceneInsertError ? { error: w.sceneInsertError } : { data: null };
       }
@@ -160,7 +168,7 @@ describe("writeReelScriptAction", () => {
       expect(row).toMatchObject({ reel_id: NEW, position: i + 1, beat: s.beat, idea: s.idea, narration: s.narration, status: "pending",
         image_prompt: scenePrompt(STATIC_THEMES.knitted, CAST, s, i) });
       // before 007 (settings has no reel_theme_id): the new columns are left out
-      for (const k of ["emotion", "action", "shot", "key_moment", "motion"]) expect(row).not.toHaveProperty(k);
+      for (const k of ["emotion", "action", "shot", "key_moment", "motion", "shot_size", "subject", "punch", "time_jump"]) expect(row).not.toHaveProperty(k);
       expect(Number.isSafeInteger(row.seed) && (row.seed as number) > 0 && (row.seed as number) < 2 ** 32).toBe(true);
     });
   });
@@ -200,10 +208,10 @@ describe("writeReelScriptAction", () => {
     writeMock.mockResolvedValueOnce({ ok: false, error: "Script too short: 12 scenes (needs at least 23)." }).mockResolvedValueOnce(ok(script()));
     expect((await A.writeReelScriptAction({})).ok).toBe(true);
     writeMock.mockReset();
-    writeMock.mockResolvedValue({ ok: false, error: "Line 3 is longer than 14 words." });
+    writeMock.mockResolvedValue({ ok: false, error: "Line 3 is longer than 15 words." });
     const r = await A.writeReelScriptAction({});
     expect(writeMock).toHaveBeenCalledTimes(3);
-    expect(r).toEqual({ ok: false, error: expect.stringMatching(/Line 3 is longer than 14 words/) });
+    expect(r).toEqual({ ok: false, error: expect.stringMatching(/Line 3 is longer than 15 words/) });
   });
 
   it("one 270 s budget: each call gets min(120 s, what is left); no call when too little is left", async () => {
@@ -293,7 +301,7 @@ describe("saveReelScriptAction", () => {
       ["no title", { title: "  ", lines }],
       ["long title", { title: "x".repeat(81), lines }],
       ["empty line", { title: "T", lines: [{ id: S1, narration: " ", idea: "i" }] }],
-      ["long line", { title: "T", lines: [{ id: S1, narration: "one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen", idea: "i" }] }],
+      ["long line", { title: "T", lines: [{ id: S1, narration: "one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen", idea: "i" }] }],
       ["empty idea", { title: "T", lines: [{ id: S1, narration: "n", idea: "" }] }],
       ["bad id", { title: "T", lines: [{ id: "x", narration: "n", idea: "i" }] }],
     ];
@@ -609,24 +617,28 @@ describe("themes + emotion + motion (007)", () => {
   const reel007 = (o: Partial<ReelRow> = {}) => reelRow({ theme_id: "clay", ...o });
   const by = (id: string) => qs("reel_scenes", "update").find((q) => q.ops.some((o) => o[0] === "eq" && o[1] === "id" && o[2] === id));
 
-  it("write: the Settings theme drives the script and the prompts; each line stores emotion / action / shot / key / motion", async () => {
+  it("write: the Settings theme drives the script and the prompts; each line stores emotion / action / move + the 008 shot list", async () => {
     const DB3D = { id: "animated3d" as const, style: "Fresh 3D wording from the database.", faces: true };
     world({ themeId: "animated3d", themes: { animated3d: DB3D } });
     const s = script("Brand New", 6);
     writeMock.mockResolvedValueOnce(ok(s));
     expect(await A.writeReelScriptAction({})).toEqual({ ok: true, reelId: NEW });
     expect(writeMock.mock.calls[0][0].theme).toEqual({ id: "animated3d", faces: true });
-    expect(rowsOf(qs("reels", "insert")[0])).toMatchObject({ title: "Brand New", theme_id: "animated3d" });
+    expect(rowsOf(qs("reels", "insert")[0])).toMatchObject({ title: "Brand New", theme_id: "animated3d", hook_text: "And nobody warned you" });
     const rows = rowsOf(qs("reel_scenes", "insert")[0]);
     const motions = assignMotion(s.scenes);
-    expect(motions[0]).toBe("punch");
+    expect(motions).toEqual(["push_in", "pull_out", "push_in", "pull_out", "push_in", "hold"]);
     rows.forEach((row, i) => {
       const x = s.scenes[i];
-      expect(row).toMatchObject({ emotion: x.emotion, action: x.action, shot: x.shot, key_moment: x.key, motion: motions[i],
-        image_prompt: scenePrompt(DB3D, CAST, x, i) });
-      expect(row.image_prompt).toContain(DB3D.style);
+      expect(row).toMatchObject({ emotion: x.emotion, action: x.action, key_moment: !!x.punch, motion: motions[i],
+        shot_size: x.shot_size, subject: x.subject, punch: x.punch, time_jump: x.time_jump, image_prompt: scenePrompt(DB3D, CAST, x, i) });
+      expect(row).not.toHaveProperty("shot");
+      // the short style tag leads the look; the long (DB) style block is for previews
+      expect(row.image_prompt).toContain(STYLE_TAG.animated3d);
+      expect(row.image_prompt).not.toContain(DB3D.style);
     });
-    expect(rows[2]).toMatchObject({ key_moment: true, motion: "punch" });
+    expect(rows[2]).toMatchObject({ key_moment: true, punch: "softly", shot_size: "detail", subject: "object" });
+    expect(rows[1]).toMatchObject({ time_jump: true });
   });
 
   it("write: no Settings theme (null / unknown) → Knitted Doll; a theme read error → the static copy", async () => {
@@ -638,7 +650,7 @@ describe("themes + emotion + motion (007)", () => {
     world({ themeId: "anime", themesError: { message: "boom" } });
     writeMock.mockResolvedValueOnce(ok(script()));
     await A.writeReelScriptAction({});
-    expect(rowsOf(qs("reel_scenes", "insert")[0])[0].image_prompt).toContain(STATIC_THEMES.anime.style);
+    expect(rowsOf(qs("reel_scenes", "insert")[0])[0].image_prompt).toContain(STYLE_TAG.anime);
   });
 
   it("write: reel_scenes without the 007 columns → saved again without them", async () => {
@@ -647,8 +659,24 @@ describe("themes + emotion + motion (007)", () => {
     expect(await A.writeReelScriptAction({})).toEqual({ ok: true, reelId: NEW });
     const ins = qs("reel_scenes", "insert");
     expect(ins).toHaveLength(2);
-    for (const row of rowsOf(ins[1])) for (const k of ["emotion", "action", "shot", "key_moment", "motion"]) expect(row).not.toHaveProperty(k);
+    for (const row of rowsOf(ins[ins.length - 1])) for (const k of ["emotion", "action", "shot", "key_moment", "motion", "shot_size", "punch"]) expect(row).not.toHaveProperty(k);
     expect(qs("reels", "delete")).toHaveLength(0);
+  });
+
+  it("write: before 008 the reel and its lines are saved without the 008 fields, and 'hold' plays as push_in", async () => {
+    world({ themeId: "knitted", scene008Missing: true });
+    writeMock.mockResolvedValueOnce(ok(script("Brand New", 6)));
+    expect(await A.writeReelScriptAction({})).toEqual({ ok: true, reelId: NEW });
+    const reels = qs("reels", "insert");
+    expect(reels).toHaveLength(2);
+    expect(rowsOf(reels[1])).not.toHaveProperty("hook_text");
+    expect(rowsOf(reels[1])).toMatchObject({ theme_id: "knitted" });
+    const ins = qs("reel_scenes", "insert");
+    expect(ins).toHaveLength(2);
+    const rows = rowsOf(ins[1]);
+    for (const row of rows) for (const k of ["shot_size", "subject", "punch", "time_jump"]) expect(row).not.toHaveProperty(k);
+    expect(rows.map((r) => r.motion)).toEqual(["push_in", "pull_out", "push_in", "pull_out", "push_in", "push_in"]);
+    expect(rows[0]).toHaveProperty("emotion");
   });
 
   it("rewrite: the reel's own theme wins over the Settings default and stays pinned", async () => {
@@ -658,22 +686,55 @@ describe("themes + emotion + motion (007)", () => {
     expect(writeMock.mock.calls[0][0].theme).toEqual({ id: "clay", faces: true });
     expect(patchOf(qs("reels", "update")[0])).toMatchObject({ theme_id: "clay" });
     const rows = rowsOf(qs("reel_scenes", "insert")[0]);
-    expect(rows[0].image_prompt).toContain(STATIC_THEMES.clay.style);
-    expect(rows[0]).toHaveProperty("motion", "punch");
+    expect(rows[0].image_prompt).toContain(STYLE_TAG.clay);
+    expect(rows[0]).toHaveProperty("motion", "push_in");
+    // a reel row without hook_text (before 008) is updated without it; with the column the new hook card is saved
+    expect(patchOf(qs("reels", "update")[0])).not.toHaveProperty("hook_text");
+    world({ themeId: "anime", reel: reel007({ hook_text: "Old card" }) });
+    writeMock.mockResolvedValueOnce(ok(script("Another Title", 2)));
+    expect(await A.rewriteReelScriptAction(REEL)).toEqual({ ok: true });
+    expect(patchOf(qs("reels", "update")[0])).toMatchObject({ hook_text: "And nobody warned you" });
   });
 
-  it("save: a new feeling rebuilds that prompt with the reel's theme and re-picks the moves of the whole reel", async () => {
-    const scenes = [scene007(S1, 1, { motion: "punch" }), scene007(S2, 2, { motion: "push_in" }), scene007(S3, 3, { motion: "pull_out" })];
+  it("save: a new feeling rebuilds that prompt with the reel's theme, its shot size and subject; the moves stay", async () => {
+    const scenes = [scene007(S1, 1, { motion: "push_in" }), scene007(S2, 2, { motion: "pull_out", shot_size: "detail", subject: "mom" }), scene007(S3, 3, { motion: "hold" })];
     world({ themeId: "knitted", reel: reel007(), scenes });
     const lines = [{ id: S2, narration: "narration 2", idea: "idea 2", emotion: "relieved" }];
     expect(await A.saveReelScriptAction(REEL, { title: "Old Title", lines })).toEqual({ ok: true });
-    const want = assignMotion([{ beat: "hook", emotion: "tender" }, { beat: "build", emotion: "relieved" }, { beat: "build", emotion: "tender" }]);
-    expect(want).toEqual(["punch", "pull_out", "push_in"]);
-    expect(patchOf(by(S2)!)).toEqual({ narration: "narration 2", idea: "idea 2", emotion: "relieved", motion: "pull_out", version: 3,
-      image_prompt: scenePrompt(STATIC_THEMES.clay, CAST, { idea: "idea 2", beat: "build", emotion: "relieved", action: "rocks gently", shot: "wide" }, 1) });
-    // S3's words did not change, only its move
-    expect(patchOf(by(S3)!)).toEqual({ motion: "push_in", version: 3 });
+    const prompt = scenePrompt(STATIC_THEMES.clay, CAST, { idea: "idea 2", beat: "build", emotion: "relieved", action: "rocks gently", shot: "wide", shot_size: "detail", subject: "mom" }, 1);
+    expect(prompt).toMatch(/^Vertical 9:16 extreme close-up detail/);
+    expect(patchOf(by(S2)!)).toEqual({ narration: "narration 2", idea: "idea 2", emotion: "relieved", version: 3, image_prompt: prompt });
+    expect(by(S3)).toBeUndefined();
     expect(by(S1)).toBeUndefined();
+  });
+
+  it("save (008): the hook card is saved (guarded, '' = none, ≤ 10 words); before 008 it can't be", async () => {
+    world({ themeId: "knitted", reel: reel007({ hook_text: "Old card" }), scenes: [scene007(S1, 1)] });
+    expect(await A.saveReelScriptAction(REEL, { title: "Old Title", hookText: "  And  nobody warned you ", lines: [] })).toEqual({ ok: true });
+    expect(patchOf(qs("reels", "update")[0])).toEqual({ title: "Old Title", hook_text: "And nobody warned you", version: 5 });
+    world({ themeId: "knitted", reel: reel007({ hook_text: "Old card" }), scenes: [scene007(S1, 1)] });
+    expect(await A.saveReelScriptAction(REEL, { title: "Old Title", hookText: " ", lines: [] })).toEqual({ ok: true });
+    expect(patchOf(qs("reels", "update")[0])).toEqual({ title: "Old Title", hook_text: null, version: 5 });
+    world({ themeId: "knitted", reel: reel007({ hook_text: "Old card" }), scenes: [scene007(S1, 1)] });
+    expect(await A.saveReelScriptAction(REEL, { title: "Old Title", hookText: "Old card", lines: [] })).toEqual({ ok: true });
+    expect(patchOf(qs("reels", "update")[0])).toEqual({ title: "Old Title", version: 5 });
+    world({ themeId: "knitted", reel: reel007({ hook_text: "Old card" }), scenes: [scene007(S1, 1)] });
+    expect(await A.saveReelScriptAction(REEL, { title: "Old Title", hookText: "one two three four five six seven eight nine ten eleven", lines: [] }))
+      .toEqual({ ok: false, error: "Keep the hook card to 10 words or fewer." });
+    world({ themeId: "knitted", reel: reel007(), scenes: [scene007(S1, 1)] });   // no hook_text column yet
+    expect(await A.saveReelScriptAction(REEL, { title: "Old Title", hookText: "A new card", lines: [] })).toEqual({ ok: false, error: expect.stringMatching(/008_reel_playbook/) });
+    expect(fake.queries.filter(isUpdate)).toHaveLength(0);
+  });
+
+  it("save (008): new words that no longer hold the punch word drop it", async () => {
+    const scenes = [scene007(S1, 1, { narration: "You'll carry them for the last time.", punch: "last time", key_moment: true }),
+      scene007(S2, 2, { narration: "It goes so fast.", punch: "fast", key_moment: true })];
+    world({ themeId: "knitted", reel: reel007(), scenes });
+    const lines = [{ id: S1, narration: "One day you'll carry them, and then never again.", idea: "idea 1" },
+      { id: S2, narration: "It goes SO fast, mama.", idea: "idea 2" }];
+    expect(await A.saveReelScriptAction(REEL, { title: "Old Title", lines })).toEqual({ ok: true });
+    expect(patchOf(by(S1)!)).toMatchObject({ punch: null, key_moment: false });
+    expect(patchOf(by(S2)!)).not.toHaveProperty("punch");
   });
 
   it("save: a new framing / body language rebuilds the prompt without touching the moves", async () => {
@@ -682,7 +743,7 @@ describe("themes + emotion + motion (007)", () => {
     const p = patchOf(by(S2)!);
     expect(p).toMatchObject({ shot: "low-angle", action: "sits close" });
     expect(p).not.toHaveProperty("motion");
-    expect(p.image_prompt).toContain("28mm lens at f/4, a low-angle view looking up at the dolls");
+    expect(p.image_prompt).toMatch(/^Vertical 9:16 medium shot/);
   });
 
   it("save: a feeling or framing off the list is refused; before 007 they can't be saved", async () => {
@@ -742,8 +803,8 @@ describe("007 review fixes", () => {
     world({ themeId: "anime", reel: reelRow({ theme_id: null }), scenes: [scene007(S1, 1), scene007(S2, 2)] });
     expect(await A.saveReelScriptAction(REEL, { title: "Old Title", lines: [{ id: S2, narration: "narration 2", idea: "The mom doll hugs the baby doll." }] })).toEqual({ ok: true });
     const p = patchOf(by(S2)!).image_prompt as string;
-    expect(p).toContain(STATIC_THEMES.knitted.style);
-    expect(p).not.toContain(STATIC_THEMES.anime.style);
+    expect(p).toContain(STYLE_TAG.knitted);
+    expect(p).not.toContain(STYLE_TAG.anime);
   });
 
   it("rewrite: a reel with no theme is rewritten as Knitted Doll", async () => {
@@ -758,8 +819,7 @@ describe("007 review fixes", () => {
     const lines = [{ id: S2, narration: "narration 2", idea: "The mom doll lifts the baby doll up, no tears, both smiling.", action: "not crying, rocking slowly" }];
     expect(await A.saveReelScriptAction(REEL, { title: "Old Title", lines })).toEqual({ ok: true });
     const saved = patchOf(by(S2)!).image_prompt as string;
-    expect(saved).toContain("Moment: both smiling.");
-    expect(saved).toContain("Body language: rocking slowly.");
+    expect(saved).toContain(", both smiling, rocking slowly,");
     expect(saved).not.toMatch(/lifts|no tears|not crying/);
 
     const dirty = [scene07(S1, 1, "The mom doll tosses the baby doll in the air, giggling."), scene07(S2, 2, "Nothing is on the table; the mom doll smiles.")];
@@ -767,9 +827,9 @@ describe("007 review fixes", () => {
     expect(await A.setReelThemeAction(REEL, "knitted")).toEqual({ ok: true });
     const a = patchOf(by(S1)!).image_prompt as string;
     const b = patchOf(by(S2)!).image_prompt as string;
-    expect(a).toContain("Moment: giggling.");
+    expect(a).toContain("a striking, high-emotion moment: giggling, rocks gently");
     expect(a).not.toMatch(/toss|in the air/);
-    expect(b).toContain("Moment: the mom doll smiles.");
+    expect(b).toContain(", the mom doll smiles, rocks gently");
     expect(b).not.toMatch(/Nothing/);
   });
 
