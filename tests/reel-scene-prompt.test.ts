@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { NO_TEXT } from "@/lib/planner/prompt";
 import { REEL_THEME_IDS } from "@/lib/db/types";
 import {
-  capWords, castTag, HOOK_ROOM, EMOTION_FACE, EMOTION_LIGHT, EMOTION_POSE, EMOTION_POSE_ONE, frameOf, lightFor, isDollCast, joinIdea, KNIT_POSE, KNIT_STYLE, positiveOnly,
+  capWords, castTag, dedupeFragments, HOOK_ROOM, EMOTION_FACE, EMOTION_LIGHT, EMOTION_POSE, EMOTION_POSE_ONE, frameOf, lightFor, isDollCast, joinIdea, KNIT_POSE, KNIT_STYLE, positiveOnly,
   SHOT_FRAMES, scenePrompt, splitIdea, undoll, wardrobeCue,
 } from "@/lib/reels/prompt";
 import { REEL_EMOTIONS, REEL_SHOTS } from "@/lib/reels/motion";
@@ -69,8 +69,8 @@ describe("scenePrompt v2: front-loaded token order", () => {
     expect(p.startsWith(`Vertical 9:16 ${frameOf("medium", 4)}, `)).toBe(true);
     expect(at("The mom rocks the baby by the window")).toBeLessThan(at(line.action));
     expect(at(line.action)).toBeLessThan(at(EMOTION_FACE.teary));
-    expect(at(EMOTION_FACE.teary)).toBeLessThan(at(`${PEOPLE.adult_tag} with ${PEOPLE.child_tag}`));
-    expect(at(PEOPLE.child_tag)).toBeLessThan(at("the sala at dusk"));
+    expect(at(EMOTION_FACE.teary)).toBeLessThan(at(`${PEOPLE.adult_tag} with chubby baby, rust romper`));
+    expect(at("chubby baby, rust romper")).toBeLessThan(at("the sala at dusk"));
     expect(at("the sala at dusk")).toBeLessThan(at(lightFor("teary", "the sala at dusk")));
     expect(at(lightFor("teary", "the sala at dusk"))).toBeLessThan(at(STYLE_TAG.animated3d));
     expect(p.endsWith(`${STYLE_TAG.animated3d}.\n${NO_TEXT}`)).toBe(true);
@@ -122,7 +122,7 @@ describe("scenePrompt v2: front-loaded token order", () => {
     expect(d).not.toMatch(/Filipino mom|low bun|glistening eyes|inner brows/);
     expect(d).toContain("100mm macro");
     const both = scenePrompt(STATIC_THEMES.animated3d, PEOPLE, { ...line, shot_size: "broll", subject: "both" }, 3);
-    expect(both).toContain("the parent's and the child's hands, tan skin, mustard cardigan, tan skin, rust romper");
+    expect(both).toContain("the parent's and the child's hands, tan skin, mustard cardigan, rust romper");
     expect(words(`${PEOPLE.adult_tag} with ${PEOPLE.child_tag}`)).toBeLessThanOrEqual(15);
     for (const subject of ["object", "none"]) {
       const o = scenePrompt(STATIC_THEMES.animated3d, PEOPLE, { ...line, shot_size: "close", subject, idea: "a half-finished bottle on the counter — the kitchen at 3 a.m." }, 5);
@@ -267,6 +267,25 @@ describe("undoll only for a doll-written cast", () => {
     expect(p).toContain("The toddler hugs her knitted rag doll on the sofa");
     const d = scenePrompt(STATIC_THEMES.anime, DOLLS, { ...line, idea: "The mom doll hugs the baby doll." }, 2);
     expect(d).toContain("The mom hugs the baby");
+  });
+
+  it("drops doll materials on bodies and toys (yarn / wool / felt / crocheted), keeps clothing", () => {
+    expect(undoll("a few scattered yarn toy blocks")).toBe("a few scattered toy blocks");
+    expect(undoll("she cups the tiny yarn feet")).toBe("she cups the tiny feet");
+    expect(undoll("felt hands and wool cheeks, a crocheted bunny")).toBe("hands and cheeks, a bunny");
+    expect(undoll("a cozy wool sweater")).toBe("a cozy wool sweater");
+    const p = scenePrompt(STATIC_THEMES.animated3d, DOLLS, { ...line, idea: "The mom doll cups the tiny yarn feet near yarn toy blocks" }, 3);
+    expect(p).not.toMatch(/\byarn\b|crochet|\bdoll/i);
+  });
+
+  it("character tags never repeat a fragment (two people, or both pairs of hands)", () => {
+    const cast = { ...PEOPLE, adult_tag: "Filipino mom, tan skin, office blouse", child_tag: "baby girl, tan skin, white onesie" };
+    const both = scenePrompt(STATIC_THEMES.animated3d, cast, { ...line, shot_size: "medium", subject: "both" }, 3);
+    expect(both).toContain("Filipino mom, tan skin, office blouse with baby girl, white onesie");
+    const hands = scenePrompt(STATIC_THEMES.animated3d, cast, { ...line, shot_size: "detail", subject: "both" }, 3);
+    expect(hands).toContain("the parent's and the child's hands, tan skin, office blouse, white onesie");
+    expect(hands.match(/tan skin/g)).toHaveLength(1);
+    expect(dedupeFragments("a, b", "B, c")).toBe("c");
   });
 
   it("maps bead eyes to eyes and drops embroidered", () => {

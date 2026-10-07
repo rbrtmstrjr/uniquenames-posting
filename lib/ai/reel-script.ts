@@ -170,6 +170,7 @@ export function reelScriptPrompt({ topic, maxScenes, alreadyMade, speed, theme }
     "",
     "EACH LINE'S PICTURE (the art style and the cast details are added later by the image system, so keep it plain):",
     `- "idea": what is in the picture — who (by their short names, e.g. ${name}) is doing what, or which object is shown — in one plain sentence that MATCHES the line and advances the story. Leave out the place (that goes in "setting"), art-style words, lighting, colours, lenses and framing jargon. Describe only what IS in the picture (never what is absent). Pictures carry no writing: never signs, labels, books with words, screens with text, letters or numbers.`,
+    ...(dolls ? [] : ["- PEOPLE, NOT DOLLS: this theme draws real people, so write every idea, action and cast line with people and real things — never doll, yarn, crochet, knitted, felt or wool wording for bodies or toys (say 'tiny feet', 'toy blocks')."]),
     "- \"setting\": the place + time of day in at most 8 words ('the dim nursery at 3 a.m.', 'the sala on a rainy afternoon', 'a jeepney at dusk'). The story can move between a few places; the last line uses the SAME setting as line 1.",
     `- "emotion": exactly one of ${REEL_EMOTIONS.join("|")}. Follow the story's wave; never the same emotion on more than 2 lines in a row.`,
     "- \"action\": the body language and what the hands do, in one short phrase ('kneels and cups the toddler's cheeks in both hands'); '' for object / none shots. Describe only what the body IS doing.",

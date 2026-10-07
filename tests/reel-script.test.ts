@@ -115,6 +115,8 @@ describe("reelScriptPrompt", () => {
     expect(a).toMatch(/describe the recurring cast as REAL PEOPLE/);
     expect(a).not.toMatch(/TEXTILE DOLLS|the mom doll/);
     expect(a).toMatch(/emotion should be readable on the faces/);
+    expect(a).toMatch(/PEOPLE, NOT DOLLS: .*never doll, yarn, crochet, knitted, felt or wool wording/);
+    expect(k).not.toMatch(/PEOPLE, NOT DOLLS/);
     const p = reelScriptPrompt({ ...input10, theme: { id: "papercraft", faces: false } }).prompt;
     expect(p).toMatch(/simple fixed faces, so EVERY emotion must show through POSE/);
   });

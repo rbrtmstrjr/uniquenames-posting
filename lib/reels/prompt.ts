@@ -181,12 +181,24 @@ export function undoll(s: string): string {
     .replace(/\b(?:crocheted|crochet|amigurumi|knitted|handmade|stitched|embroidered)\s+(?=[a-z])/gi, "")
     .replace(/\bbead eyes\b/gi, "eyes")
     .replace(/\b(?:yarn|wool|woollen|woolen)\s+(?=(?:hair|skin|tufts?|curls?|strands?|braids?|ponytails?|eyebrows?|lashes|fringe)\b)/gi, "")
+    // doll materials used for bodies or toys ("tiny yarn feet" → "tiny feet", "yarn toy blocks" → "toy blocks")
+    .replace(/\b(?:yarn|wool|woollen|woolen|felt)\s+(?=(?:feet|foot|toes?|hands?|fingers?|arms?|legs?|cheeks?|body|bodies|head|heads|face|faces|tummy|belly|nose|ears?|lips|mouth|limbs?|toys?|blocks?|balls?|bears?|bunn(?:y|ies)|animals?|rattles?)\b)/gi, "")
     .replace(/\b(the|both|two|these|those) dolls\b/gi, (_, w: string) => `${w} ${w.toLowerCase() === "the" ? "characters" : "of them"}`)
     .replace(/(\w) doll(?:'s|’s)/gi, "$1's")
     .replace(/(\w) dolls?\b/gi, "$1")
     .replace(/\s+/g, " ")
     .trim();
 }
+
+/** Comma fragments of `b` that `a` already has are dropped ("tan skin, rust shorts" after "…, tan skin, …" → "rust shorts"). */
+export function dedupeFragments(a: string, b: string): string {
+  const key = (x: string) => x.trim().toLowerCase();
+  const seen = new Set(a.split(",").map(key).filter(Boolean));
+  return b.split(",").map((x) => x.trim()).filter((x) => x && !seen.has(key(x))).join(", ");
+}
+/** Each fragment once, in order. */
+const uniqueFragments = (s: string) =>
+  s.split(",").map((x) => x.trim()).filter((x, i, all) => x && all.findIndex((y) => y.toLowerCase() === x.toLowerCase()) === i).join(", ");
 
 /** A cast written as dolls (a Knitted Doll script): only then does another theme turn it into people. */
 export const isDollCast = (cast: ReelCast) => /\b(?:dolls?|crochet(?:ed)?|amigurumi|yarn)\b/i.test(`${cast.adult} ${cast.child}`);
@@ -247,11 +259,12 @@ export function scenePrompt(theme: ReelTheme, cast: ReelCast, scene: PromptScene
   let who = "";
   if (person && faceFree) {
     const tags = [subject !== "baby" ? tag("adult") : "", subject !== "mom" ? tag("child") : ""].filter(Boolean);
-    const cue = wardrobeCue(tags.join(", "));
+    const cue = uniqueFragments(wardrobeCue(tags.join(", ")));
     who = `${HANDS[subject as "mom" | "baby" | "both"]}${cue ? `, ${cue}` : ""}`;
   } else if (person) {
     const a = tag("adult"), c = tag("child");
-    who = subject === "mom" ? a : subject === "baby" ? c : `${a} with ${c}`;
+    const c2 = dedupeFragments(a, c);
+    who = subject === "mom" ? a : subject === "baby" ? c : c2 ? `${a} with ${c2}` : a;
   }
   const setting = fix(rawSetting);
   const slots = [
