@@ -4,7 +4,7 @@ import { buildCtaPrompt, buildPrompt, ctaShot, pickSubject, randomSubject, type 
 import { hashSeed, seededRandom, shuffle } from "./random";
 import { buildMixedShotSpecs, buildShots, dealAges, sessionShots, shotSpec, type ShotSpec } from "./shots";
 import { SUBJECT_AGES, type AgeChoice } from "./age";
-import { AZ_PARTS, pickAzNames, type AzPart } from "@/lib/series/az";
+import { startsWith } from "@/lib/series/letter";
 
 /** One key per post for its child (look, and session for older posts): add-a-card reuses it so extra cards match. */
 export const subjectKey = (postDate: string, gender: Gender, style: NameStyle) => `${postDate}|${gender}|${style}`;
@@ -15,6 +15,8 @@ export interface PlanInput {
     gender: Gender; style: NameStyle; count: number | null; postDate: string;
     /** The child's age from Today. "random" = its own child per card; undefined/null = the original one-baby plan. */
     age?: AgeChoice | null;
+    /** A post by letter: only names starting with it (for two-word names, the first name). */
+    letter?: string | null;
   };
   names: NameRow[]; themes: ThemeRow[];
   settings: Pick<SettingsRow, "caption_template" | "hashtags" | "min_images" | "max_images">;
@@ -45,7 +47,13 @@ export function nextTheme(themes: ThemeRow[], gender: Gender): ThemeRow | undefi
 export function planPost(input: PlanInput): PlanResult {
   const { request: r, settings: s } = input;
   const label = r.gender;
-  const pool = availablePool(input.names, r.gender, r.style);
+  const pool = availablePool(input.names, r.gender, r.style).filter((n) => !r.letter || startsWith(n.name, r.letter));
+  if (r.letter) {
+    const need = r.count ?? s.min_images;
+    if (pool.length < need) {
+      return { ok: false, reason: `Only ${pool.length} unused ${label} ${r.style} names start with ${r.letter}; this post needs ${need}. Use Suggest with AI on Today to add more.` };
+    }
+  }
   if (pool.length < s.min_images) {
     return { ok: false, reason: `Only ${pool.length} unused ${label} ${r.style} names are left; a post needs at least ${s.min_images}. Add names on the Names page.` };
   }
@@ -72,7 +80,7 @@ export function planPost(input: PlanInput): PlanResult {
 /**
  * One post's gallery for these names, in this order: the shots (cover first, props frames spread
  * through) and each card's child. `key` is the post's subjectKey (a fixed-age post's child);
- * `salt` varies the shots and Random ages between posts sharing a key (the parts of a series).
+ * `salt` varies the shots and Random ages between posts sharing a key.
  */
 function galleryCards(chosen: NameRow[], theme: ThemeRow, gender: Gender, postDate: string, key: string, age: AgeChoice | null | undefined, salt = ""): PlannedCard[] {
   const rngKey = salt ? `${key}|${salt}` : key;
@@ -94,43 +102,6 @@ function galleryCards(chosen: NameRow[], theme: ThemeRow, gender: Gender, postDa
   }));
 }
 
-export interface AzSeriesInput {
-  gender: Gender; postDate: string; age?: AgeChoice | null;
-  /** This gender's names (any style or status: only available single names are used). */
-  names: NameRow[]; themes: ThemeRow[]; themeId?: string;
-}
-export interface AzSeriesPart { part: AzPart; letters: string[]; cards: PlannedCard[] }
-export type AzSeriesResult = { ok: true; theme_id: string; parts: AzSeriesPart[] } | { ok: false; reason: string; missing?: string[] };
-
-/**
- * The A–Z series (011): one available single name per letter (the oldest-added), Part 1 = A–M and
- * Part 2 = N–Z, each card at its letter's position. One theme and (for a fixed age) one child for
- * both parts, so the series reads as one photoshoot; each part is its own gallery (its own cover
- * and props frames, different shots).
- */
-export function planAzSeries(i: AzSeriesInput): AzSeriesResult {
-  const picked = pickAzNames(i.names.filter((n) => n.gender === i.gender));
-  if (!picked.ok) {
-    return { ok: false, missing: picked.missing, reason: `No available single ${i.gender} name for ${picked.missing.join(", ")}. Use Fill missing letters, then approve the names you like.` };
-  }
-  let theme: ThemeRow | undefined;
-  if (i.themeId) {
-    theme = i.themes.find((t) => t.id === i.themeId);
-    if (!theme || theme.gender !== i.gender || theme.status !== "available" || !themeComplete(theme)) {
-      return { ok: false, reason: `That theme is not available for a ${i.gender} post. Pick another theme.` };
-    }
-  } else {
-    theme = nextTheme(i.themes, i.gender);
-    if (!theme) return { ok: false, reason: `No unused ${i.gender} theme is left. Add a theme on the Themes page.` };
-  }
-  const key = subjectKey(i.postDate, i.gender, "single");
-  const parts = AZ_PARTS.map(({ part, letters }) => {
-    const chosen = picked.names.slice((part - 1) * 13, (part - 1) * 13 + letters.length);
-    return { part, letters, cards: galleryCards(chosen, theme!, i.gender, i.postDate, key, i.age, `az${part}`) };
-  });
-  return { ok: true, theme_id: theme.id, parts };
-}
-
 export interface ExtraCardInput {
   theme: ThemeRow; gender: Gender; style: NameStyle; names: NameRow[]; usedNameIds: string[]; nextPosition: number; salt: string;
   /** subjectKey(post_date, gender, style) of the post, so the extra card shows the same baby. */
@@ -139,6 +110,8 @@ export interface ExtraCardInput {
   age?: AgeChoice | null;
   /** The shot text of every card already in the post, so the new card never repeats one. */
   usedShots?: string[];
+  /** A post by letter: the new card's name starts with it too. */
+  letter?: string | null;
 }
 export type ExtraCardResult = { ok: true; card: PlannedCard } | { ok: false; reason: string };
 
@@ -162,8 +135,12 @@ export function pickExtraShot(lib: ShotSpec[], usedShots: string[], rng: () => n
 }
 
 export function planExtraCard(i: ExtraCardInput): ExtraCardResult {
-  const pool = availablePool(i.names, i.gender, i.style).filter((n) => !i.usedNameIds.includes(n.id));
-  if (!pool.length) return { ok: false, reason: `No unused ${i.gender} ${i.style} names left. Add names on the Names page.` };
+  const pool = availablePool(i.names, i.gender, i.style).filter((n) => !i.usedNameIds.includes(n.id) && (!i.letter || startsWith(n.name, i.letter)));
+  if (!pool.length) {
+    return { ok: false, reason: i.letter
+      ? `No unused ${i.gender} ${i.style} names starting with ${i.letter} left. On Today, pick By letter and ${i.letter}, then Suggest with AI to add more.`
+      : `No unused ${i.gender} ${i.style} names left. Add names on the Names page.` };
+  }
   const rng = seededRandom(hashSeed(i.salt));
   const pick = pool[Math.floor(rng() * pool.length)];
   const subject = i.age === "random"

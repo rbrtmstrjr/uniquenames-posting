@@ -14,6 +14,7 @@ import { fail, requireOwner, type ActionResult } from "./result";
 import { fontsOf, sameFonts, validateFonts, type PostFonts } from "@/lib/fonts/post-fonts";
 import { addClosingCard } from "@/lib/cta/card";
 import { seriesPart } from "@/lib/series/az";
+import { isLetter } from "@/lib/series/letter";
 
 const NEEDS_003 = "Changing a post's fonts needs a database update first: run supabase/migrations/003_post_fonts.sql in Supabase. Nothing was re-stamped.";
 const missingColumn = (e: { message: string; code?: string }) => e.code === "PGRST204" || /schema cache/i.test(e.message);
@@ -24,10 +25,14 @@ export async function createPostAction(input: {
   fonts?: PostFonts;
   /** The child's age chosen on Today (default Random). Stored on the post (migration 004; an older create_post ignores it). */
   subjectAge?: AgeChoice;
+  /** A post by letter (Today > By letter): every name starts with it; stored as posts.letter (013) for the label. */
+  letter?: string;
 }): Promise<ActionResult<{ postId: string }>> {
   await requireOwner();
-  const badInput = validateCreatePost(input) ?? (input.fonts !== undefined ? validateFonts(input.fonts) : null);
+  const badInput = validateCreatePost(input) ?? (input.fonts !== undefined ? validateFonts(input.fonts) : null)
+    ?? (input.letter !== undefined && !isLetter(input.letter) ? "Pick a letter A to Z." : null);
   if (badInput) return fail(badInput);
+  const letter = input.letter ?? null;
   if (!/^\d{4}-\d{2}-\d{2}$/.test(input.postDate)) return fail("Pick a valid date.");
   const fonts = input.fonts ? fontsOf(input.fonts) : null;
   const age: AgeChoice = input.subjectAge ?? "random";
@@ -47,7 +52,7 @@ export async function createPostAction(input: {
     const left = aiDeadline - Date.now();
     if (!lines.has(key)) {
       if (left < 500) return Promise.resolve(null);
-      lines.set(key, aiCaptionLine({ theme, gender: input.gender, style: input.style, captionStyle: style, names, recent: h.texts, recentTags: recentTags(h) }, left));
+      lines.set(key, aiCaptionLine({ theme, gender: input.gender, style: input.style, captionStyle: style, names, recent: h.texts, recentTags: recentTags(h), letter }, left));
     }
     return lines.get(key)!;
   };
@@ -66,7 +71,7 @@ export async function createPostAction(input: {
     const s = settings as SettingsRow;
     const themeRows = (themes ?? []) as ThemeRow[];
     const plan = planPost({
-      request: { gender: input.gender, style: input.style, count: input.count, postDate: input.postDate, age },
+      request: { gender: input.gender, style: input.style, count: input.count, postDate: input.postDate, age, letter },
       names: (names ?? []) as NameRow[], themes: themeRows, settings: s, themeId: input.themeId,
     });
     if (!plan.ok) return fail(plan.reason);
@@ -76,7 +81,7 @@ export async function createPostAction(input: {
     captionStyle ??= pickStyle(h.styles, postNames);
     const aiOn = captionAiOn(s);
     const ai = theme && aiOn ? await lineFor(theme, postNames, captionStyle, h) : null;
-    const { caption, caption_style, hashtag_set } = composePostCaption({ ai, aiOn, captionStyle, gender: input.gender, settings: s, history: h });
+    const { caption, caption_style, hashtag_set } = composePostCaption({ ai, aiOn, captionStyle, gender: input.gender, settings: s, history: h, letter });
     // Remember the fonts as the "last used" ones (Today's defaults, theme previews) BEFORE the
     // cards exist: without migration 003 the PC stamps with the settings fonts, so card 1 must
     // never be claimed with the previous fonts. Best effort: a failed save never blocks the post.
@@ -95,13 +100,16 @@ export async function createPostAction(input: {
       // The style and hashtag set (009) let the next post differ. create_post doesn't take them, so they
       // follow in a second write; best effort: before 009, or on an error, the post is simply without them.
       // The closing "follow" card (010) is queued after the name cards, also best effort: before 010, or on
-      // an error, the post simply has none (the owner can add it on the post page).
-      const [{ error: metaErr }, closing] = await Promise.all([
+      // an error, the post simply has none (the owner can add it on the post page). A post by letter stores its
+      // letter (013) the same way: before 013 it is simply made without its "Letter A" label.
+      const [{ error: metaErr }, closing, letterSaved] = await Promise.all([
         sb.from("posts").update({ caption_style, hashtag_set }).eq("id", r.post_id),
         theme ? addClosingCard(sb, { post: { id: r.post_id, post_date: input.postDate, gender: input.gender, style: input.style, theme_id: plan.theme_id, subject_age: age }, theme, settings: s })
           : Promise.resolve(null),
+        letter ? sb.from("posts").update({ letter }).eq("id", r.post_id) : Promise.resolve(null),
       ]);
       if (metaErr && !missing009(metaErr)) console.error("createPostAction: could not save the caption style", metaErr.message);
+      if (letterSaved?.error && !missing009(letterSaved.error)) console.error("createPostAction: could not save the letter", letterSaved.error.message);
       if (closing?.status === "error") console.error("createPostAction: could not add the closing card", closing.message);
       revalidatePath("/", "layout");
       return { ok: true, postId: r.post_id };
@@ -188,11 +196,13 @@ export async function rewriteCaptionAction(postId: string): Promise<ActionResult
   // A part of an A–Z series (011) keeps saying which part it is, with the series tag.
   const part = seriesPart(p);
   const series = part ? { part } : undefined;
+  // A post by letter (013) keeps saying its letter, with its letter tag.
+  const letter = isLetter(p.letter) ? p.letter : null;
   const ai = await aiCaptionLine({
-    theme: theme as ThemeRow, gender: p.gender, style: p.style, captionStyle, names, recent: history.texts, recentTags: recentTags(history), series,
+    theme: theme as ThemeRow, gender: p.gender, style: p.style, captionStyle, names, recent: history.texts, recentTags: recentTags(history), series, letter,
   }, REWRITE_TIMEOUT_MS);
   if (!ai) return fail("Could not write a new caption right now. Your caption is unchanged — try again in a moment.");
-  const { caption, caption_style, hashtag_set } = composePostCaption({ ai, aiOn: true, captionStyle, gender: p.gender, settings: settings as SettingsRow, history, series });
+  const { caption, caption_style, hashtag_set } = composePostCaption({ ai, aiOn: true, captionStyle, gender: p.gender, settings: settings as SettingsRow, history, series, letter });
   let { data, error } = await sb.from("posts").update({ caption, caption_style, hashtag_set }).eq("id", postId).select("id");
   // Before 009 there is no style / hashtag set column: save the caption alone.
   if (missing009(error)) ({ data, error } = await sb.from("posts").update({ caption }).eq("id", postId).select("id"));
@@ -271,7 +281,9 @@ export async function addCardAction(postId: string): Promise<ActionResult<{ card
   const plan = planExtraCard({ theme: theme as ThemeRow, gender: p.gender, style: p.style, names: (names ?? []) as NameRow[], usedNameIds: used, nextPosition: next,
     salt: `${postId}|${Date.now()}`, subjectKey: subjectKey(p.post_date, p.gender, p.style), age: storedAge(p.subject_age),
     // Every shot already in the post, so the new card is a new frame and not a near-copy.
-    usedShots: (cards ?? []).map((c) => c.shot as string | null).filter((s): s is string => !!s) });
+    usedShots: (cards ?? []).map((c) => c.shot as string | null).filter((s): s is string => !!s),
+    // A post by letter (013): the new name starts with the same letter.
+    letter: isLetter(p.letter) ? p.letter : null });
   if (!plan.ok) return fail(plan.reason);
   const { data, error } = await sb.rpc("add_card", { p_post: postId, c: plan.card });
   if (error) return fail(error.message);

@@ -2,8 +2,8 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import type { Gender, NameStyle } from "@/lib/db/types";
-import { suggestForLetters, suggestNames, suggestThemes } from "@/lib/ai/suggest";
-import { AZ_IDEAS_PER_LETTER, azCoverage, fillNeeds, missingLetters } from "@/lib/series/az";
+import { suggestForLetter, suggestNames, suggestThemes } from "@/lib/ai/suggest";
+import { LETTER_IDEAS, isLetter, startsWith } from "@/lib/series/letter";
 import { NAME_COUNT, THEME_COUNT, VIBE_MAX, filterNameSuggestions, filterThemeSuggestions } from "@/lib/ai/suggest-filter";
 import { fail, requireOwner, type ActionResult } from "./result";
 import { UUID_RE } from "./helpers";
@@ -75,14 +75,22 @@ export async function cardNameIdeasAction(cardId: string): Promise<CardNameIdeas
   if (!card) return fail("Card not found.");
   if (!card.post_id || card.kind === "cta") return fail("Name ideas are for the name cards in a post.");
   const [{ data: post }, { data: theme }, all] = await Promise.all([
-    sb.from("posts").select("gender, style").eq("id", card.post_id).single(),
+    // select * (letter is 013's column): works before and after the migration.
+    sb.from("posts").select("*").eq("id", card.post_id).single(),
     sb.from("themes").select("title").eq("id", card.theme_id).single(),
     selectAll<{ name: string; gender: Gender; style: NameStyle }>(sb, "names", "name, gender, style"),
   ]);
   if (!post) return fail("Post not found.");
   if (all.error) return fail(all.error);
-  const { gender, style } = post as { gender: Gender; style: NameStyle };
+  const { gender, style, letter } = post as { gender: Gender; style: NameStyle; letter?: string | null };
   const existing = all.rows.filter((n) => n.gender === gender && n.style === style).map((n) => n.name);
+  // A post by letter: the ideas start with its letter too (the hardened letter prompt and checks).
+  if (isLetter(letter)) {
+    const ai = await suggestForLetter({ gender, style, letter, count: CARD_IDEAS, existing: existing.filter((n) => startsWith(n, letter)), allNames: all.rows.map((n) => n.name) });
+    if (!ai.ok) return fail(`Gemini could not suggest names: ${ai.error}`);
+    if (!ai.result.fresh.length) return fail(`Gemini had no new ${letter} names this time. Try again.`);
+    return { ok: true, ideas: ai.result.fresh.map((n) => ({ name: n.name, meaning: n.meaning })) };
+  }
   const vibe = theme?.title ? `names that suit a "${theme.title}" baby photoshoot`.slice(0, VIBE_MAX) : undefined;
   const ai = await suggestNames({ gender, style, count: CARD_IDEAS, vibe, existing });
   if (!ai.ok) return fail(`Gemini could not suggest names: ${ai.error}`);
@@ -117,37 +125,26 @@ export async function suggestThemesAction(i: { gender: Gender; count: number; vi
   return { ok: true, added: rows.length, duplicates, invalid };
 }
 
-export type FillLettersResult = ActionResult<{ added: number; letters: { letter: string; added: number }[]; short: string[] }>;
+export type LetterIdeas = ActionResult<{ ideas: { name: string; meaning: string }[] }>;
 
 /**
- * "Fill missing letters" for the A–Z series: every letter with no available single name of this
- * gender gets up to 3 real names from Gemini (counting the ideas already waiting), checked against
- * EVERY name in the database and saved as 'pending' for the owner to approve on the Names page.
- * `short` = letters that got fewer than asked (Gemini knew no more new, real names).
+ * "Suggest with AI" for a post by letter on Today (the letter has too few names): up to `count` real,
+ * uncommon names of this gender + style that start with the letter (two-word: the first name), checked
+ * against EVERY name in the database. Nothing is saved: the owner ticks the ones to keep, which are then
+ * added as available names (addNamesAction), as in the card dialog where the owner approves on the spot.
  */
-export async function fillMissingLettersAction(i: { gender: Gender }): Promise<FillLettersResult> {
+export async function letterNameIdeasAction(i: { gender: Gender; style: NameStyle; letter: string; count: number }): Promise<LetterIdeas> {
   await requireOwner();
   if (i.gender !== "boy" && i.gender !== "girl") return fail("Pick Boy or Girl.");
+  if (i.style !== "two-word" && i.style !== "single") return fail("Pick a name style.");
+  if (!isLetter(i.letter)) return fail("Pick a letter A to Z.");
+  if (!Number.isInteger(i.count) || i.count < 1 || i.count > LETTER_IDEAS.max) return fail(`Ask for 1 to ${LETTER_IDEAS.max} names.`);
   const sb = await createClient();
-  const all = await selectAll<{ name: string; gender: Gender; style: NameStyle; status: string }>(sb, "names", "name, gender, style, status");
+  const all = await selectAll<{ name: string; gender: Gender; style: NameStyle }>(sb, "names", "name, gender, style");
   if (all.error) return fail(all.error);
-  const mine = all.rows.filter((n) => n.gender === i.gender && n.style === "single");
-  const coverage = azCoverage(mine);
-  const missing = missingLetters(coverage);
-  if (!missing.length) return fail(`Every letter already has a ${i.gender} name. Nothing to fill.`);
-  const needs = fillNeeds(coverage);
-  if (!needs.length) {
-    return fail(`Every missing letter (${missing.join(", ")}) already has ${AZ_IDEAS_PER_LETTER} name ideas waiting for approval. Review them on the Names page.`);
-  }
-  const ai = await suggestForLetters({ gender: i.gender, needs, existing: mine.map((n) => n.name), allNames: all.rows.map((n) => n.name) });
+  const existing = all.rows.filter((n) => n.gender === i.gender && n.style === i.style && startsWith(n.name, i.letter)).map((n) => n.name);
+  const ai = await suggestForLetter({ gender: i.gender, style: i.style, letter: i.letter, count: i.count, existing, allNames: all.rows.map((n) => n.name) });
   if (!ai.ok) return fail(`Gemini could not suggest names: ${ai.error}`);
-  const rows = ai.result.fresh.map((n) => ({ name: n.name, meaning: n.meaning, gender: i.gender, style: "single" as const, status: "pending" as const }));
-  if (rows.length) {
-    const { error } = await sb.from("names").insert(rows);
-    if (error) return fail(insertError(error, "Some of these names were added at the same time. Try again."));
-  }
-  const letters = needs.map((n) => ({ letter: n.letter, added: ai.result.fresh.filter((f) => f.letter === n.letter).length }));
-  revalidatePath("/names");
-  revalidatePath("/", "layout");
-  return { ok: true, added: rows.length, letters, short: letters.filter((l, k) => l.added < needs[k].want).map((l) => l.letter) };
+  if (!ai.result.fresh.length) return fail(`Gemini had no new real ${i.letter} names this time. Try again, or add names on the Names page.`);
+  return { ok: true, ideas: ai.result.fresh.map((n) => ({ name: n.name, meaning: n.meaning })) };
 }

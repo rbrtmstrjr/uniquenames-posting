@@ -205,3 +205,17 @@ describe("A–Z series captions (011)", () => {
     expect(tpl.hashtag_set).toContain("#atozbabynames");
   });
 });
+
+describe("captionProblem for a post by letter", () => {
+  const ask = (line: string, letter = "A") => captionProblem(line, { captionStyle: "story", letter });
+  it("accepts the letter named as such", () => {
+    for (const l of ["Baby girl names starting with A, soft as petals.", "Sweet names that start with an A for your girl.", "Every name begins with the letter A today.",
+      "A names for a baby girl, among the tulips.", "Our favorite letter “A” baby girl names."]) expect(ask(l)).toBeNull();
+    expect(ask("Baby boy names that start with K by the sea.", "K")).toBeNull();
+  });
+  it("never counts the article a or a stray capital", () => {
+    expect(ask("A soft spring set for these baby girl names.")).toMatch(/does not say the names start with the letter A/);
+    expect(ask("Start your day with a smile and these baby girl names.")).toMatch(/letter A/);
+    expect(ask("Kites and kisses for baby boy names.", "K")).toMatch(/letter K/);
+  });
+});

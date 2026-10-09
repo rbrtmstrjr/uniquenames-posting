@@ -6,6 +6,7 @@ import { EMPTY_HISTORY, recentTags, type CaptionHistory } from "@/lib/captions/h
 import { NAME_STYLES, pickStyle, type CaptionName, type CaptionStyle } from "@/lib/captions/styles";
 import { askCaption, firstWord, openers, sanitizeText, type AiCaption } from "./caption-core";
 import { AZ_SERIES_TAG, partRange, type AzPart } from "@/lib/series/az";
+import { isLetter, letterTag } from "@/lib/series/letter";
 
 export type { AiCaption } from "./caption-core";
 
@@ -35,6 +36,8 @@ export interface CaptionInput {
   recentTags?: string[];
   /** A part of an A–Z series (011): the caption says which part it is. */
   series?: CaptionSeries;
+  /** A post by letter (013): every name starts with this letter, and the caption says so. */
+  letter?: string | null;
 }
 export interface CaptionSeries { part: AzPart }
 
@@ -91,6 +94,11 @@ export function captionPrompt(input: CaptionInput): string {
     lines.push("", `This post is Part ${part} of 2 of an A to Z series of single-word baby ${gender} names: one name for each letter from ${partRange(part)}.`,
       `Say naturally that it is Part ${part} of the A to Z series, for example "Part ${part} of our A to Z baby ${gender} names, ${partRange(part)}".`);
   }
+  if (isLetter(input.letter)) {
+    const l = input.letter;
+    lines.push("", `Every name in this post starts with the letter ${l}: baby ${gender} names starting with ${l}.`,
+      `Say naturally that these are baby ${gender} names starting with the letter ${l}, for example "baby ${gender} names that start with ${l}".`);
+  }
   const recent = (input.recent ?? []).filter(Boolean);
   if (recent.length) {
     lines.push("", "Recent captions on the page, newest first. Yours must read clearly different (opening word, sentence shape, question):",
@@ -111,12 +119,22 @@ const nameRe = (name: string) => new RegExp(`(?<![\\p{L}])${escapeRe(t(name).spl
 /** "Part 1" / "Part one" (any case). */
 const PART_RE: Record<AzPart, RegExp> = { 1: /\bpart\s+(?:1|one)\b/i, 2: /\bpart\s+(?:2|two)\b/i };
 const partRe = (part: AzPart) => PART_RE[part];
+/** The letter named as such: "letter K", "start with K", "starting with an A", "K names" (the capital itself, so "a" never counts). */
+const letterRe = (l: string) => new RegExp([
+  String.raw`[Ll]etter\s+["'“‘]?${l}(?!\p{L})`,
+  String.raw`\b(?:[Ss]tart|[Bb]egin)\w*\s+with\s+(?:an?\s+|the\s+letter\s+)?["'“‘]?${l}(?!\p{L})`,
+  String.raw`(?<!\p{L})${l}[-\s]names\b`,
+].join("|"), "u");
 
-/** Why a caption is not right yet: it opens like a recent one, a name style names too few names, or a series part does not say its part. */
-export function captionProblem(line: string, input: Pick<CaptionInput, "captionStyle" | "names" | "recent" | "series">): string | null {
+/**
+ * Why a caption is not right yet: it opens like a recent one, a name style names too few names, a series
+ * part does not say its part, or a post by letter does not say its letter.
+ */
+export function captionProblem(line: string, input: Pick<CaptionInput, "captionStyle" | "names" | "recent" | "series" | "letter">): string | null {
   const w = firstWord(line);
   if (w && openers(input.recent ?? []).includes(w)) return `starts with "${w}" like a recent caption`;
   if (input.series && !partRe(input.series.part).test(line)) return `does not say it is Part ${input.series.part} of the A to Z series`;
+  if (isLetter(input.letter) && !letterRe(input.letter).test(line)) return `does not say the names start with the letter ${input.letter}`;
   const need = input.captionStyle === "choice" ? 2 : NAME_STYLES.includes(input.captionStyle) ? 1 : 0;
   if (need && (input.names ?? []).filter((n) => n.name.trim() && nameRe(n.name).test(line)).length < need) {
     return need === 2 ? "does not name two names from the list" : "does not name a name from the list";
@@ -138,9 +156,10 @@ export function withHashtags(line: string, hashtags: string): string {
   return tags ? `${line}\n\n${tags}` : line;
 }
 
-export const templateLine = (gender: Gender, template: string, series?: CaptionSeries) => {
+export const templateLine = (gender: Gender, template: string, series?: CaptionSeries, letter?: string | null) => {
   const line = template.replace(/\{gender\}/g, gender).trim();
-  return series ? `A to Z baby ${gender} names, Part ${series.part} (${partRange(series.part)}). ${line}`.trim() : line;
+  if (series) return `A to Z baby ${gender} names, Part ${series.part} (${partRange(series.part)}). ${line}`.trim();
+  return isLetter(letter) ? `Baby ${gender} names starting with ${letter}. ${line}`.trim() : line;
 };
 
 export interface PostCaption { caption: string; caption_style: string; hashtag_set: string; source: "ai" | "template" }
@@ -154,15 +173,17 @@ export function composePostCaption(o: {
   ai: AiCaption | null; aiOn: boolean; captionStyle: CaptionStyle; gender: Gender; settings: CaptionSettings; history: CaptionHistory;
   /** A part of an A–Z series: the series tag takes the first theme-tag slot, and the template names the part. */
   series?: CaptionSeries;
+  /** A post by letter: its letter tag takes the first theme-tag slot, and the template names the letter. */
+  letter?: string | null;
 }): PostCaption {
   const { always, pool } = tagSettings(o.settings);
   const ai = o.aiOn ? o.ai : null;
-  const themeTags = [...(o.series ? [AZ_SERIES_TAG] : []), ...(ai ? ai.tags : [])];
+  const themeTags = [...(o.series ? [AZ_SERIES_TAG] : isLetter(o.letter) ? [letterTag(o.letter)] : []), ...(ai ? ai.tags : [])];
   const tags = pickPostTags({ always, themeTags, pool, gender: o.gender, history: o.history.sets, poolCount: ai ? 1 : 2 });
   const set = tags.join(" ");
   return ai
     ? { caption: withHashtags(ai.line, set), caption_style: o.captionStyle, hashtag_set: set, source: "ai" }
-    : { caption: withHashtags(templateLine(o.gender, o.settings.caption_template, o.series), set), caption_style: "template", hashtag_set: set, source: "template" };
+    : { caption: withHashtags(templateLine(o.gender, o.settings.caption_template, o.series, o.letter), set), caption_style: "template", hashtag_set: set, source: "template" };
 }
 
 /**
