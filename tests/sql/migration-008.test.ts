@@ -20,6 +20,7 @@ const earlier = [
 const m008 = read("supabase", "migrations", "008_reel_playbook.sql");
 const m009 = read("supabase", "migrations", "009_captions.sql");
 const m010 = read("supabase", "migrations", "010_cta_card.sql");
+const m011 = stripSupabase(read("supabase", "migrations", "011_az_series.sql"));
 
 async function liveDb() {
   const db = new PGlite();
@@ -103,6 +104,7 @@ describe("fresh schema.sql matches v1 + 002..008 (+ 009)", () => {
     const migrated = await migratedDb();
     await migrated.exec(m009);
     await migrated.exec(m010);
+    await migrated.exec(m011);
     const want = await shape(migrated);
     const names = (want.constraints as { conname: string }[]).map((c) => c.conname);
     expect(names).toEqual(expect.arrayContaining(["reel_scenes_shot_size_check", "reel_scenes_subject_check", "reel_scenes_motion_check"]));

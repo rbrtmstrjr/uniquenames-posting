@@ -9,7 +9,7 @@ const stripSupabase = (sql: string) => sql.replace(/-- @supabase-only begin[\s\S
 const v1 = stripSupabase(readFileSync(join(process.cwd(), "tests", "sql", "fixtures", "schema-v1.sql"), "utf8"));
 const migration = readFileSync(join(process.cwd(), "supabase", "migrations", "002_v2.sql"), "utf8");
 // Later migrations that also touch settings/names/themes (005/006/007 add the reel settings).
-const later = ["003_post_fonts.sql", "004_subject_age.sql", "005_reels.sql", "006_reel_voices.sql", "007_reel_themes.sql", "008_reel_playbook.sql", "009_captions.sql", "010_cta_card.sql"]
+const later = ["003_post_fonts.sql", "004_subject_age.sql", "005_reels.sql", "006_reel_voices.sql", "007_reel_themes.sql", "008_reel_playbook.sql", "009_captions.sql", "010_cta_card.sql", "011_az_series.sql"]
   .map((m) => stripSupabase(readFileSync(join(process.cwd(), "supabase", "migrations", m), "utf8")));
 
 const POSITIONS = ["auto", "top-left", "top-center", "top-right", "middle-left", "middle-center", "middle-right", "bottom-left", "bottom-center", "bottom-right"];

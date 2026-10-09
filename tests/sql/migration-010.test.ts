@@ -20,6 +20,7 @@ const earlier = [
   read("supabase", "migrations", "009_captions.sql"),
 ];
 const m010 = read("supabase", "migrations", "010_cta_card.sql");
+const m011 = stripSupabase(read("supabase", "migrations", "011_az_series.sql"));
 
 async function liveDb() {
   const db = new PGlite();
@@ -114,7 +115,7 @@ describe("010_cta_card.sql on the live schema (v1 + 002..009)", () => {
   });
 });
 
-describe("fresh schema.sql matches v1 + 002..010", () => {
+describe("fresh schema.sql matches v1 + 002..010 (+ 011)", () => {
   const TABLES = "('settings','cards','posts','reels','reel_scenes','themes','names')";
   const shape = async (db: PGlite) => ({
     columns: (await db.query(`select table_name, column_name, data_type, is_nullable, column_default from information_schema.columns
@@ -124,8 +125,10 @@ describe("fresh schema.sql matches v1 + 002..010", () => {
     indexes: (await db.query(`select tablename, indexname, indexdef from pg_indexes where schemaname='public' and tablename in ${TABLES} order by 1, 2`)).rows,
   });
 
-  it("has the same columns (incl. the 010 defaults), constraints and indexes", async () => {
-    const want = await shape(await migratedDb());
+  it("has the same columns (incl. the 010 defaults), constraints and indexes (+ 011)", async () => {
+    const migrated = await migratedDb();
+    await migrated.exec(m011);
+    const want = await shape(migrated);
     const cols = (want.columns as { table_name: string; column_name: string }[]).map((c) => `${c.table_name}.${c.column_name}`);
     expect(cols).toEqual(expect.arrayContaining(["settings.cta_enabled", "settings.cta_messages"]));
     expect((want.indexes as { indexname: string }[]).map((i) => i.indexname)).toContain("cards_one_cta");
