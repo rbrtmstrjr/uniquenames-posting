@@ -82,3 +82,21 @@ export function pickAzNames(names: NameRow[]): { ok: true; names: NameRow[] } | 
   const missing = AZ_LETTERS.filter((l) => !best.has(l));
   return missing.length ? { ok: false, missing } : { ok: true, names: AZ_LETTERS.map((l) => best.get(l)!) };
 }
+
+/**
+ * A newest-first list with each A–Z series reading Part 1 above Part 2 (Part 2 is made 1 ms later, so
+ * by time it would come first): the series' posts swap into their part order within the slots they
+ * already hold; every other post keeps its place.
+ */
+export function partsInOrder<T extends SeriesFields & { series_id?: string | null }>(posts: T[]): T[] {
+  const slots = new Map<string, number[]>();
+  posts.forEach((p, k) => {
+    if (seriesPart(p) && p.series_id) slots.set(p.series_id, [...(slots.get(p.series_id) ?? []), k]);
+  });
+  const out = [...posts];
+  for (const at of slots.values()) {
+    const parts = at.map((k) => posts[k]).sort((a, b) => (a.series_part ?? 0) - (b.series_part ?? 0));
+    at.forEach((k, i) => { out[k] = parts[i]; });
+  }
+  return out;
+}

@@ -4,6 +4,7 @@ import type { Gender, NameStyle } from "@/lib/db/types";
 import { nameKey, normalizeName, styleOf } from "@/lib/actions/helpers";
 import { validateName, validateTheme, type ThemeInput } from "@/lib/actions/validate";
 import { letterOf } from "@/lib/series/az";
+import { isCommonName, negativeMeaning, notAGivenName, otherGenderName } from "./common-names";
 
 export interface NameSuggestion { name: string; meaning: string }
 export type ThemeFields = Omit<ThemeInput, "gender">;
@@ -26,7 +27,7 @@ const cleanMeaning = (m: string) => m.replace(/\s+/g, " ").trim().replace(/[.!]+
  * name in the database, any gender or status) nor earlier in the batch. A two-word name may
  * share its first OR second word with another name: only the full name must be new.
  */
-export function filterNameSuggestions(cands: NameSuggestion[], existing: Iterable<string>, style: NameStyle, minWords: number = MEANING_MIN_WORDS): FilterResult<NameSuggestion> {
+export function filterNameSuggestions(cands: NameSuggestion[], existing: Iterable<string>, style: NameStyle): FilterResult<NameSuggestion> {
   const have = new Set<string>();
   for (const n of existing) have.add(nameKey(n));
   const fresh: NameSuggestion[] = [];
@@ -36,7 +37,7 @@ export function filterNameSuggestions(cands: NameSuggestion[], existing: Iterabl
     const name = normalizeName(typeof c?.name === "string" ? c.name : "");
     const meaning = cleanMeaning(typeof c?.meaning === "string" ? c.meaning : "");
     const words = meaning ? meaning.split(" ").length : 0;
-    if (validateName(name, meaning) || styleOf(name) !== style || name.split(" ").length > 2 || words < minWords || words > MEANING_MAX_WORDS) {
+    if (validateName(name, meaning) || styleOf(name) !== style || name.split(" ").length > 2 || words < MEANING_MIN_WORDS || words > MEANING_MAX_WORDS) {
       invalid++;
       continue;
     }
@@ -137,26 +138,45 @@ export function sampleForPrompt<T>(items: T[], cap: number, rng: () => number = 
 }
 
 export interface LetterSuggestion extends NameSuggestion { letter: string }
-/** A real name's accepted meaning is often one word ("Quentin: fifth", "Xolani: peace"): fine for the letter fill. */
-export const LETTER_MEANING_MIN_WORDS = 1;
-export interface LetterFilterResult extends FilterResult<LetterSuggestion> { offLetter: number }
+/** "lady or sun": a hedge between two readings. */
+const HEDGE = /\bor\b/i;
+/** What Gemini returns for the letter fill: the name, its accepted meaning, and who it is given to. */
+export interface LetterCandidate extends NameSuggestion { origin?: string; gender?: string }
+export interface LetterFilterResult extends FilterResult<LetterSuggestion> {
+  /** Valid and new, but the letter was not asked or is already full. */
+  offLetter: number;
+  /** Very common for this gender (US/PH top 100, classics) or not a given name (a brand, a coinage). */
+  blocked: number;
+  /** Said (by Gemini, or by the common lists) to be the other gender's name. */
+  wrongGender: number;
+  /** A sad or harsh meaning ("wounded", "bitter"...). */
+  negative: number;
+}
 
 /**
- * "Fill missing letters" (A–Z series): the usual single-name filter (valid, a meaning of 1 to 6 words, new
- * against every name in the database and earlier in the batch), then only names that start with a
- * requested letter, at most `want` per letter, in Gemini's order.
+ * "Fill missing letters" (A–Z series): the usual single-name filter (valid, a meaning of 2 to 6 words, new
+ * against every name in the database and earlier in the batch, case-insensitive), then out go very common
+ * names, non-names, the other gender's names and unkind meanings; of the rest, names that start with a
+ * requested letter, at most `want` per letter, in Gemini's order (it lists each letter's best first).
  */
-export function filterLetterSuggestions(cands: NameSuggestion[], existing: Iterable<string>, needs: { letter: string; want: number }[]): LetterFilterResult {
-  const { fresh, duplicates, invalid } = filterNameSuggestions(cands, existing, "single", LETTER_MEANING_MIN_WORDS);
+export function filterLetterSuggestions(cands: LetterCandidate[], existing: Iterable<string>, needs: { letter: string; want: number }[], gender: Gender): LetterFilterResult {
+  const said = new Map(cands.map((c) => [typeof c?.name === "string" ? nameKey(c.name) : "", typeof c?.gender === "string" ? c.gender.trim().toLowerCase() : ""]));
+  const other = gender === "boy" ? "girl" : "boy";
+  const { fresh, duplicates, invalid: bad } = filterNameSuggestions(cands, existing, "single");
+  let invalid = bad;
   const room = new Map(needs.map((n) => [n.letter, n.want]));
   const kept: LetterSuggestion[] = [];
-  let offLetter = 0;
+  let offLetter = 0, blocked = 0, wrongGender = 0, negative = 0;
   for (const s of fresh) {
+    if (HEDGE.test(s.meaning)) { invalid++; continue; }
+    if (isCommonName(s.name, gender) || notAGivenName(s.name)) { blocked++; continue; }
+    if (said.get(nameKey(s.name)) === other || otherGenderName(s.name, gender)) { wrongGender++; continue; }
+    if (negativeMeaning(s.meaning)) { negative++; continue; }
     const letter = letterOf(s.name);
     const left = letter ? room.get(letter) ?? 0 : 0;
     if (!letter || left <= 0) { offLetter++; continue; }
     room.set(letter, left - 1);
     kept.push({ ...s, letter });
   }
-  return { fresh: kept, duplicates, invalid, offLetter };
+  return { fresh: kept, duplicates, invalid, offLetter, blocked, wrongGender, negative };
 }
