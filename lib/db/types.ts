@@ -60,7 +60,7 @@ export interface SettingsRow {
   reel_voice_path?: string | null;
   /** Reels (migration 006; absent before it runs): the default narrator, a reel_voices id (default 'gacrux'). */
   reel_voice_id?: string;
-  /** Narration speed (ffmpeg atempo) 1.00–1.25, default 1.12. numeric(3,2) in Postgres. */
+  /** Narration speed (ffmpeg atempo) 1.00–1.25, default 1.05 (1.12 before 014). numeric(3,2) in Postgres. */
   reel_speed?: number;
   /** Background music under the voice (default on) and its volume in % (5–40, default 18). */
   reel_music?: boolean;
@@ -71,6 +71,8 @@ export interface SettingsRow {
   hashtags_always?: string; hashtag_pool?: string;
   /** Closing card (migration 010; absent before it runs): on/off and its messages, one per line ("/" = a line break, {gender}). */
   cta_enabled?: boolean; cta_messages?: string;
+  /** Reels (migration 014; absent before it runs): draw the on-screen step labels (default on). */
+  reel_labels?: boolean;
   updated_at: string;
 }
 export type VoiceSampleStatus = "missing" | "queued" | "making" | "ready" | "failed";
@@ -177,6 +179,8 @@ export interface ReelRow {
   hook_text?: string | null;
   /** Migration 009 (absent before it runs): the post caption written after the script and its hashtags (null = none yet). */
   caption?: string | null; hashtags?: string | null;
+  /** Migration 014 (absent before it runs): the script's format (lib/reels/formats) and its topic-bank idea (null = a typed topic or an older reel). */
+  format?: string | null; topic_id?: string | null;
   version: number; claimed_at: string | null; started_at: string | null; finished_at: string | null;
   created_at: string; updated_at: string;
 }
@@ -203,6 +207,8 @@ export interface ReelSceneRow {
   feeling?: string | null;
   /** Migration 012: Red Thread's thread state for this line (null = from the emotion). */
   thread?: ReelThread | null;
+  /** Migration 014 (absent before it runs): the short label drawn while the line is spoken (null = none). */
+  on_screen?: string | null;
   created_at: string; updated_at: string;
 }
 /** What claim_next_reel_step(p_no_comfy) returns to the PC (null = nothing to do). */

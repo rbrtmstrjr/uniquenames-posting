@@ -195,6 +195,7 @@ describe("fresh schema.sql matches v1 + 002..011 (+ 012)", () => {
     const db = await migratedDb();
     await db.exec(stripSupabase(read("supabase", "migrations", "012_two_styles.sql")));
     await db.exec(stripSupabase(read("supabase", "migrations", "013_letter_posts.sql")));
+    await db.exec(stripSupabase(read("supabase", "migrations", "014_reel_formats.sql")));
     const want = await shape(db);
     const cols = (want.columns as { table_name: string; column_name: string }[]).map((c) => `${c.table_name}.${c.column_name}`);
     expect(cols).toEqual(expect.arrayContaining(["posts.series", "posts.series_id", "posts.series_part"]));

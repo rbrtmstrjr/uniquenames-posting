@@ -26,10 +26,10 @@ describe("pure voice helpers", () => {
     expect(sampleKey(1)).toBe("e0.35-t0.7-c0.5-s1.00-g1");
     expect(sampleKey(1.1300000000000001)).toBe(sampleKey(1.13));
   });
-  it("speed: numeric strings, out of range and junk fall back to 1.12; label shows ×", () => {
+  it("speed: numeric strings, out of range and junk fall back to 1.05 (the default from 014); label shows ×", () => {
     expect(speedOf("1.20")).toBe(1.2);
-    expect(speedOf(2)).toBe(1.12);
-    expect(speedOf(null)).toBe(1.12);
+    expect(speedOf(2)).toBe(1.05);
+    expect(speedOf(null)).toBe(1.05);
     expect(speedLabel(1.1)).toBe("1.10×");
   });
   it("needsSample: set up and (missing | failed | stale)", () => {

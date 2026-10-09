@@ -11,7 +11,8 @@ export const CALM = { exaggeration: 0.35, temperature: 0.7, cfg_weight: 0.5 } as
 export const SPEED_MIN = 1;
 export const SPEED_MAX = 1.25;
 export const SPEED_STEP = 0.01;
-export const SPEED_DEFAULT = 1.12;
+/** Calmer from migration 014 on (was 1.12). */
+export const SPEED_DEFAULT = 1.05;
 /** Music volume in % of the normalized bed. */
 export const VOLUME_MIN = 5;
 export const VOLUME_MAX = 40;
@@ -27,7 +28,7 @@ export function speedOf(v: unknown): number {
   const n = roundSpeed(Number(v));
   return Number.isFinite(n) && n >= SPEED_MIN && n <= SPEED_MAX ? n : SPEED_DEFAULT;
 }
-/** "1.12×". */
+/** "1.05×". */
 export const speedLabel = (v: number) => `${roundSpeed(v).toFixed(2)}×`;
 
 /**

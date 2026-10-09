@@ -26,6 +26,7 @@ const earlier = [
   stripSupabase(read("supabase", "migrations", "011_az_series.sql")),
 ];
 const m012 = stripSupabase(read("supabase", "migrations", "012_two_styles.sql"));
+const later = ["013_letter_posts.sql", "014_reel_formats.sql"].map((m) => stripSupabase(read("supabase", "migrations", m)));
 
 async function liveDb() {
   const db = new PGlite();
@@ -116,7 +117,7 @@ describe("012_two_styles.sql on the live schema (v1 + 002..011)", () => {
   });
 });
 
-describe("fresh schema.sql matches v1 + 002..012", () => {
+describe("fresh schema.sql matches v1 + 002..012 (+ 013, 014)", () => {
   const TABLES = "('settings','reel_themes','reel_scenes','reels')";
   const shape = async (db: PGlite) => ({
     columns: (await db.query(`select table_name, column_name, data_type, is_nullable, column_default from information_schema.columns
@@ -129,7 +130,9 @@ describe("fresh schema.sql matches v1 + 002..012", () => {
   });
 
   it("has the same columns, constraints, theme rows and default theme", async () => {
-    const want = await shape(await migratedDb());
+    const migrated = await migratedDb();
+    for (const m of later) await migrated.exec(m);
+    const want = await shape(migrated);
     const cols = (want.columns as { table_name: string; column_name: string }[]).map((c) => `${c.table_name}.${c.column_name}`);
     expect(cols).toEqual(expect.arrayContaining(["reel_themes.active", "reel_themes.keep_red", "reel_themes.preview_prompt", "reel_scenes.feeling", "reel_scenes.thread"]));
     expect(await shape(await freshDb())).toEqual(want);

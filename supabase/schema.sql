@@ -1,5 +1,5 @@
 -- Unique Names posting: database. Paste the whole file into the Supabase SQL editor and run it once.
--- A project created before v2 runs supabase/migrations/002_v2.sql, 003_post_fonts.sql, 004_subject_age.sql, 005_reels.sql, 006_reel_voices.sql, 007_reel_themes.sql, 008_reel_playbook.sql, 009_captions.sql, 010_cta_card.sql, 011_az_series.sql, 012_two_styles.sql then 013_letter_posts.sql instead (this file already includes them).
+-- A project created before v2 runs supabase/migrations/002_v2.sql, 003_post_fonts.sql, 004_subject_age.sql, 005_reels.sql, 006_reel_voices.sql, 007_reel_themes.sql, 008_reel_playbook.sql, 009_captions.sql, 010_cta_card.sql, 011_az_series.sql, 012_two_styles.sql, 013_letter_posts.sql then 014_reel_formats.sql instead (this file already includes them).
 -- Status 'pending' = an AI-suggested name/theme waiting for approval; nothing here ever plans it (only 'available').
 
 -- ---------------------------------------------------------------- tables
@@ -123,7 +123,7 @@ create table if not exists public.settings (
   reel_voice_path text,
   -- reels (006): default narrator, narration speed (atempo), background music on/off and its volume in %
   reel_voice_id text not null default 'gacrux' references public.reel_voices (id),
-  reel_speed numeric(3,2) not null default 1.12 constraint settings_reel_speed_check check (reel_speed between 1.00 and 1.25),
+  reel_speed numeric(3,2) not null default 1.05 constraint settings_reel_speed_check check (reel_speed between 1.00 and 1.25),
   reel_music boolean not null default true,
   reel_music_volume int not null default 18 constraint settings_reel_music_volume_check check (reel_music_volume between 5 and 40),
   -- reels (007): the default visual theme
@@ -136,6 +136,8 @@ create table if not exists public.settings (
   cta_enabled boolean not null default true,
   cta_messages text not null default
     E'Follow for more / baby name ideas.\nFollow us for a new / name list every day.\nStill searching? Follow for / more unique names.\nSave this post and follow / for more name ideas.\nMore {gender} names tomorrow. / Follow so you don''t miss them.\nFound a favorite? / Follow for more like it.\nFollow for a fresh list / of unique {gender} names.\nNew names every day. / Follow along!',
+  -- reels (014): draw the on-screen step labels
+  reel_labels boolean not null default true,
   updated_at timestamptz not null default now(),
   check (min_images <= max_images)
 );
@@ -265,6 +267,10 @@ create table if not exists public.reels (
   -- 009: the post caption written after the script, and its hashtags
   caption text,
   hashtags text,
+  -- 014: the script's format (one of the 5 rotating formats) and the topic-bank idea it came from (null = typed topic)
+  format text constraint reels_format_check
+    check (format is null or format in ('named_method', 'say_this', 'lola_science', 'scene_lesson', 'problem_fix')),
+  topic_id text,
   duration_s numeric,
   version int not null default 1,
   claimed_at timestamptz, started_at timestamptz, finished_at timestamptz,
@@ -306,6 +312,8 @@ create table if not exists public.reel_scenes (
   -- 012: the guide styles' "The feeling is ..." phrase and Red Thread's thread state
   feeling text,
   thread text constraint reel_scenes_thread_check check (thread in ('plain', 'tight', 'stretched', 'tangled', 'loose')),
+  -- 014: an optional short label drawn while the line is spoken
+  on_screen text constraint reel_scenes_on_screen_len check (on_screen is null or char_length(on_screen) <= 80),
   unique (reel_id, position)
 );
 alter table public.themes drop constraint if exists themes_preview_fk;
