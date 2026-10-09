@@ -40,6 +40,16 @@ const RETRY_DELAY_MS = 600;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const retryable = (status: number) => status === 429 || status >= 500;
 
+/** Shown instead of Gemini's 402 text: the prepaid balance is empty and every AI button fails until it is topped up. */
+export const GEMINI_CREDITS_OUT =
+  "Your Gemini credits have run out. Top up in Google AI Studio (Billing), then try again.";
+
+/** The error text for a failed Gemini HTTP call (shared with tts.ts). */
+export function geminiHttpError(status: number, message?: string): string {
+  if (status === 402) return GEMINI_CREDITS_OUT;
+  return `Gemini error ${status}${message ? `: ${message.slice(0, 200)}` : ""}`;
+}
+
 interface GeminiResponse {
   candidates?: { content?: { parts?: { text?: string; thought?: boolean }[] }; finishReason?: string }[];
   promptFeedback?: { blockReason?: string };
@@ -97,7 +107,7 @@ export async function generateJson<T>(input: GenerateJsonInput<T>): Promise<Gene
       clearTimeout(timer);
     }
     if (!res.ok) {
-      lastError = `Gemini error ${res.status}${json?.error?.message ? `: ${json.error.message.slice(0, 200)}` : ""}`;
+      lastError = geminiHttpError(res.status, json?.error?.message);
       if (attempt === 0 && retryable(res.status) && deadline - Date.now() > RETRY_DELAY_MS) { await sleep(RETRY_DELAY_MS); continue; }
       return { ok: false, error: lastError };
     }

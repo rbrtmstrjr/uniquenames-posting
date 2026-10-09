@@ -1,4 +1,5 @@
 import "server-only";
+import { geminiHttpError } from "@/lib/ai/gemini";
 
 /** Newest GA Gemini TTS model (spike 2026-10-06); it answers with a complete WAV file. */
 export const TTS_MODEL = "gemini-3.8-flash-tts";
@@ -94,7 +95,7 @@ export async function geminiVoiceClip(voice: string, text: string, timeoutMs = 6
       clearTimeout(timer);
     }
     if (!res.ok) {
-      lastError = `Gemini error ${res.status}${json?.error?.message ? `: ${json.error.message.slice(0, 200)}` : ""}`;
+      lastError = geminiHttpError(res.status, json?.error?.message);
       if (attempt === 0 && retryable(res.status) && deadline - Date.now() > RETRY_DELAY_MS) { await sleep(RETRY_DELAY_MS); continue; }
       return { ok: false, error: lastError };
     }

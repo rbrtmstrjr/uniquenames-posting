@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { GEMINI_MODEL, generateJson } from "@/lib/ai/gemini";
+import { GEMINI_CREDITS_OUT, GEMINI_MODEL, generateJson } from "@/lib/ai/gemini";
 
 const KEY = "test-key-SECRET-123";
 const schema = { type: "OBJECT", properties: { caption: { type: "STRING" } }, required: ["caption"] } as const;
@@ -49,6 +49,15 @@ describe("generateJson", () => {
     fetchMock.mockResolvedValueOnce(status(500)).mockResolvedValueOnce(ok({ caption: "Again" }));
     expect(await generateJson(base)).toEqual({ ok: true, data: { caption: "Again" } });
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("says plainly when the prepaid credits have run out (402), without retrying", async () => {
+    fetchMock.mockImplementation(async () => status(402, "Your prepayment credits are depleted. Please go to AI Studio at https://ai.studio/projects to manage your project and billing."));
+    const r = await generateJson(base);
+    expect(r).toEqual({ ok: false, error: GEMINI_CREDITS_OUT });
+    expect(GEMINI_CREDITS_OUT).toMatch(/credits have run out/i);
+    expect(GEMINI_CREDITS_OUT).toMatch(/AI Studio/);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("retries a 429 only once and reports the error", async () => {
