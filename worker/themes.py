@@ -2,9 +2,11 @@
 # the themes compare fairly) and the grayscale rule (sketch: Z-Image colours the clothes from the cast text, so
 # the worker turns the picture grey afterwards). Wording from docs/reference/reel-themes-motion-spike.md §5:
 # positive-only, never "camera"; NO_TEXT is the only "no".
+# Migration 012: the two guide styles (Crayon, Red Thread) carry their whole preview prompt on the row (the guide's
+# example scene, used verbatim), and Red Thread keeps only strong reds (its thread) while everything else turns grey.
 import re
 
-from PIL import ImageOps
+from PIL import Image, ImageChops, ImageFilter, ImageOps
 
 DEFAULT_THEME = "knitted"
 THEME_ID = re.compile(r"^[a-z0-9]+$")
@@ -25,10 +27,13 @@ COMPOSITION = ("Composition: the scene fills the whole frame edge to edge; the c
 
 
 def preview_prompt(theme):
-    """The Z-Image prompt for a theme's preview: the fixed moment, the theme's style block and a simple cast
-    (dolls for knitted). The same moment is used for every theme, knitted included: the spike's no-lift rule is
-    for script lines (a doll lift there added a second baby), and this one preview moment passed for knitted in
-    spike r1, so it is kept as is."""
+    """The Z-Image prompt for a theme's preview. A theme with a saved preview prompt (012: Crayon, Red Thread) uses
+    it verbatim. Otherwise the fixed moment, the theme's style block and a simple cast (dolls for knitted). The same
+    moment is used for every old theme, knitted included: the spike's no-lift rule is for script lines (a doll lift
+    there added a second baby), and this one preview moment passed for knitted in spike r1, so it is kept as is."""
+    saved = str((theme or {}).get("preview_prompt") or "").strip()
+    if saved:
+        return saved
     dolls = (theme or {}).get("id") == "knitted"
     who = "the same two dolls in every picture" if dolls else "the same two people in every picture"
     style = str((theme or {}).get("style") or "").strip()
@@ -63,3 +68,61 @@ def theme_id_for(reel, settings):
 def to_gray(img):
     """A grayscale copy, still RGB (the JPEG and the video stay 3-channel)."""
     return ImageOps.grayscale(img).convert("RGB")
+
+
+def colour_mode(theme):
+    """What the worker does to a theme's pictures after Z-Image: "red" (012 keep_red: Red Thread), "gray" (sketch)
+    or None (keep the colours)."""
+    theme = theme or {}
+    if theme.get("keep_red"):
+        return "red"
+    return "gray" if theme.get("grayscale") else None
+
+
+def apply_colour(img, mode):
+    if mode == "red":
+        return to_red_only(img)
+    if mode == "gray":
+        return to_gray(img)
+    return img
+
+
+# Red Thread's colour guarantee, in PIL HSV units (hue 0-255 around the circle, 0 = red; saturation and value 0-255).
+# Full red within RED_HUE_FULL of pure red, fading out by RED_HUE_EDGE (about 11 and 18 degrees: orange and skin
+# tones stay grey); full from SAT_FULL saturation, none below SAT_EDGE (pale pinks and tan skin turn grey); dark
+# ink-like reds below VAL_EDGE turn grey.
+RED_HUE_FULL, RED_HUE_EDGE = 8, 13
+# on the crimson / magenta side a red stays red a little further (a crimson thread); pinks are pale (low saturation)
+CRIMSON_FULL, CRIMSON_EDGE = 16, 22
+SAT_FULL, SAT_EDGE = 130, 95
+VAL_FULL, VAL_EDGE = 70, 40
+
+
+def _ramp(lo, hi):
+    """A 0-255 lookup: 0 at or below lo, 255 at or above hi, linear between."""
+    return [0 if x <= lo else 255 if x >= hi else int(round(255.0 * (x - lo) / (hi - lo))) for x in range(256)]
+
+
+def _hue_lut():
+    out = []
+    for x in range(256):
+        # distance from pure red around the circle, toward orange (x < 128) or toward crimson / magenta
+        d, full, edge = (x, RED_HUE_FULL, RED_HUE_EDGE) if x < 128 else (256 - x, CRIMSON_FULL, CRIMSON_EDGE)
+        out.append(255 if d <= full else 0 if d >= edge else int(round(255.0 * (edge - d) / (edge - full))))
+    return out
+
+
+def red_mask(img):
+    """L mask: 255 where the picture is a strong red, 0 elsewhere, soft in between."""
+    h, s, v = img.convert("RGB").convert("HSV").split()
+    m = ImageChops.multiply(h.point(_hue_lut()), s.point(_ramp(SAT_EDGE, SAT_FULL)))
+    return ImageChops.multiply(m, v.point(_ramp(VAL_EDGE, VAL_FULL)))
+
+
+def to_red_only(img):
+    """Selective desaturation (Red Thread): strongly saturated reds keep their colour, everything else becomes its
+    grayscale value. The mask is grown by a pixel and softened so the thread's anti-aliased edge blends into the grey
+    instead of leaving a coloured fringe. Always RGB."""
+    rgb = img.convert("RGB")
+    mask = red_mask(rgb).filter(ImageFilter.MaxFilter(3)).filter(ImageFilter.GaussianBlur(0.8))
+    return Image.composite(rgb, to_gray(rgb), mask)

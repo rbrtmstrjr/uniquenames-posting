@@ -107,6 +107,19 @@ One run makes two posts of single names, one name per letter: **Part 1 (A–M)**
 5. When all 26 letters are green, press **Make A–Z (2 posts)**. For each letter the name waiting longest is used. Pressing twice still makes one series. Both parts show on Today while they are made (26 cards + 2 closing cards; the PC makes them one by one) and on the Posts page with their **A–Z Part 1 (A–M)** / **Part 2 (N–Z)** label.
 6. Deleting one part frees its names; the theme stays used until both parts are deleted.
 
+## Two reel styles: Crayon and Red Thread (existing install)
+Reels now come in exactly two styles, built word for word from your guides (`docs/reference/crayon-parenting-prompt.md`
+and `docs/reference/red-thread-parenting-prompt.md`): **Crayon** (the default) and **Red Thread** (black-and-white line
+art where a red thread on the wrist is the only colour). The 8 old themes stay in the database so old reels can still be
+made again, but they are no longer offered.
+1. Supabase **SQL Editor**: paste and run `supabase/migrations/012_two_styles.sql` (safe to run again). It adds the two
+   styles, hides the old ones and moves your default to Crayon if it was an old theme.
+2. Restart the worker (Task Scheduler: **End** then **Run** "Unique Names card worker"). The new worker (2.4.0) keeps
+   only the red thread in colour on Red Thread pictures and makes each style's preview from its guide's example scene.
+3. Push to GitHub so Vercel redeploys the website.
+4. **Settings > Theme > Make all previews**: your PC makes one preview per style (Crayon: "Mother and newborn", Red
+   Thread: "2. Newborn"). Pick the default; each reel can switch style on its review page before you approve it.
+
 ## When something is wrong
 - Header dot red, "PC offline": turn on the PC. The worker starts at login. **Generate** is disabled (the button says why) until the PC is back.
 - Amber dot, "ComfyUI closed": open ComfyUI Desktop. **Generate** stays disabled until then; text edits and Re-stamp still work.

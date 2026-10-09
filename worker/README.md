@@ -49,9 +49,10 @@ Steps, in order: voice → timing → music → images → render.
   only if the row's version still matches; older samples are removed. Failure → `'failed'` + `error`; ComfyUI closed
   → back to `'queued'`.
 - **Theme previews** (007): after voice samples (same conditions), `claim_next_theme_preview()` hands out one theme;
-  Z-Image (seed 1234, 1088x1920 → 1080x1920) draws the fixed moment ("a mother gently lifting her laughing baby up
-  toward the warm window light") in the theme's `style` with a simple cast (crocheted dolls for `knitted`), turned grey
-  when `grayscale` (sketch) → `reels/themes/<id>/preview-v<version>.jpg`, `preview_status 'ready'` + `preview_path`,
+  Z-Image (seed 1234, 1088x1920 → 1080x1920) draws the theme's saved `preview_prompt` verbatim (012: Crayon and Red
+  Thread, the guide's example scene), else the fixed moment ("a mother gently lifting her laughing baby up toward the
+  warm window light") in the theme's `style` with a simple cast (crocheted dolls for `knitted`); then the theme's colour
+  rule (below) → `reels/themes/<id>/preview-v<version>.jpg`, `preview_status 'ready'` + `preview_path`,
   saved only if the version still matches; older previews are removed. Failure → `'failed'` + `error`; ComfyUI closed
   → back to `'queued'`. Before 007 the claim function is missing: previews are off (logged once, re-checked every
   10 minutes). A theme id that isn't a-z/0-9 → `'failed'` with a message.
@@ -59,8 +60,10 @@ Steps, in order: voice → timing → music → images → render.
   `start_s`/`end_s` by matching its line letter by letter (first line from 0, last to the end of the audio).
 - **Images**: each scene's `image_prompt` + `seed` in Z-Image at 1088x1920, fitted to 1080x1920, JPEG q92, uploaded as
   `reels/<id>/scenes/<pos>-v<scene version>.jpg`. If the reel's theme (`reels.theme_id` →
-  `settings.reel_theme_id` → `knitted`) has `grayscale` (sketch), the picture is turned grey first (before 007 it stays as made; if
-  the settings or the theme can't be read, the image goes back in line without using an attempt). The 3rd failure of an image sets the reel `needs_attention`.
+  `settings.reel_theme_id` → `knitted`) has `keep_red` (012: Red Thread), only strongly saturated reds (the thread) keep
+  their colour and everything else turns grey (`themes.to_red_only`); with `grayscale` (sketch) the whole picture turns
+  grey (before 007 it stays as made; if the settings or the theme can't be read, the image goes back in line without
+  using an attempt). Z-Image settings match both style guides: 8 steps, cfg 1, res_multistep / simple, 1088x1920. The 3rd failure of an image sets the reel `needs_attention`.
 - **Render** (`reel_render.py` + `reel_frames.py` + `reel_audio.py`, playbook v2): the frames are drawn in Python and
   piped into ffmpeg (from `imageio-ffmpeg`), H.264 1080x1920 30 fps, then a 720p preview (<= ~15 MB, 45 MB cap).
   - **Motion**: one move per picture, `push_in` / `pull_out` / `hold` only (`reel_scenes.motion`; old rows with

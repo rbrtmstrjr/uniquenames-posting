@@ -1,7 +1,8 @@
 # Reel steps on the PC: voice (Chatterbox in ComfyUI, sped up with atempo) -> timing (faster-whisper) ->
 # music (ACE-Step in ComfyUI, 006) -> one image per scene (Z-Image in ComfyUI) -> render (reel_render.py).
 # One step per claim_next_reel_step() claim. Voice samples (006): one per claim_next_voice_sample() claim.
-# Theme previews (007): one per claim_next_theme_preview() claim; grayscale themes (sketch) turn every picture grey.
+# Theme previews (007): one per claim_next_theme_preview() claim; grayscale themes (sketch) turn every picture grey,
+# keep_red themes (012: Red Thread) keep only the red thread and turn the rest grey.
 # Contract (supabase/migrations/005_reels.sql): save each result version-guarded AND clear the claim;
 # re-touch reels.claimed_at between long sub-steps; on an image's 3rd failure the reel needs attention.
 import datetime
@@ -336,8 +337,7 @@ class ReelRunner:
             if not str(row.get("style") or "").strip():
                 raise JobError("This theme has no style text.")
             photo = self.renderer.generate_photo(themes.preview_prompt(row), themes.PREVIEW_SEED, IMAGE_W, IMAGE_H)
-            if row.get("grayscale"):
-                photo = themes.to_gray(photo)
+            photo = themes.apply_colour(photo, themes.colour_mode(row))
             data = to_jpeg(fit_to_size(photo, OUT_W, OUT_H), 90)
             self._net(lambda: self.supa.upload(BUCKET, path, data))
         except Exception as e:
@@ -360,29 +360,30 @@ class ReelRunner:
             return
         self._tidy("themes/%s" % tid, r"preview-v\d+\.jpg$", path)
 
-    def _grayscale(self, reel):
-        """True if the reel's theme (reels.theme_id, null = knitted; see themes.theme_id_for) turns pictures grey;
-        False on a database without 007. Raises ThemeUnread if the settings or the theme can't be read (the image
-        goes back in line without using an attempt, rather than coming out in the wrong colours)."""
+    def _colour_mode(self, reel):
+        """What the reel's theme (reels.theme_id, null = knitted; see themes.theme_id_for) does to its pictures:
+        "red" (012 keep_red: Red Thread), "gray" (sketch) or None; None on a database without 007. Raises ThemeUnread
+        if the settings or the theme can't be read (the image goes back in line without using an attempt, rather than
+        coming out in the wrong colours). select=* because keep_red is missing on a database before 012."""
         try:
             settings = self._settings_row()
         except Exception as e:
             raise ThemeUnread(e)
         tid = themes.theme_id_for(reel, settings)
         if not tid:
-            return False
+            return None
         try:
-            rows = self._retry(lambda: self.supa.select("reel_themes", "id=eq.%s&select=id,grayscale" % tid)) or []
+            rows = self._retry(lambda: self.supa.select("reel_themes", "id=eq.%s&select=*" % tid)) or []
         except Exception as e:
             raise ThemeUnread(e)
-        return bool(rows and rows[0].get("grayscale"))
+        return themes.colour_mode(rows[0] if rows else None)
 
     # ------------------------------------------------------------ one image
     def _image(self, reel, scene):
         try:
             if not self.renderer.health()["ok"]:
                 raise JobError(COMFY_CLOSED)
-            gray = self._grayscale(reel)
+            mode = self._colour_mode(reel)
             photo = self.renderer.generate_photo(scene["image_prompt"], int(scene["seed"]), IMAGE_W, IMAGE_H)
         except ThemeUnread as e:
             self._requeue_scene(reel, scene, "couldn't read the reel's theme (%s)" % str(e.args[0])[:160])
@@ -392,8 +393,7 @@ class ReelRunner:
                 raise
             self._requeue_scene(reel, scene)  # not the picture's fault: no attempt used
             return
-        if gray:
-            photo = themes.to_gray(photo)
+        photo = themes.apply_colour(photo, mode)
         data = to_jpeg(fit_to_size(photo, OUT_W, OUT_H), 92)
         path = "%s/scenes/%02d-v%d.jpg" % (reel["id"], int(scene["position"]), int(scene["version"]))
         self._net(lambda: self.supa.upload(BUCKET, path, data))
