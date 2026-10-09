@@ -14,7 +14,8 @@ vi.mock("@/lib/actions/suggest", () => ({ fillMissingLettersAction: vi.fn(async 
 vi.mock("@/lib/actions/names", () => ({ addNamesAction: vi.fn(), updateNameAction: vi.fn(), setSkipAction: vi.fn(), deleteNameAction: vi.fn(), approveNamesAction: vi.fn(), rejectNamesAction: vi.fn() }));
 vi.mock("@/lib/actions/call", () => ({ callAction: vi.fn(async (fn: () => Promise<unknown>) => fn()), optimistic: vi.fn(async () => ({ ok: true })) }));
 const { NewPostPanel } = await import("@/components/today/new-post-panel");
-const { NamesTable, namesFilterFromParams } = await import("@/components/names/names-table");
+const { NamesTable } = await import("@/components/names/names-table");
+const { namesFilterFromParams } = await import("@/lib/names/filter");
 const { createAzSeriesAction } = await import("@/lib/actions/series");
 const { fillMissingLettersAction } = await import("@/lib/actions/suggest");
 

@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import type { NameRow } from "@/lib/db/types";
-import { NamesTable, namesFilterFromParams } from "@/components/names/names-table";
+import { NamesTable } from "@/components/names/names-table";
+import { namesFilterFromParams } from "@/lib/names/filter";
 import { PageHeader } from "@/components/ui/page-header";
 
 const PAGE = 1000; // PostgREST's default max-rows

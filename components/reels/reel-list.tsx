@@ -19,7 +19,7 @@ export function ReelsSetup() {
   return <Empty icon={<DatabaseZap className="size-6" />} title="Reels need one setup step" text={SETUP_TEXT} />;
 }
 
-export const newReelLink = "inline-flex min-h-11 items-center gap-2 rounded-xl bg-accent px-4 text-sm font-bold text-accent-ink shadow-soft transition hover:opacity-90 active:scale-[.98]";
+import { newReelLink } from "./styles";
 
 /** Status badge for a reel (pulses while the PC works on it). */
 export function ReelBadge({ reel, scenes, music = false }: { reel: Pick<ReelRow, "status" | "voice_path" | "words" | "music_path">; scenes: { status: ReelListScene["status"] }[]; music?: boolean }) {

@@ -2,7 +2,8 @@ import Link from "next/link";
 import { Plus } from "lucide-react";
 import { getReelList } from "@/lib/data/reels";
 import { musicOn } from "@/lib/data/voices";
-import { ReelList, ReelsSetup, newReelLink } from "@/components/reels/reel-list";
+import { ReelList, ReelsSetup } from "@/components/reels/reel-list";
+import { newReelLink } from "@/components/reels/styles";
 import { PageHeader } from "@/components/ui/page-header";
 
 // Server actions run with the page's limit: writing a script can take a few minutes.

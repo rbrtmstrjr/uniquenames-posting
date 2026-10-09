@@ -21,20 +21,7 @@ import { BulkPaste } from "./bulk-paste";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/shadcn/select";
 import { AZ_LETTERS, letterOf } from "@/lib/series/az";
 
-export interface NamesFilter { gender?: Gender; style?: NameStyle; status?: NameStatus | "all"; letter?: string }
-const NAME_STATUSES: (NameStatus | "all")[] = ["available", "reserved", "used", "skip", "pending", "all"];
-const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v);
-
-/** The Names page filters from its URL (?status=&gender=&style=&letter=); anything unknown is ignored. */
-export function namesFilterFromParams(p: Record<string, string | string[] | undefined>): NamesFilter {
-  const gender = one(p.gender), style = one(p.style), status = one(p.status), letter = one(p.letter)?.toUpperCase();
-  return {
-    gender: gender === "boy" || gender === "girl" ? gender : undefined,
-    style: style === "single" || style === "two-word" ? style : undefined,
-    status: NAME_STATUSES.includes(status as NameStatus) ? (status as NameStatus | "all") : undefined,
-    letter: letter && AZ_LETTERS.includes(letter) ? letter : undefined,
-  };
-}
+import type { NamesFilter } from "@/lib/names/filter";
 
 const STATUS_TONE: Record<NameStatus, "ok" | "accent" | "muted" | "warn"> = { available: "ok", reserved: "accent", used: "muted", skip: "warn", pending: "accent" };
 const STATUS_TEXT: Record<NameStatus, string> = { available: "Available", reserved: "In a post", used: "Used", skip: "Skip", pending: "Pending" };
