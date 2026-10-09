@@ -70,6 +70,17 @@ HOOK_POP = ((0.0, 0.86), (0.12, 1.04), (0.18, 1.0))   # pop-in done in 180 ms
 HOOK_MAX_WORDS = 24                # (the web allows 10 words / 80 characters)
 HOOK_INK = (17, 17, 17)
 
+# ---- on-screen step labels (reel_scenes.on_screen, 014): a smaller card of the same family in the hook card's band,
+# shown while its line is spoken (never during the hook card), popped in like the hook card and cut at the line's end
+LABEL_SIZE, LABEL_MIN_SIZE = 72, 24  # 72 px when it fits; two lines shrink to fit (>= 60 px for an 8-word label)
+LABEL_MAX_W = 870
+LABEL_PAD = (28, 10)
+LABEL_LINES = 2
+LABEL_RADIUS = 22
+LABEL_SHADOW = 12
+LABEL_MIN_S = 0.4                  # a label that would be up for less than this is not drawn (it would only flash)
+LABEL_MAX_CHARS = 120              # the web keeps them to 80; anything longer is cut with an ellipsis
+
 
 # ---------------------------------------------------------------- easing + moves
 def smoothstep(p):
@@ -616,6 +627,150 @@ class Hook:
         return hit
 
 
+# ---------------------------------------------------------------- on-screen labels
+def label_words(text):
+    """The label's words as written (case and quotes kept), whitespace collapsed; [] when empty."""
+    t = re.sub(r"\s+", " ", str(text or "")).strip()
+    if len(t) > LABEL_MAX_CHARS:
+        t = t[:LABEL_MAX_CHARS - 1].rstrip() + "…"
+    return t.split(" ") if t else []
+
+
+def _two_lines(words, font, max_w):
+    """The split of `words` into two lines that keeps the wider line narrowest (no lonely last word), or None if no
+    split fits max_w."""
+    best = None
+    for k in range(1, len(words)):
+        a, b = " ".join(words[:k]), " ".join(words[k:])
+        wide = max(font.getlength(a), font.getlength(b))
+        if wide <= max_w and (best is None or wide < best[0]):
+            best = (wide, [a, b])
+    return best[1] if best else None
+
+
+def label_layout(text, font_for_size):
+    """(size, lines, box w, box h) for a label card: one line at the largest size from LABEL_SIZE down that fits,
+    else two balanced lines; never more than two lines, never wider than LABEL_MAX_W. A word too wide for the card is
+    hyphen-broken; text that still won't fit two lines at LABEL_MIN_SIZE is cut with an ellipsis."""
+    words = label_words(text)
+    if not words:
+        return None
+    max_text_w = LABEL_MAX_W - 2 * LABEL_PAD[0]
+
+    def box(size, lines):
+        f = font_for_size(size)
+        w = int(max(f.getlength(l) for l in lines)) + 2 * LABEL_PAD[0]
+        return size, lines, min(w, LABEL_MAX_W), int(round(size * HOOK_LINE)) * len(lines) + 2 * LABEL_PAD[1]
+
+    for size in range(LABEL_SIZE, LABEL_MIN_SIZE - 1, -2):
+        f = font_for_size(size)
+        if all(f.getlength(w) <= max_text_w for w in words):
+            if f.getlength(" ".join(words)) <= max_text_w:
+                return box(size, [" ".join(words)])
+            lines = _two_lines(words, f, max_text_w)
+            if lines:
+                return box(size, lines)
+    f = font_for_size(LABEL_MIN_SIZE)
+    lines = wrap(words, f, max_text_w)
+    if len(lines) > LABEL_LINES:
+        last = lines[LABEL_LINES - 1]
+        while last and f.getlength(last + "…") > max_text_w:
+            last = last[:-1]
+        lines = lines[:LABEL_LINES - 1] + [last.rstrip() + "…"]
+    return box(LABEL_MIN_SIZE, lines)
+
+
+def label_card(text, font_path=None, band=HOOK_BANDS[0], weight=800):
+    """RGBA label card (white rounded box, dark ink, soft shadow: the hook card's family, smaller), sized to fit
+    inside `band`; None without text. Paste it at label_xy(card, band)."""
+    fonts = {}
+
+    def font_for(size):
+        if size not in fonts:
+            fonts[size] = _font(font_path, weight, size)
+        return fonts[size]
+
+    lay = label_layout(text, font_for)
+    if not lay:
+        return None
+    size, lines, w, h = lay
+    while h > band[1] - band[0] and size > LABEL_MIN_SIZE:   # a narrow band: shrink until the card fits in it
+        size -= 2
+        f = font_for(size)
+        w = min(LABEL_MAX_W, int(max(f.getlength(l) for l in lines)) + 2 * LABEL_PAD[0])
+        h = int(round(size * HOOK_LINE)) * len(lines) + 2 * LABEL_PAD[1]
+    f = font_for(size)
+    line_h = int(round(size * HOOK_LINE))
+    sh = LABEL_SHADOW
+    card = Image.new("RGBA", (w + 2 * sh, h + 2 * sh), (0, 0, 0, 0))
+    shadow = Image.new("L", card.size, 0)
+    ImageDraw.Draw(shadow).rounded_rectangle((sh, sh + 5, sh + w, sh + h + 5), LABEL_RADIUS, fill=110)
+    card.putalpha(shadow.filter(ImageFilter.GaussianBlur(8)))
+    box = Image.new("RGBA", card.size, (0, 0, 0, 0))
+    d = ImageDraw.Draw(box)
+    d.rounded_rectangle((sh, sh, sh + w, sh + h), LABEL_RADIUS, fill=(255, 255, 255, 246))
+    asc = f.getbbox("H", anchor="ls")
+    for k, line in enumerate(lines):
+        slot_mid = sh + LABEL_PAD[1] + line_h * k + line_h / 2.0
+        d.text((sh + w / 2.0, slot_mid - (asc[1] + asc[3]) / 2.0), line, font=f, anchor="ms", fill=HOOK_INK)
+    return Image.alpha_composite(card, box)
+
+
+def label_xy(card, band=HOOK_BANDS[0]):
+    """Where a label card goes: centred across, its white box's top edge on the band's top (like the hook card)."""
+    return (WIDTH - card.width) // 2, band[0] - LABEL_SHADOW
+
+
+def label_spans(items, hook_end=HOOK_END_S, min_s=LABEL_MIN_S):
+    """[(start, end, text)] of the labels to draw: items [{"text", "start", "end"}] in time order, each starting no
+    earlier than the end of the hook card; empty text and spans shorter than min_s are dropped."""
+    out = []
+    for it in items or []:
+        text = " ".join(label_words(it.get("text")))
+        if not text or it.get("start") is None or it.get("end") is None:
+            continue
+        start, end = max(float(it["start"]), float(hook_end)), float(it["end"])
+        if out:
+            start = max(start, out[-1][1])
+        if end - start >= min_s:
+            out.append((start, end, text))
+    return out
+
+
+class Labels:
+    def __init__(self, items, font_path=None, weight=800, band=HOOK_BANDS[0]):
+        """items: [{"text", "start", "end"}] (seconds). band: the hook card's band (the labels share its place)."""
+        self.band = band
+        self.spans, self.cards = [], []
+        for start, end, text in label_spans(items):
+            card = label_card(text, font_path, band, weight)
+            if card is not None:
+                self.spans.append((start, end, text))
+                self.cards.append(card)
+        self._cache = {}
+
+    def at(self, t):
+        """(RGBA, (x, y)) to paste at time t, or None. A pop-in like the hook card's (done in 180 ms), full strength
+        to the end of the line, then a hard cut."""
+        for k, (start, end, _text) in enumerate(self.spans):
+            if start <= t < end:
+                break
+        else:
+            return None
+        card = self.cards[k]
+        s = round(hook_scale(t - start), 3)
+        hit = self._cache.get((k, s))
+        if hit is None:
+            img = card
+            if s != 1.0:
+                img = card.resize((max(1, int(round(card.width * s))), max(1, int(round(card.height * s)))), Image.BICUBIC)
+            x, y = label_xy(card, self.band)
+            cx, cy = x + card.width / 2.0, y + card.height / 2.0
+            hit = (img, (int(round(cx - img.width / 2.0)), int(round(cy - img.height / 2.0))))
+            self._cache[(k, s)] = hit
+        return hit
+
+
 # ---------------------------------------------------------------- frames
 def _render(sources, layers, overlays, shots):
     out = None
@@ -629,8 +784,9 @@ def _render(sources, layers, overlays, shots):
     return out.tobytes()
 
 
-def frames(shots, open_source, captions=None, hook=None, fps=FPS, threads=THREADS):
-    """RGB24 frame bytes, in order, for the whole video. open_source(shot) -> the 2x picture. Pictures are loaded
+def frames(shots, open_source, captions=None, hook=None, fps=FPS, threads=THREADS, labels=None):
+    """RGB24 frame bytes, in order, for the whole video. open_source(shot) -> the 2x picture. Overlays: the hook card,
+    the on-screen step labels (Labels; they start after the hook card) and the word captions. Pictures are loaded
     in order as they are needed and dropped once their shot (and any dissolve out of it) is done."""
     total = shots[-1]["f0"] + shots[-1]["n"] if shots else 0
     loaded = {}
@@ -651,6 +807,10 @@ def frames(shots, open_source, captions=None, hook=None, fps=FPS, threads=THREAD
                 h = hook.at(t)
                 if h:
                     overlays.append(h)
+            if labels is not None:
+                lab = labels.at(t)
+                if lab:
+                    overlays.append(lab)
             if captions is not None:
                 c = captions.at(t)
                 if c is not None:

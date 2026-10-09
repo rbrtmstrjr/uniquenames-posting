@@ -5,7 +5,8 @@
 #   full MP4 (1080x1920)  -> Pictures\Unique Names\Reels\<date> <title>.mp4  (written as .part, then renamed)
 #   preview MP4 (720x1280) -> storage reels/<id>/preview-v<version>.mp4     (<= ~15 MB, 45 MB hard cap)
 # Reads 008's columns (reels.hook_text; reel_scenes.punch, time_jump, motion 'hold') when they are there; a database
-# without 008 renders with no hook card and no punch-ins.
+# without 008 renders with no hook card and no punch-ins. 014's reel_scenes.on_screen + settings.reel_labels add the
+# on-screen step labels; a database without 014 renders with none.
 import datetime
 import os
 import re
@@ -68,10 +69,8 @@ def fit_durations(raw, total, min_s=MIN_SCENE_S):
         fixed.update(low)
 
 
-def scene_timeline(scenes, total, min_s=MIN_SCENE_S):
-    """[(scene, seconds)] for the scenes with a finished picture, in order. Each picture covers its line
-    up to the next picture's line, so a skipped scene's time goes to the picture before it (the first
-    picture also covers anything before it). Lines without times are placed by their word counts."""
+def line_starts(scenes, total):
+    """Each line's start (s): its start_s, or (any line without times) placed by the lines' word counts."""
     starts = [s.get("start_s") for s in scenes]
     if any(t is None for t in starts):
         counts = [max(1, len((s.get("narration") or "").split())) for s in scenes]
@@ -79,6 +78,14 @@ def scene_timeline(scenes, total, min_s=MIN_SCENE_S):
         for c in counts:
             starts.append(total * acc / float(sum(counts)))
             acc += c
+    return starts
+
+
+def scene_timeline(scenes, total, min_s=MIN_SCENE_S):
+    """[(scene, seconds)] for the scenes with a finished picture, in order. Each picture covers its line
+    up to the next picture's line, so a skipped scene's time goes to the picture before it (the first
+    picture also covers anything before it). Lines without times are placed by their word counts."""
+    starts = line_starts(scenes, total)
     shown = [(s, float(t)) for s, t in zip(scenes, starts) if s.get("status") == "done" and s.get("photo_path")]
     if not shown:
         return []
@@ -88,6 +95,33 @@ def scene_timeline(scenes, total, min_s=MIN_SCENE_S):
 
 
 frame_counts = reel_frames.frame_counts
+
+
+def labels_on(settings):
+    """settings.reel_labels (014, default on): only an explicit false turns the labels off."""
+    return (settings or {}).get("reel_labels", True) is not False
+
+
+def reel_labels(settings, scenes, total):
+    """[{"text", "start", "end"}] of the lines' on-screen labels (reel_scenes.on_screen, 014) when the setting is on:
+    each from its line's start to the next line's start (a hard cut on the change of line), the last to its end_s
+    (else the end of the voice). Skipped pictures keep their labels (text only). No on_screen column: none.
+    reel_frames.label_spans keeps them clear of the hook card."""
+    if not labels_on(settings):
+        return []
+    starts = line_starts(scenes, total)
+    out = []
+    for k, s in enumerate(scenes):
+        text = s.get("on_screen")
+        text = re.sub(r"\s+", " ", text).strip() if isinstance(text, str) else ""
+        if not text:
+            continue
+        if k + 1 < len(scenes):
+            end = starts[k + 1]
+        else:
+            end = s.get("end_s") if s.get("start_s") is not None and s.get("end_s") is not None else total
+        out.append({"text": text, "start": float(starts[k]), "end": float(end)})
+    return out
 
 
 def video_args(ffmpeg, audio, out_path, width=WIDTH, height=HEIGHT, fps=FPS):
@@ -335,7 +369,8 @@ def render_reel(runner, reel, scenes):
             with open(os.path.join(work, name), "wb") as fh:
                 fh.write(fetch(s["photo_path"], JobError("Picture %s is missing from storage. Redo that picture." % s.get("position"))))
             items.append(scene_item(s, name, secs))
-        bed, volume = fetch_music(runner, reel, work, BUCKET, is_http_4xx)
+        settings = runner._settings_row()
+        bed, volume = fetch_music(runner, reel, work, BUCKET, is_http_4xx, settings)
         if bed and items:
             # the music rings out after the last word: hold the last picture (its move goes on) for the bed's extra time
             items[-1]["duration"] += music_mod.EXTRA_SECONDS
@@ -346,10 +381,13 @@ def render_reel(runner, reel, scenes):
         hook_text = reel.get("hook_text")  # 008; missing column or null = no hook card
         has_hook = bool(reel_frames.hook_words(hook_text))
         punches = reel_frames.punch_times(shots)
-        runner.log("reel render: %d pictures, %.1f s of voice%s, %d punch-ins + %d reframes, %d dissolves%s" % (
+        label_items = reel_labels(settings, scenes, total)
+        n_labels = len(reel_frames.label_spans(label_items))
+        runner.log("reel render: %d pictures, %.1f s of voice%s, %d punch-ins + %d reframes, %d dissolves%s%s" % (
             len(items), total, ", music at %d%%" % round(volume * 100) if bed else "", len(punches),
             sum(len(s["reframes"]) for s in shots),
-            sum(1 for s in shots if s["dissolve"]), ", hook card" if has_hook else ""))
+            sum(1 for s in shots if s["dissolve"]), ", hook card" if has_hook else "",
+            ", %d label%s" % (n_labels, "" if n_labels == 1 else "s") if n_labels else ""))
         reel_audio.make_audio(ffmpeg, work, "voice.wav", video_s, reel_audio.sfx_events(has_hook, punches, total, video_s),
                               lambda args, what: run_ffmpeg(args, work, AUDIO_TIMEOUT, what, beat, log=runner.log),
                               music=bed, volume=volume or reel_audio.MUSIC_DEFAULT_VOLUME, log=runner.log)
@@ -358,7 +396,9 @@ def render_reel(runner, reel, scenes):
         font, weight = caption_font(runner.log)
         captions = reel_frames.Captions(words, font, weight)
         hook = reel_frames.Hook(hook_text, font, weight, first_picture=first_picture(work, items, has_hook))
-        frames = reel_frames.frames(shots, lambda shot: open_picture(work, shot, items), captions, hook, FPS)
+        labels = reel_frames.Labels(label_items, font, weight, band=hook.band) if n_labels else None
+        frames = reel_frames.frames(shots, lambda shot: open_picture(work, shot, items), captions, hook, FPS,
+                                    labels=labels)
         pipe_ffmpeg(video_args(ffmpeg, "audio.wav", "full.mp4"), work, frames, RENDER_TIMEOUT, "video", beat,
                     log=runner.log)
         full = os.path.join(work, "full.mp4")
@@ -463,10 +503,13 @@ def music_choice(settings, reel):
     return path, music_mod.clamp_volume(settings.get("reel_music_volume", 18)) / 100.0
 
 
-def fetch_music(runner, reel, work, bucket, is_http_4xx):
-    """('music.flac' in `work`, volume) or (None, 0). A bed missing from storage only means no music."""
-    rows = runner._net(lambda: runner.supa.select("settings", "id=eq.1&select=*")) or [{}]
-    path, volume = music_choice(rows[0] if rows else {}, reel)
+def fetch_music(runner, reel, work, bucket, is_http_4xx, settings=None):
+    """('music.flac' in `work`, volume) or (None, 0). A bed missing from storage only means no music. `settings`: the
+    settings row when the caller has read it (else it is read here)."""
+    if settings is None:
+        rows = runner._net(lambda: runner.supa.select("settings", "id=eq.1&select=*")) or [{}]
+        settings = rows[0] if rows else {}
+    path, volume = music_choice(settings or {}, reel)
     if not path:
         return None, 0.0
     try:
