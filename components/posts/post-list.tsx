@@ -8,6 +8,7 @@ import { Empty } from "@/components/ui/empty";
 import { Segmented } from "@/components/ui/segmented";
 import { useSignedUrls } from "@/lib/realtime/signed-urls";
 import { FadeImage } from "@/components/ui/fade-image";
+import { seriesLabel } from "@/lib/series/az";
 
 type Filter = "all" | "ready" | "posted";
 
@@ -42,6 +43,7 @@ export function PostList({ posts }: { posts: PostListItem[] }) {
                   <div className="font-semibold text-ink">
                     {new Date(p.post_date + "T00:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })} · {p.gender === "girl" ? "Girl" : "Boy"}
                   </div>
+                  {seriesLabel(p) && <div className="text-xs font-semibold text-accent">{seriesLabel(p)}</div>}
                   <div className="text-xs text-muted">{p.theme_title} · {p.style} · {p.cards.length} cards</div>
                 </div>
                 {statusBadge(p)}

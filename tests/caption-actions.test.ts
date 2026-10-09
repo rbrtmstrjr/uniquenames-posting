@@ -230,6 +230,16 @@ describe("rewriteCaptionAction", () => {
     expect((await rewriteCaptionAction(POST_ID)).ok).toBe(true);
   });
 
+  it("an A–Z series part keeps saying its part (prompt + series tag)", async () => {
+    world(s009);
+    const inner = respond;
+    respond = (q) => (q.table === "posts" && op(q, "maybeSingle") ? { data: { ...POST, series: "az", series_id: REQ, series_part: 2 } } : inner(q));
+    generateJson.mockResolvedValueOnce({ ok: true, data: { caption: "Part 2 of our A to Z baby boy names, N to Z, by the sea.", tags: [] } });
+    const r = await rewriteCaptionAction(POST_ID);
+    expect(r).toMatchObject({ ok: true, caption: expect.stringMatching(/^Part 2 of our A to Z[\s\S]*#atozbabynames/) });
+    expect(generateJson.mock.calls[0][0].prompt).toContain("Part 2 of 2 of an A to Z series");
+  });
+
   it("on AI failure leaves the saved caption alone", async () => {
     generateJson.mockResolvedValueOnce({ ok: false, error: "Gemini error 500" });
     expect(await rewriteCaptionAction(POST_ID)).toMatchObject({ ok: false, error: expect.stringMatching(/unchanged/) });

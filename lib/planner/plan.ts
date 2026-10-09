@@ -4,6 +4,7 @@ import { buildCtaPrompt, buildPrompt, ctaShot, pickSubject, randomSubject, type 
 import { hashSeed, seededRandom, shuffle } from "./random";
 import { buildMixedShotSpecs, buildShots, dealAges, sessionShots, shotSpec, type ShotSpec } from "./shots";
 import { SUBJECT_AGES, type AgeChoice } from "./age";
+import { AZ_PARTS, pickAzNames, type AzPart } from "@/lib/series/az";
 
 /** One key per post for its child (look, and session for older posts): add-a-card reuses it so extra cards match. */
 export const subjectKey = (postDate: string, gender: Gender, style: NameStyle) => `${postDate}|${gender}|${style}`;
@@ -64,24 +65,70 @@ export function planPost(input: PlanInput): PlanResult {
     return { ok: false, reason: `Number of cards must be ${s.min_images} to ${s.max_images}.` };
   }
   const chosen = shuffle(pool, rng).slice(0, Math.min(want, pool.length));
-  const key = subjectKey(r.postDate, r.gender, r.style);
-  const shotRng = seededRandom(hashSeed(`${key}|shots`));
+  const cards = galleryCards(chosen, theme, r.gender, r.postDate, subjectKey(r.postDate, r.gender, r.style), r.age);
+  return { ok: true, theme_id: theme.id, caption: buildCaption(r.gender, s), cards };
+}
+
+/**
+ * One post's gallery for these names, in this order: the shots (cover first, props frames spread
+ * through) and each card's child. `key` is the post's subjectKey (a fixed-age post's child);
+ * `salt` varies the shots and Random ages between posts sharing a key (the parts of a series).
+ */
+function galleryCards(chosen: NameRow[], theme: ThemeRow, gender: Gender, postDate: string, key: string, age: AgeChoice | null | undefined, salt = ""): PlannedCard[] {
+  const rngKey = salt ? `${key}|${salt}` : key;
+  const shotRng = seededRandom(hashSeed(`${rngKey}|shots`));
   let frames: { shot: string; subject?: Subject }[];
-  if (r.age === "random") {
+  if (age === "random") {
     // Its own child per baby card, the ages dealt so the post shows a real spread.
-    const ageRng = seededRandom(hashSeed(`${key}|ages`));
+    const ageRng = seededRandom(hashSeed(`${rngKey}|ages`));
     const ages = dealAges(chosen.length, ageRng);
     frames = buildMixedShotSpecs(chosen.length, ages, shotRng).map((f) =>
       ({ shot: f.spec.text, subject: f.age ? randomSubject(f.age, ageRng) : undefined }));
   } else {
-    const subject = pickSubject(key, r.age ?? undefined);
+    const subject = pickSubject(key, age ?? undefined);
     frames = buildShots(chosen.length, shotRng, subject.session).map((shot) => ({ shot, subject }));
   }
-  const cards = chosen.map((n, k) => ({
+  return chosen.map((n, k) => ({
     position: k + 1, name_id: n.id, name: n.name.trim(), meaning: n.meaning.trim(), shot: frames[k].shot,
-    prompt: buildPrompt(theme!, frames[k].shot, r.gender, frames[k].subject), seed: cardSeed(r.postDate, n.name, k),
+    prompt: buildPrompt(theme, frames[k].shot, gender, frames[k].subject), seed: cardSeed(postDate, n.name, k),
   }));
-  return { ok: true, theme_id: theme.id, caption: buildCaption(r.gender, s), cards };
+}
+
+export interface AzSeriesInput {
+  gender: Gender; postDate: string; age?: AgeChoice | null;
+  /** This gender's names (any style or status: only available single names are used). */
+  names: NameRow[]; themes: ThemeRow[]; themeId?: string;
+}
+export interface AzSeriesPart { part: AzPart; letters: string[]; cards: PlannedCard[] }
+export type AzSeriesResult = { ok: true; theme_id: string; parts: AzSeriesPart[] } | { ok: false; reason: string; missing?: string[] };
+
+/**
+ * The A–Z series (011): one available single name per letter (the oldest-added), Part 1 = A–M and
+ * Part 2 = N–Z, each card at its letter's position. One theme and (for a fixed age) one child for
+ * both parts, so the series reads as one photoshoot; each part is its own gallery (its own cover
+ * and props frames, different shots).
+ */
+export function planAzSeries(i: AzSeriesInput): AzSeriesResult {
+  const picked = pickAzNames(i.names.filter((n) => n.gender === i.gender));
+  if (!picked.ok) {
+    return { ok: false, missing: picked.missing, reason: `No available single ${i.gender} name for ${picked.missing.join(", ")}. Use Fill missing letters, then approve the names you like.` };
+  }
+  let theme: ThemeRow | undefined;
+  if (i.themeId) {
+    theme = i.themes.find((t) => t.id === i.themeId);
+    if (!theme || theme.gender !== i.gender || theme.status !== "available" || !themeComplete(theme)) {
+      return { ok: false, reason: `That theme is not available for a ${i.gender} post. Pick another theme.` };
+    }
+  } else {
+    theme = nextTheme(i.themes, i.gender);
+    if (!theme) return { ok: false, reason: `No unused ${i.gender} theme is left. Add a theme on the Themes page.` };
+  }
+  const key = subjectKey(i.postDate, i.gender, "single");
+  const parts = AZ_PARTS.map(({ part, letters }) => {
+    const chosen = picked.names.slice((part - 1) * 13, (part - 1) * 13 + letters.length);
+    return { part, letters, cards: galleryCards(chosen, theme!, i.gender, i.postDate, key, i.age, `az${part}`) };
+  });
+  return { ok: true, theme_id: theme.id, parts };
 }
 
 export interface ExtraCardInput {

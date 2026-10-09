@@ -5,6 +5,7 @@ import { pickPostTags, tagSettings } from "@/lib/captions/hashtags";
 import { EMPTY_HISTORY, recentTags, type CaptionHistory } from "@/lib/captions/history";
 import { NAME_STYLES, pickStyle, type CaptionName, type CaptionStyle } from "@/lib/captions/styles";
 import { askCaption, firstWord, openers, sanitizeText, type AiCaption } from "./caption-core";
+import { AZ_SERIES_TAG, partRange, type AzPart } from "@/lib/series/az";
 
 export type { AiCaption } from "./caption-core";
 
@@ -32,7 +33,10 @@ export interface CaptionInput {
   recent?: string[];
   /** Hashtags used lately: Gemini suggests others. */
   recentTags?: string[];
+  /** A part of an A–Z series (011): the caption says which part it is. */
+  series?: CaptionSeries;
 }
+export interface CaptionSeries { part: AzPart }
 
 /** `caption_ai` is undefined until migration 002 runs; treat that as the column default. */
 export const captionAiOn = (s: { caption_ai?: boolean | null }) => s.caption_ai ?? TEXT_SETTINGS_DEFAULTS.caption_ai;
@@ -82,6 +86,11 @@ export function captionPrompt(input: CaptionInput): string {
   if (NAME_STYLES.includes(captionStyle) && names.length) {
     lines.push("", "Names in this post with their real meanings (use only these, spelled exactly):", ...names.map((n) => `- ${t(n.name)}: ${t(n.meaning)}`));
   }
+  if (input.series) {
+    const { part } = input.series;
+    lines.push("", `This post is Part ${part} of 2 of an A to Z series of single-word baby ${gender} names: one name for each letter from ${partRange(part)}.`,
+      `Say naturally that it is Part ${part} of the A to Z series, for example "Part ${part} of our A to Z baby ${gender} names, ${partRange(part)}".`);
+  }
   const recent = (input.recent ?? []).filter(Boolean);
   if (recent.length) {
     lines.push("", "Recent captions on the page, newest first. Yours must read clearly different (opening word, sentence shape, question):",
@@ -99,10 +108,15 @@ const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 /** The name's first word as a whole word ("Aurelia" in "Aurelia means golden"). */
 const nameRe = (name: string) => new RegExp(`(?<![\\p{L}])${escapeRe(t(name).split(" ")[0])}(?![\\p{L}])`, "iu");
 
-/** Why a caption is not right yet: it opens like a recent one, or a name style names too few names. */
-export function captionProblem(line: string, input: Pick<CaptionInput, "captionStyle" | "names" | "recent">): string | null {
+/** "Part 1" / "Part one" (any case). */
+const PART_RE: Record<AzPart, RegExp> = { 1: /\bpart\s+(?:1|one)\b/i, 2: /\bpart\s+(?:2|two)\b/i };
+const partRe = (part: AzPart) => PART_RE[part];
+
+/** Why a caption is not right yet: it opens like a recent one, a name style names too few names, or a series part does not say its part. */
+export function captionProblem(line: string, input: Pick<CaptionInput, "captionStyle" | "names" | "recent" | "series">): string | null {
   const w = firstWord(line);
   if (w && openers(input.recent ?? []).includes(w)) return `starts with "${w}" like a recent caption`;
+  if (input.series && !partRe(input.series.part).test(line)) return `does not say it is Part ${input.series.part} of the A to Z series`;
   const need = input.captionStyle === "choice" ? 2 : NAME_STYLES.includes(input.captionStyle) ? 1 : 0;
   if (need && (input.names ?? []).filter((n) => n.name.trim() && nameRe(n.name).test(line)).length < need) {
     return need === 2 ? "does not name two names from the list" : "does not name a name from the list";
@@ -124,7 +138,10 @@ export function withHashtags(line: string, hashtags: string): string {
   return tags ? `${line}\n\n${tags}` : line;
 }
 
-export const templateLine = (gender: Gender, template: string) => template.replace(/\{gender\}/g, gender).trim();
+export const templateLine = (gender: Gender, template: string, series?: CaptionSeries) => {
+  const line = template.replace(/\{gender\}/g, gender).trim();
+  return series ? `A to Z baby ${gender} names, Part ${series.part} (${partRange(series.part)}). ${line}`.trim() : line;
+};
 
 export interface PostCaption { caption: string; caption_style: string; hashtag_set: string; source: "ai" | "template" }
 
@@ -133,14 +150,19 @@ export interface PostCaption { caption: string; caption_style: string; hashtag_s
  * line is missing or AI is off, the template + always-tags and 2 rotated pool tags. Either way the
  * hashtag set differs from the last 10 posts in `history`.
  */
-export function composePostCaption(o: { ai: AiCaption | null; aiOn: boolean; captionStyle: CaptionStyle; gender: Gender; settings: CaptionSettings; history: CaptionHistory }): PostCaption {
+export function composePostCaption(o: {
+  ai: AiCaption | null; aiOn: boolean; captionStyle: CaptionStyle; gender: Gender; settings: CaptionSettings; history: CaptionHistory;
+  /** A part of an A–Z series: the series tag takes the first theme-tag slot, and the template names the part. */
+  series?: CaptionSeries;
+}): PostCaption {
   const { always, pool } = tagSettings(o.settings);
   const ai = o.aiOn ? o.ai : null;
-  const tags = pickPostTags({ always, themeTags: ai ? ai.tags : [], pool, gender: o.gender, history: o.history.sets, poolCount: ai ? 1 : 2 });
+  const themeTags = [...(o.series ? [AZ_SERIES_TAG] : []), ...(ai ? ai.tags : [])];
+  const tags = pickPostTags({ always, themeTags, pool, gender: o.gender, history: o.history.sets, poolCount: ai ? 1 : 2 });
   const set = tags.join(" ");
   return ai
     ? { caption: withHashtags(ai.line, set), caption_style: o.captionStyle, hashtag_set: set, source: "ai" }
-    : { caption: withHashtags(templateLine(o.gender, o.settings.caption_template), set), caption_style: "template", hashtag_set: set, source: "template" };
+    : { caption: withHashtags(templateLine(o.gender, o.settings.caption_template, o.series), set), caption_style: "template", hashtag_set: set, source: "template" };
 }
 
 /**

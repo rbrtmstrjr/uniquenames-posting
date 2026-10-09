@@ -13,6 +13,7 @@ import { NAME_STYLES, pickStyle, type CaptionName, type CaptionStyle } from "@/l
 import { fail, requireOwner, type ActionResult } from "./result";
 import { fontsOf, sameFonts, validateFonts, type PostFonts } from "@/lib/fonts/post-fonts";
 import { addClosingCard } from "@/lib/cta/card";
+import { seriesPart } from "@/lib/series/az";
 
 const NEEDS_003 = "Changing a post's fonts needs a database update first: run supabase/migrations/003_post_fonts.sql in Supabase. Nothing was re-stamped.";
 const missingColumn = (e: { message: string; code?: string }) => e.code === "PGRST204" || /schema cache/i.test(e.message);
@@ -184,11 +185,14 @@ export async function rewriteCaptionAction(postId: string): Promise<ActionResult
   const own = splitCaption(p.caption ?? "");
   const history = withFirst(others, { id: postId, text: own.text, style: p.caption_style ?? null, set: p.hashtag_set ? tagsInText(p.hashtag_set) : own.tags });
   const captionStyle = pickStyle(history.styles, names, Math.random, others.styles[0] ? [others.styles[0]] : []);
+  // A part of an A–Z series (011) keeps saying which part it is, with the series tag.
+  const part = seriesPart(p);
+  const series = part ? { part } : undefined;
   const ai = await aiCaptionLine({
-    theme: theme as ThemeRow, gender: p.gender, style: p.style, captionStyle, names, recent: history.texts, recentTags: recentTags(history),
+    theme: theme as ThemeRow, gender: p.gender, style: p.style, captionStyle, names, recent: history.texts, recentTags: recentTags(history), series,
   }, REWRITE_TIMEOUT_MS);
   if (!ai) return fail("Could not write a new caption right now. Your caption is unchanged — try again in a moment.");
-  const { caption, caption_style, hashtag_set } = composePostCaption({ ai, aiOn: true, captionStyle, gender: p.gender, settings: settings as SettingsRow, history });
+  const { caption, caption_style, hashtag_set } = composePostCaption({ ai, aiOn: true, captionStyle, gender: p.gender, settings: settings as SettingsRow, history, series });
   let { data, error } = await sb.from("posts").update({ caption, caption_style, hashtag_set }).eq("id", postId).select("id");
   // Before 009 there is no style / hashtag set column: save the caption alone.
   if (missing009(error)) ({ data, error } = await sb.from("posts").update({ caption }).eq("id", postId).select("id"));

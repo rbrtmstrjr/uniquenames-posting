@@ -20,6 +20,11 @@ export const LOW_STOCK = 15;
 export const stockLevel = (count: number, maxCards: number): StockLevel =>
   count <= 0 ? "out" : count < Math.max(LOW_STOCK, maxCards) ? "low" : "ok";
 
+/** The Today footer line in A–Z mode: "A–Z · 2 posts (13 + 13 cards) · Boy · Single · Random ages · Modern Realism". */
+export function azSummary({ gender, age, themeTitle }: { gender: Gender; age: AgeChoice; themeTitle?: string }) {
+  return ["A–Z · 2 posts (13 + 13 cards)", cap(gender), "Single", ageText(age), themeTitle].filter(Boolean).join(" · ");
+}
+
 /** About how many more posts a stock of names covers, at the average Auto post size. */
 export const postsLeft = (count: number, minCards: number, maxCards: number): number =>
   Math.floor(Math.max(0, count) / Math.max(1, Math.round((minCards + maxCards) / 2)));

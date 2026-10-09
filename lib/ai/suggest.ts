@@ -1,7 +1,7 @@
 import "server-only";
 import type { Gender, NameStyle } from "@/lib/db/types";
 import { generateJson, type GeminiSchema, type GenerateJsonResult } from "./gemini";
-import { MEANING_MAX_WORDS, MEANING_MIN_WORDS, VIBE_MAX, sampleForPrompt, type NameSuggestion, type ThemeFields } from "./suggest-filter";
+import { MEANING_MAX_WORDS, MEANING_MIN_WORDS, VIBE_MAX, filterLetterSuggestions, sampleForPrompt, type LetterFilterResult, type NameSuggestion, type ThemeFields } from "./suggest-filter";
 
 /** The owner waits on this with a spinner; a long list can take Gemini a while. */
 export const SUGGEST_TIMEOUT_MS = 50000;
@@ -131,4 +131,77 @@ export function suggestThemes(i: SuggestThemesInput): Promise<GenerateJsonResult
   return generateJson<ThemeFields[]>({
     system: THEMES_SYSTEM, prompt: themesPrompt(i), schema: THEMES_SCHEMA, temperature: 1, timeoutMs: SUGGEST_TIMEOUT_MS, parse: arrayOf<ThemeFields>("themes"),
   });
+}
+
+// ---------------------------------------------------------------- A–Z series: names for missing letters
+/** Extra ideas asked per letter, so the uniqueness filter still leaves enough. */
+export const LETTER_SPARE = 2;
+
+export interface SuggestLettersInput { gender: Gender; needs: { letter: string; want: number }[]; existing: string[] }
+
+export const LETTERS_SYSTEM = [
+  "You suggest baby names for @unique_names, a Facebook page that shares unique, beautiful baby names with their meanings.",
+  "Each name is shown on a photo card with its meaning underneath, so both must read well and be true.",
+  "This batch fills the gaps in an A to Z series: one baby name per letter of the alphabet. Every name must start with the letter it is asked for.",
+  "A single name is exactly one word. Use only letters, with an optional hyphen or apostrophe inside the word. No titles, numbers, emoji or nicknames in brackets.",
+  "Only established given names: names listed in mainstream baby-name references and used as first names by real people, from any culture (English, Hebrew, Arabic, Greek, Latin, Irish, Welsh, Hawaiian, Japanese, Yoruba, Sanskrit and so on). Prefer names parents really choose today.",
+  "Never invent a name, never respell or shorten a word into a name, and never use a surname, a plant, a place or a fictional name unless it is itself an established given name.",
+  "If you know fewer such names for a letter than asked, return fewer for that letter. A short list of real names is right; an invented one is wrong.",
+  "For each name give its origin (language or culture) and its commonly accepted meaning in that language, as etymology references give it: one meaning, not a list of alternatives, and never a guess from how the name sounds. If you are not sure of a name's meaning, choose another name.",
+  `The meaning is 1 to ${MEANING_MAX_WORDS} plain English words, all lowercase, no commas, no ending period (like "the moon", "little bear" or "peace").`,
+  "Every suggestion must be new: never repeat a name from the existing list, in any spelling or capitalization, and never repeat one inside your own list.",
+  "Return JSON: {\"names\": [{\"name\": \"...\", \"origin\": \"...\", \"meaning\": \"...\"}]}.",
+].join("\n");
+
+const LETTERS_SCHEMA: GeminiSchema = {
+  type: "OBJECT",
+  properties: {
+    names: {
+      type: "ARRAY",
+      items: {
+        type: "OBJECT",
+        properties: {
+          name: { type: "STRING", description: "One word, capitalized" },
+          origin: { type: "STRING", description: "The language or culture the name comes from" },
+          meaning: { type: "STRING", description: `1-${MEANING_MAX_WORDS} lowercase English words: the accepted meaning` },
+        },
+        required: ["name", "origin", "meaning"],
+      },
+    },
+  },
+  required: ["names"],
+};
+
+export function lettersPrompt(i: SuggestLettersInput, rng?: () => number): string {
+  const { items, sampled } = sampleForPrompt(i.existing, PROMPT_NAMES_CAP, rng);
+  const ask = i.needs.map((n) => `${n.letter} (${n.want + LETTER_SPARE})`).join(", ");
+  const total = i.needs.reduce((t, n) => t + n.want + LETTER_SPARE, 0);
+  return [
+    `Suggest single-word baby ${i.gender} names that start with these letters (how many in brackets): ${ask}.`,
+    `Each name is one word, capitalized, a real ${i.gender} name (or a unisex name given to ${i.gender}s).`,
+    items.length
+      ? `${sampled ? `Some of the ${i.existing.length} names already on the page (a random sample)` : "Names already on the page (do not repeat any)"}:\n${items.join(", ")}`
+      : "The page has no single names of this kind yet.",
+    `Return at most ${total} names in total, grouped by letter in the order above.`,
+  ].join("\n\n");
+}
+
+/** Gemini's names for the missing letters (unfiltered). Never throws. */
+export function suggestLetterNames(i: SuggestLettersInput): Promise<GenerateJsonResult<NameSuggestion[]>> {
+  return generateJson<NameSuggestion[]>({
+    // Low temperature + some thinking: real names and true meanings matter more than variety here.
+    system: LETTERS_SYSTEM, prompt: lettersPrompt(i), schema: LETTERS_SCHEMA, temperature: 0.4, thinkingBudget: 2048,
+    timeoutMs: SUGGEST_TIMEOUT_MS, parse: arrayOf<NameSuggestion>("names"),
+  });
+}
+
+/**
+ * Fill missing letters, without touching the database: Gemini's names for `needs`, filtered (valid,
+ * real-looking single names with a short meaning, new against `allNames` = every name in the
+ * database, starting with a requested letter, at most `want` per letter).
+ */
+export async function suggestForLetters(i: SuggestLettersInput & { allNames: string[] }): Promise<{ ok: true; result: LetterFilterResult } | { ok: false; error: string }> {
+  const ai = await suggestLetterNames(i);
+  if (!ai.ok) return { ok: false, error: ai.error };
+  return { ok: true, result: filterLetterSuggestions(ai.data, i.allNames, i.needs) };
 }

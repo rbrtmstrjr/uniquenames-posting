@@ -29,6 +29,7 @@ import { restampSelection } from "@/lib/actions/helpers";
 import { regenerateCardAction, reorderCardsAction, selectAllAction, setSelectedAction } from "@/lib/actions/cards";
 import { callAction, optimistic } from "@/lib/actions/call";
 import type { ActionResult } from "@/lib/actions/result";
+import { seriesLabel } from "@/lib/series/az";
 import { useUndoableDelete } from "@/components/cards/use-undoable-delete";
 import type { PostFonts } from "@/lib/fonts/post-fonts";
 import { RestampDialog } from "./restamp-dialog";
@@ -172,6 +173,7 @@ export function PostDetail({ post: initialPost, theme, initialCards, settingsFon
   const restampable = restampSelection(visible);
 
   const label = post.gender === "girl" ? "Girl" : "Boy";
+  const series = seriesLabel(post);
   const failed = visible.filter((c) => c.status === "failed");
   const hasCta = cards.some((c) => c.kind === "cta");
   const nameCards = visible.filter((c) => c.kind !== "cta").length;
@@ -184,7 +186,10 @@ export function PostDetail({ post: initialPost, theme, initialCards, settingsFon
           <h1 className="font-display text-2xl text-ink sm:text-3xl">
             {new Date(post.post_date + "T00:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })} · {label}
           </h1>
-          <p className="mt-1 text-sm text-muted">{theme.title} · {post.style} · {nameCards} cards{visible.length > nameCards ? " + closing card" : ""}</p>
+          <p className="mt-1 text-sm text-muted">
+            {series && <><span className="font-semibold text-accent">{series}</span> · </>}
+            {theme.title} · {post.style} · {nameCards} cards{visible.length > nameCards ? " + closing card" : ""}
+          </p>
         </div>
         <div className="flex items-center gap-2">
           {statusBadge({ status: post.status, cards: visible })}

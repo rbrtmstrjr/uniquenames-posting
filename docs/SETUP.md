@@ -98,6 +98,15 @@ Every new post ends with one extra picture from the same photoshoot that says "F
 4. **Settings > Closing card**: switch it on or off and edit the messages, one per line (`/` = a line break, up to 3 lines; `{gender}` becomes boy or girl). Each post gets the message used longest ago, never the same as the post before.
 5. On a post the closing card has a **Closing card** badge and is always saved last (you can still unselect it). Open it to change its message (Save text re-stamps the photo) or make a new picture. Posts without one show **Add closing card**.
 
+## A–Z series (existing install)
+One run makes two posts of single names, one name per letter: **Part 1 (A–M)** and **Part 2 (N–Z)**, 13 cards each, in alphabetical order, on the same theme (one photoshoot). Everything else is a normal post: fonts, child age, caption (it says which part it is, with `#atozbabynames` among its tags), closing card, selection, order, save, mark posted.
+1. Supabase **SQL Editor**: paste and run `supabase/migrations/011_az_series.sql` (safe to run again; no worker restart needed: the PC makes these cards like any others). Until it runs, Today has no A–Z option and everything else works as before.
+2. Push to GitHub so Vercel redeploys the website.
+3. **Today > Post type > A–Z series**: pick Boy or Girl, the theme, child age and fonts as usual. The 26 letters show green (a single name is ready for that letter) or amber (none yet; a small number = ideas waiting for your approval).
+4. Amber letters: press **Fill missing letters**. Gemini suggests up to 3 real names (with their meanings) for each missing letter; they wait as **Pending** on the Names page. Use **Review … waiting** (or Names > Pending with the **Starts with** letter filter), approve the ones you like, reject the rest. Check every name and meaning before approving: rare letters (Q, U, X, Y) are where AI ideas are weakest.
+5. When all 26 letters are green, press **Make A–Z (2 posts)**. For each letter the name waiting longest is used. Pressing twice still makes one series. Both parts show on Today while they are made (26 cards + 2 closing cards; the PC makes them one by one) and on the Posts page with their **A–Z Part 1 (A–M)** / **Part 2 (N–Z)** label.
+6. Deleting one part frees its names; the theme stays used until both parts are deleted.
+
 ## When something is wrong
 - Header dot red, "PC offline": turn on the PC. The worker starts at login. **Generate** is disabled (the button says why) until the PC is back.
 - Amber dot, "ComfyUI closed": open ComfyUI Desktop. **Generate** stays disabled until then; text edits and Re-stamp still work.

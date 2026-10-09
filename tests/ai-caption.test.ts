@@ -176,3 +176,32 @@ describe("aiCaption", () => {
     expect(await aiCaption({ theme, gender: "boy", settings: legacy })).toMatchObject({ source: "ai" });
   });
 });
+
+describe("A–Z series captions (011)", () => {
+  it("the prompt says which part of the A to Z series this is", () => {
+    const p = captionPrompt({ theme, gender: "boy", style: "single", captionStyle: "story", series: { part: 1 } });
+    expect(p).toContain("Part 1 of 2 of an A to Z series of single-word baby boy names: one name for each letter from A to M.");
+    expect(p).toContain('"Part 1 of our A to Z baby boy names, A to M"');
+    expect(captionPrompt({ theme, gender: "girl", captionStyle: "story", series: { part: 2 } })).toContain("each letter from N to Z");
+    expect(captionPrompt({ theme, gender: "girl", captionStyle: "story" })).not.toContain("A to Z");
+  });
+
+  it("a series caption that does not say its part is a problem (and earns the retry)", () => {
+    const base = { captionStyle: "story" as const, names: [], recent: [] };
+    expect(captionProblem("Soft light and baby boy names.", { ...base, series: { part: 1 } })).toMatch(/Part 1 of the A to Z series/);
+    expect(captionProblem("Part 1 of our A to Z baby boy names, A to M.", { ...base, series: { part: 1 } })).toBeNull();
+    expect(captionProblem("Part one of our A–Z names, A to M.", { ...base, series: { part: 1 } })).toBeNull();
+    expect(captionProblem("Part 1 of our A to Z baby boy names.", { ...base, series: { part: 2 } })).toMatch(/Part 2/);
+  });
+
+  it("the series hashtag takes a theme-tag slot; the template fallback names the part too", async () => {
+    const { composePostCaption } = await import("@/lib/ai/caption");
+    const history = postHistory([]);
+    const ai = { line: "Part 1 of our A to Z baby boy names, A to M, in a cozy pumpkin patch.", tags: ["#pumpkinbaby"] };
+    const withAi = composePostCaption({ ai, aiOn: true, captionStyle: "story", gender: "boy", settings: s009, history, series: { part: 1 } });
+    expect(withAi.hashtag_set.split(" ")).toEqual(["#uniquenames", "#atozbabynames", "#pumpkinbaby", "#babynames"]);
+    const tpl = composePostCaption({ ai: null, aiOn: false, captionStyle: "story", gender: "girl", settings: s009, history, series: { part: 2 } });
+    expect(tpl.caption.startsWith("A to Z baby girl names, Part 2 (N to Z). Here are some beautiful names for your baby girl. 🥰")).toBe(true);
+    expect(tpl.hashtag_set).toContain("#atozbabynames");
+  });
+});

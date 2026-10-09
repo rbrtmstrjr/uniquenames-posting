@@ -17,6 +17,7 @@ import { regenerateCardAction } from "@/lib/actions/cards";
 import { callAction } from "@/lib/actions/call";
 import { CardDialog } from "@/components/cards/card-dialog";
 import { useUndoableDelete } from "@/components/cards/use-undoable-delete";
+import { seriesLabel } from "@/lib/series/az";
 
 // Making order, with the closing card (010) always last.
 const byPosition = (a: CardRow, b: CardRow) => (a.kind === "cta" ? 1 : 0) - (b.kind === "cta" ? 1 : 0) || a.position - b.position;
@@ -40,10 +41,11 @@ export function ActivePost({ post, initialCards }: { post: PostRow; initialCards
   const pct = cards.length ? Math.round((done / cards.length) * 100) : 0;
   const finished = done === cards.length && cards.length > 0;
   const label = post.gender === "girl" ? "Girl" : "Boy";
+  const series = seriesLabel(post);
 
   return (
     <Panel
-      title={finished ? "Just finished" : "Making now"}
+      title={`${finished ? "Just finished" : "Making now"}${series ? ` · ${series}` : ""}`}
       action={<Link href={`/posts/${post.id}`} className="inline-flex min-h-11 items-center gap-1 text-xs font-bold text-accent">Open post <ArrowRight className="size-3.5" /></Link>}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>

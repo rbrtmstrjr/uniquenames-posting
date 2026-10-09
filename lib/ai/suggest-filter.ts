@@ -3,6 +3,7 @@
 import type { Gender, NameStyle } from "@/lib/db/types";
 import { nameKey, normalizeName, styleOf } from "@/lib/actions/helpers";
 import { validateName, validateTheme, type ThemeInput } from "@/lib/actions/validate";
+import { letterOf } from "@/lib/series/az";
 
 export interface NameSuggestion { name: string; meaning: string }
 export type ThemeFields = Omit<ThemeInput, "gender">;
@@ -25,7 +26,7 @@ const cleanMeaning = (m: string) => m.replace(/\s+/g, " ").trim().replace(/[.!]+
  * name in the database, any gender or status) nor earlier in the batch. A two-word name may
  * share its first OR second word with another name: only the full name must be new.
  */
-export function filterNameSuggestions(cands: NameSuggestion[], existing: Iterable<string>, style: NameStyle): FilterResult<NameSuggestion> {
+export function filterNameSuggestions(cands: NameSuggestion[], existing: Iterable<string>, style: NameStyle, minWords: number = MEANING_MIN_WORDS): FilterResult<NameSuggestion> {
   const have = new Set<string>();
   for (const n of existing) have.add(nameKey(n));
   const fresh: NameSuggestion[] = [];
@@ -35,7 +36,7 @@ export function filterNameSuggestions(cands: NameSuggestion[], existing: Iterabl
     const name = normalizeName(typeof c?.name === "string" ? c.name : "");
     const meaning = cleanMeaning(typeof c?.meaning === "string" ? c.meaning : "");
     const words = meaning ? meaning.split(" ").length : 0;
-    if (validateName(name, meaning) || styleOf(name) !== style || name.split(" ").length > 2 || words < MEANING_MIN_WORDS || words > MEANING_MAX_WORDS) {
+    if (validateName(name, meaning) || styleOf(name) !== style || name.split(" ").length > 2 || words < minWords || words > MEANING_MAX_WORDS) {
       invalid++;
       continue;
     }
@@ -133,4 +134,29 @@ export function sampleForPrompt<T>(items: T[], cap: number, rng: () => number = 
     [a[i], a[j]] = [a[j], a[i]];
   }
   return { items: a.slice(0, cap), sampled: true };
+}
+
+export interface LetterSuggestion extends NameSuggestion { letter: string }
+/** A real name's accepted meaning is often one word ("Quentin: fifth", "Xolani: peace"): fine for the letter fill. */
+export const LETTER_MEANING_MIN_WORDS = 1;
+export interface LetterFilterResult extends FilterResult<LetterSuggestion> { offLetter: number }
+
+/**
+ * "Fill missing letters" (A–Z series): the usual single-name filter (valid, a meaning of 1 to 6 words, new
+ * against every name in the database and earlier in the batch), then only names that start with a
+ * requested letter, at most `want` per letter, in Gemini's order.
+ */
+export function filterLetterSuggestions(cands: NameSuggestion[], existing: Iterable<string>, needs: { letter: string; want: number }[]): LetterFilterResult {
+  const { fresh, duplicates, invalid } = filterNameSuggestions(cands, existing, "single", LETTER_MEANING_MIN_WORDS);
+  const room = new Map(needs.map((n) => [n.letter, n.want]));
+  const kept: LetterSuggestion[] = [];
+  let offLetter = 0;
+  for (const s of fresh) {
+    const letter = letterOf(s.name);
+    const left = letter ? room.get(letter) ?? 0 : 0;
+    if (!letter || left <= 0) { offLetter++; continue; }
+    room.set(letter, left - 1);
+    kept.push({ ...s, letter });
+  }
+  return { fresh: kept, duplicates, invalid, offLetter };
 }
