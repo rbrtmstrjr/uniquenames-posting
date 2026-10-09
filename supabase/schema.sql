@@ -1,5 +1,5 @@
 -- Unique Names posting: database. Paste the whole file into the Supabase SQL editor and run it once.
--- A project created before v2 runs supabase/migrations/002_v2.sql, 003_post_fonts.sql, 004_subject_age.sql, 005_reels.sql, 006_reel_voices.sql, 007_reel_themes.sql, 008_reel_playbook.sql, 009_captions.sql, 010_cta_card.sql then 011_az_series.sql instead (this file already includes them).
+-- A project created before v2 runs supabase/migrations/002_v2.sql, 003_post_fonts.sql, 004_subject_age.sql, 005_reels.sql, 006_reel_voices.sql, 007_reel_themes.sql, 008_reel_playbook.sql, 009_captions.sql, 010_cta_card.sql, 011_az_series.sql then 012_two_styles.sql instead (this file already includes them).
 -- Status 'pending' = an AI-suggested name/theme waiting for approval; nothing here ever plans it (only 'available').
 
 -- ---------------------------------------------------------------- tables
@@ -35,7 +35,7 @@ on conflict (id) do nothing;
 
 -- reels (007): visual themes, each a positive-only style block + one preview picture; before settings, which references them
 create table if not exists public.reel_themes (
-  id text primary key,               -- knitted | animated3d | watercolor | clay | papercraft | anime | sketch | cinematic
+  id text primary key,               -- crayon | redthread (012) + knitted | animated3d | watercolor | clay | papercraft | anime | sketch | cinematic (007)
   label text not null,
   emoji text not null default '',
   blurb text not null default '',
@@ -43,6 +43,9 @@ create table if not exists public.reel_themes (
   faces boolean not null default true,      -- expressive faces (false: feelings show through pose only)
   grayscale boolean not null default false, -- the worker turns the picture grey after Z-Image (sketch)
   sort int not null default 0,
+  active boolean not null default true,     -- 012: offered in the pickers (the 8 themes of 007 stay only for old reels)
+  keep_red boolean not null default false,  -- 012: the worker keeps only strong reds, the rest turns grey (redthread)
+  preview_prompt text,               -- 012: the whole preview prompt, used verbatim (null = the worker's fixed moment)
   preview_path text,                 -- themes/<id>/preview-v<version>.jpg in the reels bucket
   preview_status text not null default 'missing' check (preview_status in ('missing', 'queued', 'making', 'ready', 'failed')),
   error text,
@@ -73,6 +76,26 @@ on conflict (id) do update set
   grayscale = excluded.grayscale, sort = excluded.sort, style = excluded.style
 where (t.label, t.emoji, t.blurb, t.faces, t.grayscale, t.sort, t.style)
   is distinct from (excluded.label, excluded.emoji, excluded.blurb, excluded.faces, excluded.grayscale, excluded.sort, excluded.style);
+-- reels (012): the two styles from the owner's prompt guides (Crayon = the default); the 8 themes above stay for old reels only
+insert into public.reel_themes as t (id, label, emoji, blurb, faces, grayscale, keep_red, active, sort, style, preview_prompt) values
+  ('crayon', 'Crayon', '🖍️', 'A rough wax crayon drawing on white paper: bold colours, big feelings, paper grain showing through.', true, false, false, true, 9,
+   'A rough wax crayon drawing on white paper, drawn by hand with heavy pressure. Thick waxy crayon strokes going in visible directions, streaky uneven coloring, white paper grain showing through the gaps between strokes, coloring slightly outside the lines, scribbly cross-hatching for shading, and bold wobbly dark crayon outlines around every shape. Looks like a real crayon artwork scanned from paper, not a painting.',
+   E'A rough wax crayon drawing on white paper, drawn by hand with heavy pressure. Thick waxy crayon strokes going in visible directions, streaky uneven coloring, white paper grain showing through the gaps between strokes, coloring slightly outside the lines, scribbly cross-hatching for shading, and bold wobbly dark crayon outlines around every shape. Looks like a real crayon artwork scanned from paper, not a painting.\n\nThe scene has depth, with detailed objects in the close foreground, the characters in the middle ground, and a smaller, paler background in the distance.\n\nA young mother with long flowing hair holds a swaddled baby close to her chest, head tilted down, gazing at the baby with a wide joyful smile, eyes crinkled shut from happiness, and bright rosy scribbled cheeks. The baby laughs up at her with a big open-mouth smile and sparkling eyes, one tiny hand reaching toward her face. Tall grass and wildflowers in the foreground, small pale mountains under a sunset sky behind. The feeling is pure love and warmth.\n\nWarm soft light from one side, with a glowing crayon outline along the characters'' hair and shoulders, and darker crayon hatching on the shadow side. Bold saturated colors, expressive emotional storybook crayon style. Not a painting, not smooth, no blending, no gradients, not photorealistic, no crayons or art supplies visible in the image, no text.'),
+  ('redthread', 'Red Thread', '🧵', 'Black-and-white storybook line art with one red thread tying parent and child in every picture.', true, false, true, true, 10,
+   'A clean black and white ink line illustration in a simple modern storybook style. Smooth confident outlines of even thickness, simple rounded shapes, minimal details, and soft flat grey tones. Light warm grey background with subtle paper texture. The entire image is monochrome grayscale except for one single thin bright red thread, the only color in the image.',
+   E'The red thread is the only color in the image. A clean black and white ink line illustration in a simple modern storybook style. Smooth confident outlines of even thickness, simple rounded shapes, minimal details, and soft flat grey tones. Light warm grey background with subtle paper texture. The entire image is monochrome grayscale except for one single thin bright red thread, the only color in the image.\n\nThe scene has depth: the main characters in the foreground with the boldest black outlines, simple furniture in the middle ground with thinner grey lines, and the background faded into pale grey.\n\nA clearly visible thin bright red thread, thick enough to be clearly visible on a phone screen, is tied in a small bow around the mother''s wrist and tied around the baby''s tiny wrist, one continuous thread connecting both wrists, with a short end trailing onto the blanket.\nA young mother sits on a bed holding her newborn baby in her arms, looking down with a soft loving smile and closed curved eyes. The baby sleeps peacefully with a tiny smile.\nThe feeling is a love that just began.\n\nGrayscale everything except the red thread. Not photorealistic, not 3D, no pencil sketch texture, no other colors, no text. The red thread is the only color in the image.')
+on conflict (id) do update set
+  label = excluded.label, emoji = excluded.emoji, blurb = excluded.blurb, faces = excluded.faces, grayscale = excluded.grayscale,
+  keep_red = excluded.keep_red, active = excluded.active, sort = excluded.sort, style = excluded.style, preview_prompt = excluded.preview_prompt
+where (t.label, t.emoji, t.blurb, t.faces, t.grayscale, t.keep_red, t.active, t.sort, t.style, t.preview_prompt)
+  is distinct from (excluded.label, excluded.emoji, excluded.blurb, excluded.faces, excluded.grayscale, excluded.keep_red, excluded.active,
+                    excluded.sort, excluded.style, excluded.preview_prompt);
+
+-- the 8 themes of 007: kept for old reels, no longer offered (a preview still waiting for one is dropped from the line)
+update public.reel_themes set active = false
+where id in ('knitted', 'animated3d', 'watercolor', 'clay', 'papercraft', 'anime', 'sketch', 'cinematic') and active;
+update public.reel_themes set preview_status = case when preview_path is null then 'missing' else 'ready' end
+where not active and preview_status = 'queued';
 
 create table if not exists public.settings (
   id int primary key default 1 check (id = 1),
@@ -104,7 +127,7 @@ create table if not exists public.settings (
   reel_music boolean not null default true,
   reel_music_volume int not null default 18 constraint settings_reel_music_volume_check check (reel_music_volume between 5 and 40),
   -- reels (007): the default visual theme
-  reel_theme_id text not null default 'knitted' references public.reel_themes (id),
+  reel_theme_id text not null default 'crayon' references public.reel_themes (id),
   -- captions (009): the hashtags on every post + the pool one tag per post is rotated from (`hashtags` is kept for older app versions)
   hashtags_always text not null default '#uniquenames',
   hashtag_pool text not null default
@@ -277,6 +300,9 @@ create table if not exists public.reel_scenes (
   subject text constraint reel_scenes_subject_check check (subject in ('mom', 'baby', 'both', 'object', 'none')),
   punch text,
   time_jump boolean not null default false,
+  -- 012: the guide styles' "The feeling is ..." phrase and Red Thread's thread state
+  feeling text,
+  thread text constraint reel_scenes_thread_check check (thread in ('plain', 'tight', 'stretched', 'tangled', 'loose')),
   unique (reel_id, position)
 );
 alter table public.themes drop constraint if exists themes_preview_fk;

@@ -21,6 +21,7 @@ const earlier = [
 const m009 = read("supabase", "migrations", "009_captions.sql");
 const m010 = read("supabase", "migrations", "010_cta_card.sql");
 const m011 = stripSupabase(read("supabase", "migrations", "011_az_series.sql"));
+const m012 = stripSupabase(read("supabase", "migrations", "012_two_styles.sql"));
 
 async function liveDb(hashtags?: string) {
   const db = new PGlite();
@@ -102,6 +103,7 @@ describe("fresh schema.sql matches v1 + 002..009 (+ 010)", () => {
     const migrated = await migratedDb();
     await migrated.exec(m010);
     await migrated.exec(m011);
+    await migrated.exec(m012);
     const want = await shape(migrated);
     const cols = (want.columns as { table_name: string; column_name: string }[]).map((c) => `${c.table_name}.${c.column_name}`);
     expect(cols).toEqual(expect.arrayContaining(["settings.hashtags_always", "settings.hashtag_pool", "posts.caption_style", "posts.hashtag_set", "reels.caption", "reels.hashtags"]));

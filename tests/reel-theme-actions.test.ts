@@ -141,11 +141,14 @@ describe("theme + line label helpers", () => {
     expect(previewShown(t("making"))).toBeNull();
     expect(previewShown(t("failed", "themes/a/preview-v1.jpg"))).toBeNull();
   });
-  it("THEME_LABEL mirrors migration 007's seed (label + emoji, in order)", () => {
-    const sql = readFileSync(join(process.cwd(), "supabase", "migrations", "007_reel_themes.sql"), "utf8");
-    const seed = [...sql.matchAll(/^\s*\('([a-z0-9]+)', '([^']*)', '([^']*)', '/gm)].map((m) => [m[1], { label: m[2], emoji: m[3] }]);
-    expect(seed).toHaveLength(8);
-    expect(Object.entries(THEME_LABEL)).toEqual(seed);
+  it("THEME_LABEL mirrors the seeds of migrations 012 (the 2 guide styles first) and 007 (label + emoji, in order)", () => {
+    const seed = (f: string) => {
+      const sql = readFileSync(join(process.cwd(), "supabase", "migrations", f), "utf8");
+      return [...sql.matchAll(/^\s*\('([a-z0-9]+)', '([^']*)', '([^']*)', '/gm)].map((m) => [m[1], { label: m[2], emoji: m[3] }]);
+    };
+    expect(seed("012_two_styles.sql")).toEqual([["crayon", { label: "Crayon", emoji: "🖍️" }], ["redthread", { label: "Red Thread", emoji: "🧵" }]]);
+    expect(seed("007_reel_themes.sql")).toHaveLength(8);
+    expect(Object.entries(THEME_LABEL)).toEqual([...seed("012_two_styles.sql"), ...seed("007_reel_themes.sql")]);
   });
   it("order by sort then id; names fall back to knitted", () => {
     expect(([{ id: "clay", sort: 2 }, { id: "sketch", sort: 1 }, { id: "anime", sort: 2 }] as const).slice().sort(byThemeOrder).map((x) => x.id)).toEqual(["sketch", "anime", "clay"]);

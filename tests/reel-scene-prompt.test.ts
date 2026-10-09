@@ -2,14 +2,14 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { NO_TEXT } from "@/lib/planner/prompt";
-import { REEL_THEME_IDS } from "@/lib/db/types";
+import { LEGACY_THEME_IDS } from "@/lib/db/types";
 import {
   capWords, castTag, childAge, childNoun, childTagWithAge, dedupeFragments, HOOK_ROOM, onlyLine, EMOTION_FACE, EMOTION_LIGHT, EMOTION_POSE, EMOTION_POSE_ONE, frameOf, lightFor, isDollCast, joinIdea, KNIT_POSE, KNIT_STYLE, positiveOnly,
   SHOT_FRAMES, scenePrompt, splitIdea, undoll, wardrobeCue,
 } from "@/lib/reels/prompt";
 import { REEL_EMOTIONS, REEL_SHOTS } from "@/lib/reels/motion";
 import { REEL_SHOT_SIZES, REEL_SUBJECTS } from "@/lib/reels/shots";
-import { DEFAULT_THEME_ID, STATIC_THEMES, STILL_STYLE_TAG, STYLE_TAG, staticTheme, styleTag, themeOf } from "@/lib/reels/themes";
+import { DEFAULT_THEME_ID, LEGACY_THEME_ID, STATIC_THEMES, STILL_STYLE_TAG, STYLE_TAG, staticTheme, styleTag, themeOf } from "@/lib/reels/themes";
 
 const DOLLS = {
   adult: "the mom doll: a crocheted mother doll with chunky dark-brown yarn hair gathered in a low bun, warm tan wool skin, a mustard-yellow cable-knit cardigan over a cream knitted dress",
@@ -31,7 +31,7 @@ describe("themes", () => {
   it("the static themes mirror migration 007's seed verbatim (style + faces)", () => {
     const sql = readFileSync(join(process.cwd(), "supabase", "migrations", "007_reel_themes.sql"), "utf8");
     const rows = [...sql.matchAll(/\('([a-z0-9]+)', '[^']*', '[^']*', '(?:[^']|'')*', (true|false), (?:true|false), \d+,\s*\n\s*'((?:[^']|'')*)'\)/g)];
-    expect(rows.map((r) => r[1])).toEqual([...REEL_THEME_IDS]);
+    expect(rows.map((r) => r[1])).toEqual([...LEGACY_THEME_IDS]);
     for (const [, id, faces, style] of rows) {
       const t = STATIC_THEMES[id as keyof typeof STATIC_THEMES];
       expect(t.style, id).toBe(style.replace(/''/g, "'"));
@@ -42,7 +42,9 @@ describe("themes", () => {
   });
 
   it("unknown ids fall back to knitted; a usable DB row wins over the static copy", () => {
-    expect(DEFAULT_THEME_ID).toBe("knitted");
+    // new reels default to Crayon (012); a reel without a theme is an old Knitted Doll reel
+    expect(DEFAULT_THEME_ID).toBe("crayon");
+    expect(LEGACY_THEME_ID).toBe("knitted");
     expect(staticTheme("nope")).toBe(STATIC_THEMES.knitted);
     expect(staticTheme(null)).toBe(STATIC_THEMES.knitted);
     expect(staticTheme("clay")).toBe(STATIC_THEMES.clay);
@@ -52,8 +54,8 @@ describe("themes", () => {
   });
 
   it("every theme has a short style tag (≤ 12 words, positive-only, no lighting, never camera)", () => {
-    expect(Object.keys(STYLE_TAG)).toEqual([...REEL_THEME_IDS]);
-    for (const id of REEL_THEME_IDS) {
+    expect(Object.keys(STYLE_TAG)).toEqual([...LEGACY_THEME_IDS]);
+    for (const id of LEGACY_THEME_IDS) {
       expect(words(STYLE_TAG[id]), id).toBeLessThanOrEqual(12);
       expect(STYLE_TAG[id], id).not.toMatch(/camera|\blight\b|avoid|\bno\b|\bnot\b/i);
     }
@@ -184,7 +186,7 @@ describe("scenePrompt v2: front-loaded token order", () => {
   });
 
   it("scene 1 keeps the top quarter calm (room for the hook card), faces and action below it; only scene 1", () => {
-    for (const id of REEL_THEME_IDS) {
+    for (const id of LEGACY_THEME_IDS) {
       const p = scenePrompt(STATIC_THEMES[id], DOLLS, line, 0);
       expect(p, id).toContain(HOOK_ROOM);
       expect(p.indexOf(HOOK_ROOM)).toBeGreaterThan(p.indexOf(STYLE_TAG[id]));
@@ -216,7 +218,7 @@ describe("scenePrompt v2: front-loaded token order", () => {
   });
 
   it("is positive-only (apart from NO_TEXT) and never says camera, for every theme, emotion, size and subject", () => {
-    for (const id of REEL_THEME_IDS) {
+    for (const id of LEGACY_THEME_IDS) {
       for (const emotion of REEL_EMOTIONS) {
         for (const shot_size of REEL_SHOT_SIZES) {
           for (const subject of REEL_SUBJECTS) {
@@ -302,7 +304,7 @@ describe("no strangers, no faces on objects, a fixed child age (e2e 4cc98904)", 
   const CAST = { ...PEOPLE, child_age: "a 10-month-old baby boy" };
 
   it("style tags never invite faces, families or extra characters; the still variant has no character wording at all", () => {
-    for (const id of REEL_THEME_IDS) {
+    for (const id of LEGACY_THEME_IDS) {
       expect(STYLE_TAG[id], id).not.toMatch(/face|family|people|characters?/i);
       expect(STILL_STYLE_TAG[id], id).not.toMatch(/face|family|people|character|doll|skin|figure/i);
       expect(STILL_STYLE_TAG[id].split(" ").length, id).toBeLessThanOrEqual(12);
@@ -313,7 +315,7 @@ describe("no strangers, no faces on objects, a fixed child age (e2e 4cc98904)", 
   it("pictures with nobody in them carry no lens / mm words (they summon a lens in frame); people shots keep them", async () => {
     const { STILL_FRAMES } = await import("@/lib/reels/prompt");
     const block = { ...line, idea: "a wooden blue block tipping off a small stack — the play mat at noon" };
-    for (const id of REEL_THEME_IDS) for (const subject of ["object", "none"]) for (const shot_size of REEL_SHOT_SIZES) for (let i = 1; i < 4; i++) {
+    for (const id of LEGACY_THEME_IDS) for (const subject of ["object", "none"]) for (const shot_size of REEL_SHOT_SIZES) for (let i = 1; i < 4; i++) {
       const p = scenePrompt(STATIC_THEMES[id], CAST, { ...block, subject, shot_size }, i);
       expect(p, `${id}/${subject}/${shot_size}`).not.toMatch(/\blens\b|\d+\s?mm\b|camera/i);
     }

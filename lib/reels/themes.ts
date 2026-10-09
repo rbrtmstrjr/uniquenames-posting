@@ -1,13 +1,19 @@
-import { REEL_THEME_IDS, type ReelThemeId, type ReelThemeRow, type ThemePreviewStatus } from "@/lib/db/types";
+import { REEL_THEME_IDS, type LegacyThemeId, type ReelThemeId, type ReelThemeRow, type ThemePreviewStatus } from "@/lib/db/types";
+import { CRAYON_GUIDE, RED_THREAD_GUIDE } from "./guide-text";
 
-// The 8 visual themes (migration 007). The database row is the source of truth (re-running 007 refreshes its
-// wording); this static map mirrors the seed so prompts can be built before 007 runs and in tests.
-// Every style block is positive-only (Z-Image runs at cfg 1) and never says "camera".
+// The visual themes. From migration 012 only the 2 guide styles (Crayon, Red Thread) are offered; the 8 themes of
+// migration 007 stay in the database (inactive) so old reels can still re-render and redo images. The database row
+// is the source of truth for the preview; this static map mirrors the seeds so prompts can be built before a
+// migration runs and in tests. The 8 old style blocks are positive-only (Z-Image runs at cfg 1) and never say
+// "camera"; the 2 guide styles use the owner's master prompts verbatim (lib/reels/guide-text.ts).
 
 /** What the prompt builder needs from a theme: its style block and whether faces carry the feeling. */
 export type ReelTheme = Pick<ReelThemeRow, "id" | "style" | "faces">;
 
-export const DEFAULT_THEME_ID: ReelThemeId = "knitted";
+/** New reels and the Settings default (migration 012). */
+export const DEFAULT_THEME_ID: ReelThemeId = "crayon";
+/** A reel with no theme (written before 007, or its theme deleted) is drawn as Knitted Doll, like the worker. */
+export const LEGACY_THEME_ID: ReelThemeId = "knitted";
 
 /** The knitted-doll look from the PC spike (round 3, docs/reference/reel-pc-spike.md); the set line widened beyond rooms. */
 export const KNIT_STYLE =
@@ -22,8 +28,10 @@ export const KNIT_STYLE =
   "Palette: warm beige, cream, oatmeal and natural linen with mustard yellow, warm orange, rust and sage accents. " +
   "Soft rounded edges everywhere, cozy and tender.";
 
-/** The seed of migration 007, verbatim (style + faces). */
+/** The seeds of migrations 012 (the guide styles' first paragraph) and 007, verbatim (style + faces). */
 export const STATIC_THEMES: Record<ReelThemeId, ReelTheme> = {
+  crayon: { id: "crayon", faces: true, style: CRAYON_GUIDE.style },
+  redthread: { id: "redthread", faces: true, style: RED_THREAD_GUIDE.style },
   knitted: { id: "knitted", faces: false, style: KNIT_STYLE },
   animated3d: {
     id: "animated3d", faces: true,
@@ -60,7 +68,7 @@ export const STATIC_THEMES: Record<ReelThemeId, ReelTheme> = {
  * condensed so the shot, the moment and the characters lead the prompt. The long block stays for theme previews.
  * Positive-only, never "camera", no lighting (the prompt sets the light per line).
  */
-export const STYLE_TAG: Record<ReelThemeId, string> = {
+export const STYLE_TAG: Record<LegacyThemeId, string> = {
   knitted: "handmade amigurumi crochet doll photography, visible stitches, felt and yarn set",
   animated3d: "stylized 3D animated feature-film still, soft global illumination, warm honey palette",
   watercolor: "storybook watercolor illustration on textured paper, soft washes, fine ink lines",
@@ -74,8 +82,8 @@ export const STYLE_TAG: Record<ReelThemeId, string> = {
 export const isThemeId = (x: unknown): x is ReelThemeId =>
   typeof x === "string" && (REEL_THEME_IDS as readonly string[]).includes(x);
 
-/** The static copy of a theme; an unknown / empty id falls back to the default (knitted). */
-export const staticTheme = (id?: string | null): ReelTheme => STATIC_THEMES[isThemeId(id) ? id : DEFAULT_THEME_ID];
+/** The static copy of a theme; an unknown / empty id is an old reel's: Knitted Doll. */
+export const staticTheme = (id?: string | null): ReelTheme => STATIC_THEMES[isThemeId(id) ? id : LEGACY_THEME_ID];
 
 /** A theme row from the database if it is usable, else the static copy of that id (or knitted). */
 export function themeOf(row: unknown, id?: string | null): ReelTheme {
@@ -90,7 +98,7 @@ export function themeOf(row: unknown, id?: string | null): ReelTheme {
  * The style tag for pictures with nobody in them (objects, empty places, B-roll): no doll, face, skin or character
  * wording, so a bottle never gets a face and no stranger walks in.
  */
-export const STILL_STYLE_TAG: Record<ReelThemeId, string> = {
+export const STILL_STYLE_TAG: Record<LegacyThemeId, string> = {
   knitted: "handmade felt and yarn miniature set photography, visible stitches, soft textiles",
   animated3d: "stylized 3D animated feature-film still, soft global illumination, warm honey palette",
   watercolor: "storybook watercolor illustration on textured paper, soft washes, fine ink lines",
@@ -101,17 +109,21 @@ export const STILL_STYLE_TAG: Record<ReelThemeId, string> = {
   cinematic: "cinematic real-life film still, fine film grain, shallow depth of field",
 };
 
-/** The short style tag of a theme (unknown id → the default theme's); `still` = the people-free variant. */
-export const styleTag = (t: Pick<ReelTheme, "id">, still = false) =>
-  (still ? STILL_STYLE_TAG : STYLE_TAG)[isThemeId(t.id) ? t.id : DEFAULT_THEME_ID];
+/** The short style tag of an old theme (any other id → knitted's); `still` = the people-free variant. */
+export const styleTag = (t: Pick<ReelTheme, "id">, still = false) => {
+  const tags: Record<string, string> = still ? STILL_STYLE_TAG : STYLE_TAG;
+  return tags[t.id] ?? tags[LEGACY_THEME_ID];
+};
 
 /** Knitted Doll draws every character as a crocheted doll: the cast and ideas are written as dolls. */
 export const isDollTheme = (t: Pick<ReelTheme, "id">) => t.id === "knitted";
 
 // ---------------------------------------------------------------- UI helpers (Settings grid + review picker)
 
-/** Name + emoji per theme (mirrors the 007 seed; the DB row wins when the page has it). */
+/** Name + emoji per theme (mirrors the 012 + 007 seeds; the DB row wins when the page has it). */
 export const THEME_LABEL: Record<ReelThemeId, { label: string; emoji: string }> = {
+  crayon: { label: "Crayon", emoji: "🖍️" },
+  redthread: { label: "Red Thread", emoji: "🧵" },
   knitted: { label: "Knitted Doll", emoji: "🧶" },
   animated3d: { label: "3D Animated", emoji: "🎬" },
   watercolor: { label: "Storybook Watercolor", emoji: "🎨" },
@@ -121,9 +133,9 @@ export const THEME_LABEL: Record<ReelThemeId, { label: string; emoji: string }> 
   sketch: { label: "Pencil Sketch (B&W)", emoji: "✏️" },
   cinematic: { label: "Cinematic Real", emoji: "📷" },
 };
-/** "🎬 3D Animated" for any id (unknown / null -> the default theme). */
+/** "🎬 3D Animated" for any id (unknown / null -> Knitted Doll, an old reel's look). */
 export const themeName = (id?: string | null) => {
-  const t = THEME_LABEL[isThemeId(id) ? id : DEFAULT_THEME_ID];
+  const t = THEME_LABEL[isThemeId(id) ? id : LEGACY_THEME_ID];
   return `${t.emoji} ${t.label}`;
 };
 
@@ -149,5 +161,7 @@ export const previewShown = (t: Pick<ReelThemeRow, "preview_status" | "preview_p
  *  then offers Retry (re-applying the same theme), which a normal pick of the current theme would skip. */
 export const THEME_PARTIAL = "The theme was saved, but";
 export const isPartialThemeSave = (error: string) => error.startsWith(THEME_PARTIAL);
+/** Offered in the pickers: every theme before 012 (no `active` column), only the 2 guide styles after it. */
+export const isActiveTheme = (t: Pick<ReelThemeRow, "active">) => t.active !== false;
 /** Display order (the seed's sort, then id). */
 export const byThemeOrder = (a: Pick<ReelThemeRow, "sort" | "id">, b: Pick<ReelThemeRow, "sort" | "id">) => a.sort - b.sort || a.id.localeCompare(b.id);

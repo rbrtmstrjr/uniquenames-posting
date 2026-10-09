@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { PGlite } from "@electric-sql/pglite";
 import { freshDb, one } from "../helpers/pglite";
 import { KNIT_STYLE } from "@/lib/reels/prompt";
-import { REEL_MOTIONS, REEL_THEME_IDS } from "@/lib/db/types";
+import { REEL_MOTIONS, LEGACY_THEME_IDS } from "@/lib/db/types";
 
 // The live DB = v1 snapshot + 002..006. 007 adds the reel themes (with previews) and per-line emotion + motion.
 const stripSupabase = (sql: string) => sql.replace(/-- @supabase-only begin[\s\S]*?-- @supabase-only end/g, "");
@@ -21,6 +21,7 @@ const m008 = read("supabase", "migrations", "008_reel_playbook.sql");
 const m009 = read("supabase", "migrations", "009_captions.sql");
 const m010 = read("supabase", "migrations", "010_cta_card.sql");
 const m011 = stripSupabase(read("supabase", "migrations", "011_az_series.sql"));
+const m012 = stripSupabase(read("supabase", "migrations", "012_two_styles.sql"));
 
 // The final style blocks from the PC spike, verbatim.
 const spike = read("docs", "reference", "reel-themes-motion-spike.md").replace(/\r\n/g, "\n");
@@ -91,7 +92,7 @@ describe("007_reel_themes.sql on the live schema (v1 + 002..006)", () => {
     const rows = (await db.query<Json & { id: string; style: string; blurb: string }>(
       `select id, label, emoji, blurb, style, faces, grayscale, sort, preview_path, preview_status, error, version, claimed_at from reel_themes order by sort`)).rows;
     expect(rows.map(({ id, label, emoji, faces, grayscale, sort }) => ({ id, label, emoji, faces, grayscale, sort }))).toEqual(THEMES);
-    expect(rows.map((r) => r.id)).toEqual([...REEL_THEME_IDS]);
+    expect(rows.map((r) => r.id)).toEqual([...LEGACY_THEME_IDS]);
     expect(Object.keys(SPIKE_STYLES).sort()).toEqual(THEMES.map((t) => t.id).sort());
     for (const r of rows) {
       expect(r.style, r.id).toBe(SPIKE_STYLES[r.id]);
@@ -166,7 +167,8 @@ describe("007_reel_themes.sql on the live schema (v1 + 002..006)", () => {
   it("007 is also safe on a fresh schema.sql project", async () => {
     const db = await freshDb();
     await db.exec(m007);
-    expect(await one(db, `select count(*)::int n from reel_themes`)).toEqual({ n: 8 });
+    // the 8 of 007 + the 2 guide styles of 012 (schema.sql has both)
+    expect(await one(db, `select count(*)::int n from reel_themes`)).toEqual({ n: 10 });
     await addReel(db, 1);
     expect((await claimStep(db))?.step).toBe("voice");
   });
@@ -289,9 +291,10 @@ describe("fresh schema.sql matches v1 + 002..007 (+ 008)", () => {
     await migrated.exec(m009);
     await migrated.exec(m010);
     await migrated.exec(m011);
+    await migrated.exec(m012);
     const want = await shape(migrated);
     expect(want.functions).toHaveLength(8);
-    expect(want.themes).toHaveLength(8);
+    expect(want.themes).toHaveLength(10);
     expect(want.triggers.filter((t) => (t as { t: string }).t === "reel_themes")).toHaveLength(1);
     expect(await shape(await freshDb())).toEqual(want);
   });

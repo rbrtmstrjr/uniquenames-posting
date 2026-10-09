@@ -63,7 +63,7 @@ export interface SettingsRow {
   /** Background music under the voice (default on) and its volume in % (5–40, default 18). */
   reel_music?: boolean;
   reel_music_volume?: number;
-  /** Reels (migration 007; absent before it runs): the default visual theme, a reel_themes id (default 'knitted'). */
+  /** Reels (migration 007; absent before it runs): the default visual theme, a reel_themes id (default 'crayon' from 012). */
   reel_theme_id?: ReelThemeId;
   /** Captions (migration 009; absent before it runs): the tags on every post (≤ 2) and the pool one tag per post is rotated from. */
   hashtags_always?: string; hashtag_pool?: string;
@@ -92,9 +92,18 @@ export interface ReelVoiceRow {
 }
 /** What claim_next_voice_sample() returns to the PC (null = nothing to do). */
 export interface VoiceSampleClaim { voice: ReelVoiceRow }
-/** The 8 visual themes (migration 007), in display order. */
-export const REEL_THEME_IDS = ["knitted", "animated3d", "watercolor", "clay", "papercraft", "anime", "sketch", "cinematic"] as const;
+/** The 8 visual themes of migration 007 (hidden from 012 on: kept so old reels can still re-render / redo images). */
+export const LEGACY_THEME_IDS = ["knitted", "animated3d", "watercolor", "clay", "papercraft", "anime", "sketch", "cinematic"] as const;
+export type LegacyThemeId = (typeof LEGACY_THEME_IDS)[number];
+/** The 2 styles of migration 012, built from the owner's prompt guides (docs/reference/*-parenting-prompt.md). */
+export const GUIDE_THEME_IDS = ["crayon", "redthread"] as const;
+export type GuideThemeId = (typeof GUIDE_THEME_IDS)[number];
+/** Every theme id the database can hold, the 2 guide styles first. */
+export const REEL_THEME_IDS = [...GUIDE_THEME_IDS, ...LEGACY_THEME_IDS] as const;
 export type ReelThemeId = (typeof REEL_THEME_IDS)[number];
+/** Red Thread: how the thread looks in a line's picture (migration 012, reel_scenes_thread_check). */
+export const REEL_THREADS = ["plain", "tight", "stretched", "tangled", "loose"] as const;
+export type ReelThread = (typeof REEL_THREADS)[number];
 export type ThemePreviewStatus = "missing" | "queued" | "making" | "ready" | "failed";
 /** A visual theme (migration 007): a fixed positive-only style block + one preview picture made by the PC. */
 export interface ReelThemeRow {
@@ -109,6 +118,12 @@ export interface ReelThemeRow {
   /** The worker turns the picture grey after Z-Image (sketch). */
   grayscale: boolean;
   sort: number;
+  /** Migration 012 (absent before it runs): shown in the pickers (false = an old theme kept for old reels only). */
+  active?: boolean;
+  /** Migration 012: the worker keeps only strong reds and turns the rest grey (Red Thread). */
+  keep_red?: boolean;
+  /** Migration 012: the whole preview prompt, verbatim (null = the worker builds the old fixed moment). */
+  preview_prompt?: string | null;
   /** `themes/<id>/preview-v<version>.jpg` in the reels bucket. */
   preview_path: string | null;
   preview_status: ThemePreviewStatus;
@@ -182,6 +197,10 @@ export interface ReelSceneRow {
   punch?: string | null;
   /** Migration 008: a time jump before this line (the render dissolves into it); default false. */
   time_jump?: boolean;
+  /** Migration 012 (absent before it runs): the guide styles' "The feeling is …" phrase (null = from the emotion). */
+  feeling?: string | null;
+  /** Migration 012: Red Thread's thread state for this line (null = from the emotion). */
+  thread?: ReelThread | null;
   created_at: string; updated_at: string;
 }
 /** What claim_next_reel_step(p_no_comfy) returns to the PC (null = nothing to do). */

@@ -179,7 +179,7 @@ describe("011_az_series.sql on the live schema (v1 + 002..010)", () => {
   });
 });
 
-describe("fresh schema.sql matches v1 + 002..011", () => {
+describe("fresh schema.sql matches v1 + 002..011 (+ 012)", () => {
   const TABLES = "('settings','cards','posts','themes','names')";
   const shape = async (db: PGlite) => ({
     columns: (await db.query(`select table_name, column_name, data_type, is_nullable, column_default from information_schema.columns
@@ -192,7 +192,9 @@ describe("fresh schema.sql matches v1 + 002..011", () => {
   });
 
   it("has the same columns, constraints, indexes and create_series body", async () => {
-    const want = await shape(await migratedDb());
+    const db = await migratedDb();
+    await db.exec(stripSupabase(read("supabase", "migrations", "012_two_styles.sql")));
+    const want = await shape(db);
     const cols = (want.columns as { table_name: string; column_name: string }[]).map((c) => `${c.table_name}.${c.column_name}`);
     expect(cols).toEqual(expect.arrayContaining(["posts.series", "posts.series_id", "posts.series_part"]));
     expect(want.functions).toHaveLength(1);

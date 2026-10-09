@@ -21,6 +21,7 @@ const earlier = [
 ];
 const m010 = read("supabase", "migrations", "010_cta_card.sql");
 const m011 = stripSupabase(read("supabase", "migrations", "011_az_series.sql"));
+const m012 = stripSupabase(read("supabase", "migrations", "012_two_styles.sql"));
 
 async function liveDb() {
   const db = new PGlite();
@@ -128,6 +129,7 @@ describe("fresh schema.sql matches v1 + 002..010 (+ 011)", () => {
   it("has the same columns (incl. the 010 defaults), constraints and indexes (+ 011)", async () => {
     const migrated = await migratedDb();
     await migrated.exec(m011);
+    await migrated.exec(m012);
     const want = await shape(migrated);
     const cols = (want.columns as { table_name: string; column_name: string }[]).map((c) => `${c.table_name}.${c.column_name}`);
     expect(cols).toEqual(expect.arrayContaining(["settings.cta_enabled", "settings.cta_messages"]));
