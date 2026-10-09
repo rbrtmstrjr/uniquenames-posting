@@ -53,7 +53,7 @@ export const COMMON_GIRL_NAMES = [
 ];
 
 /** Names mostly given to the other gender that Gemini calls unisex (the owner flagged these). Key = the gender NOT to give it to. */
-export const NOT_FOR: Record<Gender, string[]> = { boy: ["Yael"], girl: [] };
+export const NOT_FOR: Record<Gender, string[]> = { boy: ["Yael", "Imani"], girl: [] };
 
 /** Not given names: brands and coinages the owner already turned down. */
 export const NOT_GIVEN_NAMES = ["Yaelen", "Qiana", "Lexus", "Tesla", "Armani", "Chanel", "Gucci", "Prada", "Versace"];
@@ -80,6 +80,7 @@ const NEGATIVE = new RegExp(`\\b(${[
   "mistress", "concubine", "widow(ed)?", "orphan(ed)?", "tears", "weep(s|ing)?", "rebel(s|lion|lious)?", "wrath", "enem(y|ies)",
   "kill(s|ed|er|ing)?", "murder(s|ed|er)?", "destroy(s|ed|er)?", "ruin(s|ed)?", "doom(ed)?", "grave", "hate[sd]?", "hatred",
   "ugly", "fool(ish)?", "beggar", "lonely", "misfortune", "unlucky", "barren", "trouble[sd]?", "loss", "lost",
+  "supplant(s|ed|er)?", "deceiv(e|ed|er)", "thie(f|ves)", "betray(s|ed|er)?",
 ].join("|")})\\b`, "i");
 
 /** Does the meaning carry a sad or harsh word (no card should say "bitter" or "wounded")? */

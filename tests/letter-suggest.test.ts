@@ -55,6 +55,8 @@ describe("filterLetterSuggestions", () => {
     const boys = filterLetterSuggestions([{ name: "Yael", meaning: "mountain goat", gender: "unisex" }, { name: "Yannick", meaning: "god is gracious", gender: "boy" }], [], single("Y", 3), "boy");
     expect(boys.fresh.map((f) => f.name)).toEqual(["Yannick"]);
     expect(boys.wrongGender).toBe(1);
+    // Seen in the live dry run: Imani offered as a boy's name (it is mostly given to girls).
+    expect(filterLetterSuggestions([{ name: "Imani", meaning: "the gift of faith", gender: "unisex" }], [], single("I", 3), "boy").wrongGender).toBe(1);
   });
 
   it("rejects meanings with sad or harsh words, and very common names for that gender", () => {
@@ -80,7 +82,7 @@ describe("common and negative checks", () => {
   });
 
   it("flags meanings with negative words, not kind ones that merely contain the letters", () => {
-    for (const m of ["wounded in the thigh", "bitter", "sea of sorrow", "child of death", "mistress", "a dead man"]) expect(negativeMeaning(m)).toBe(true);
+    for (const m of ["wounded in the thigh", "bitter", "sea of sorrow", "child of death", "mistress", "a dead man", "the supplanter"]) expect(negativeMeaning(m)).toBe(true);
     for (const m of ["the fifth one", "beloved friend", "bright and shining", "gift from god", "brave warrior"]) expect(negativeMeaning(m)).toBe(false);
   });
 });
