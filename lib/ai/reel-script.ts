@@ -205,7 +205,7 @@ export function reelScriptPrompt({ topic, maxScenes, alreadyMade, speed, theme }
     "- The LAST line mirrors line 1: the same subject, the same setting and a similar framing, so the reel loops.",
     ...(guide ? [red
       ? "- In this style the thread on the wrist must stay in view: face-free lines are very close detail views of the hands and wrists (subject mom, baby or both with shot_size detail); use subject object or none on at most 1 line."
-      : "- In this style every picture of a person shows their face with a BIG, exaggerated expression (the guide's rule; a calm hands-only close-up comes out looking like a photo), so a detail line shows their hands doing something that matters AND their big expression. The face-free line is an object picture: subject object (a few named things on a simple background) on at most 1 line in 5; the other face-free lines are those detail views."] : []),
+      : "- In this style every picture of a person shows their face with a BIG, exaggerated expression (the guide's rule; a calm hands-only close-up comes out looking like a photo), so a detail line shows their hands doing something that matters AND their big expression. The face-free line is an object picture: subject object (a few named things on a simple background) on at most 1 line; the other face-free lines are those detail views."] : []),
     "",
     ...(guide ? guidePictureRules(red) : [
     "EACH LINE'S PICTURE (the art style and the cast details are added later by the image system, so keep it plain):",
