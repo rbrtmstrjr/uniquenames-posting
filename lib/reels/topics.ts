@@ -11,12 +11,18 @@ export interface ReelTopic {
   format: ReelFormat;
   health: boolean;
   stage?: "newborn" | "baby" | "toddler" | "preschooler";
+  /** Health topics: the only medical claims the script may make (3-5 plain sentences from a checked source). */
+  facts?: string[];
+  /** Health topics: the safety line (when to call the doctor). */
+  safety?: string;
+  /** A verified term the reel may attribute to experts: "<term> — <who uses it>". */
+  anchor?: string;
 }
 
 const T = (id: string, topic: string, format: ReelFormat, health = false, stage?: ReelTopic["stage"]): ReelTopic =>
   ({ id, topic, format, health, ...(stage ? { stage } : {}) });
 
-export const REEL_TOPICS: ReelTopic[] = [
+const BASE_TOPICS: ReelTopic[] = [
   // Tantrums and big feelings
   T("five-word-rule", "The 5-Word Rule: name your toddler's big feeling in five words or less during a tantrum", "named_method", false, "toddler"),
   T("tantrum-phrases", "3 things we all say that make tantrums longer: \"calm down\", \"stop crying\", \"you're fine\"", "say_this", false, "toddler"),
@@ -82,6 +88,133 @@ export const REEL_TOPICS: ReelTopic[] = [
   T("names-mean-brave", "3 names that mean \"brave\", and how to raise a brave kid", "named_method", false, "preschooler"),
   T("mama-poop", "You finally sit down and hear \"Mama, poop\": the potty moment, handled calmly", "scene_lesson", false, "toddler"),
 ];
+
+/**
+ * Vetted medical facts + a safety line for every health topic: the script may restate ONLY these as medical claims.
+ * Sources (checked 2026-10-09):
+ * - Fever: AAP HealthyChildren "Fever Without Fear" https://www.healthychildren.org/English/health-issues/conditions/fever/Pages/Fever-Without-Fear.aspx
+ *   ("Do not overdress your child. A single layer of clothing is good."; "offer plenty of fluids"; "an alcohol bath or
+ *   ice packs and sponging, are no longer recommended") and "When to Call the Pediatrician"
+ *   https://www.healthychildren.org/English/health-issues/conditions/fever/Pages/When-to-Call-the-Pediatrician.aspx
+ *   (under 3 months with 100.4°F / 38°C or higher: call right away; looks very ill: call right away).
+ * - Sleep: HealthyChildren "Healthy Sleep Habits" https://www.healthychildren.org/English/healthy-living/sleep/Pages/healthy-sleep-habits-how-many-hours-does-your-child-need.aspx
+ *   ("brush, book, bed"; the same waking time every day; screens off at least 1 hour before bedtime).
+ * - Picky eating: HealthyChildren "Picky Eaters" https://www.healthychildren.org/English/ages-stages/toddler/nutrition/Pages/Picky-Eaters.aspx
+ *   ("as many as 10 or more times tasting a food"; "Pressuring kids to eat ... can make them actively dislike foods";
+ *   "use hunger as a guide") + Satter's Division of Responsibility (research §10.4 S3).
+ * - Colds: CDC "About Common Cold" https://www.cdc.gov/common-cold/about/index.html (caused by viruses, spread by
+ *   droplets and close contact).
+ * - First words: CDC milestones https://www.cdc.gov/act-early/milestones/9-months.html and /1-year.html, and
+ *   https://www.cdc.gov/act-early/milestones/index.html ("Don't wait." Talk with your child's doctor).
+ * - Brain growth: Harvard Center on the Developing Child, serve and return (research §10.4 S3).
+ * - Hiccups: Cleveland Clinic https://health.clevelandclinic.org/heres-what-to-do-when-your-baby-has-the-hiccups/
+ */
+const FEVER_SAFETY = "Baby under 3 months with a fever, or very sick? Call your doctor.";
+const COLD_FACTS = [
+  "Colds are caused by viruses, not by night air, dew or wet hair.",
+  "Cold viruses spread mostly through coughs, sneezes and close contact.",
+  "Washing hands often helps protect your family from germs.",
+];
+const SLEEP_FACTS = [
+  "A simple bedtime routine, the same every night (like brush, book, bed), helps young children settle.",
+  "Waking up at the same time every day helps bedtime go smoothly.",
+  "Turning screens off at least an hour before bed helps children fall asleep.",
+];
+const SLEEP_SAFETY = "If sleep troubles go on for weeks, talk to your pediatrician.";
+const EATING_FACTS = [
+  "A toddler may need to taste a new food 10 or more times before accepting it.",
+  "Pressuring or punishing a child to eat can make them dislike foods.",
+  "You decide what, when and where food is offered; your child decides how much to eat.",
+  "Children can learn to listen to their bodies and use hunger as a guide.",
+];
+const EATING_SAFETY = "Worried your child isn't eating enough to grow? Talk to your pediatrician.";
+const HEALTH: Record<string, Pick<ReelTopic, "facts" | "safety">> = {
+  "talking-signs": {
+    facts: [
+      "By about 9 months, many babies make lots of different sounds, like \"mamamama\" and \"bababa\".",
+      "By about 1 year, many babies wave bye-bye and call a parent \"mama\", \"dada\" or another special name.",
+      "Talking back and forth with your baby (serve and return) helps language grow.",
+      "Every baby grows at their own pace.",
+    ],
+    safety: "Worried about how your baby is talking? Don't wait: ask your pediatrician.",
+  },
+  "last-three-things": { facts: SLEEP_FACTS, safety: SLEEP_SAFETY },
+  "second-wind": {
+    facts: [...SLEEP_FACTS, "A child who doesn't get enough sleep can be cranky and find it hard to settle."],
+    safety: SLEEP_SAFETY,
+  },
+  "hamog-night-air": { facts: COLD_FACTS, safety: FEVER_SAFETY },
+  "wet-hair-sleep": { facts: COLD_FACTS, safety: "Fever with trouble breathing, or very sick? Call your pediatrician." },
+  "fifteen-try-rule": { facts: EATING_FACTS, safety: EATING_SAFETY },
+  "who-decides": { facts: EATING_FACTS, safety: EATING_SAFETY },
+  "ubusin-mo-yan": {
+    facts: [...EATING_FACTS.slice(1), "Leaving food on the plate does not make fingers curl: that is only an old saying."],
+    safety: EATING_SAFETY,
+  },
+  "one-more-bite": { facts: EATING_FACTS, safety: EATING_SAFETY },
+  "kulob-fever": {
+    facts: [
+      "Don't bundle a child with a fever: a single light layer of clothing is good.",
+      "If your child shivers or has chills, give a light blanket.",
+      "Offer plenty of fluids, because a fever makes children lose fluids faster.",
+      "A fever is the body fighting an infection; your goal is your child's comfort.",
+    ],
+    safety: FEVER_SAFETY,
+  },
+  "bathe-sick-child": {
+    facts: [
+      "A bath is fine for comfort if your child wants one: lukewarm water, never cold.",
+      "Never add alcohol to the bath or rub alcohol on the skin.",
+      "Sponging and ice packs are no longer recommended for a fever: aim for comfort.",
+      "Offer plenty of fluids, a single light layer of clothes and rest.",
+    ],
+    safety: FEVER_SAFETY,
+  },
+  "usog-saliva": {
+    facts: [
+      "Washing hands before holding a baby helps protect them from germs.",
+      "It's okay to ask visitors to wash their hands and let a tired baby rest.",
+      "A baby who cries and can't be settled, or has a fever, needs a doctor's check.",
+    ],
+    safety: "Baby crying and won't settle, or has a fever? Call your pediatrician.",
+  },
+  "haircut-smarter": {
+    facts: [
+      "A haircut doesn't change how smart a child will be.",
+      "Back-and-forth talk and play (serve and return) builds a baby's brain connections.",
+      "Keeping a lock from the first haircut is a sweet keepsake.",
+    ],
+    safety: "Questions about your baby's growth? Ask your pediatrician at the next check-up.",
+  },
+  "hiccup-wet-paper": {
+    facts: [
+      "Hiccups are very common in babies and usually stop on their own.",
+      "They often happen during or after feeding, when babies swallow air.",
+      "Burping during feeds and feeding your baby more upright can help.",
+      "A wet paper on the forehead does not stop hiccups.",
+    ],
+    safety: "Hiccups that go on and on, or fussy feeds? Ask your pediatrician.",
+  },
+};
+
+/** Verified terms a reel may attribute to experts ("psychologists call it …"): the term, then who uses it. */
+const ANCHORS: Record<string, string> = {
+  "five-word-rule": "affect labeling — psychologists (naming a feeling helps it calm down)",
+  "serve-and-return": "serve and return — Harvard Center on the Developing Child",
+  "talking-signs": "serve and return — Harvard Center on the Developing Child",
+  "haircut-smarter": "serve and return — Harvard Center on the Developing Child",
+  "labeled-praise": "labeled praise — Parent-Child Interaction Therapy (PCIT)",
+  "special-time": "special time — Parent-Child Interaction Therapy (PCIT)",
+  "so-smart": "labeled praise — Parent-Child Interaction Therapy (PCIT)",
+  "who-decides": "Division of Responsibility — Ellyn Satter, feeding specialist",
+  "fifteen-try-rule": "Division of Responsibility — Ellyn Satter, feeding specialist",
+  "sportscaster-day": "sportscasting — RIE (Magda Gerber's approach)",
+  "sportscaster-siblings": "sportscasting — RIE (Magda Gerber's approach)",
+  "screen-hours": "co-viewing — the American Academy of Pediatrics",
+  "watch-with-them": "co-viewing — the American Academy of Pediatrics",
+};
+
+export const REEL_TOPICS: ReelTopic[] = BASE_TOPICS.map((t) => ({ ...t, ...(HEALTH[t.id] ?? {}), ...(ANCHORS[t.id] ? { anchor: ANCHORS[t.id] } : {}) }));
 
 /** How many recent reels' topics are skipped. */
 export const TOPIC_WINDOW = 15;

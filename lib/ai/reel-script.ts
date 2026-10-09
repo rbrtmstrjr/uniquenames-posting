@@ -78,6 +78,10 @@ export interface ReelScriptInput {
   format: ReelFormat;
   /** A fever / illness / sleep / feeding / development topic: soft wording and one safety line. */
   topicHealth?: boolean;
+  /** A bank health topic's vetted facts (the only medical claims allowed) and its safety line. */
+  topicFacts?: string[]; topicSafety?: string;
+  /** A verified term the reel may attribute to experts ("<term> — <who uses it>"). */
+  topicAnchor?: string;
   /** Narration speed (settings.reel_speed, 1.00–1.25; default 1 = unchanged): a faster voice fits more words in the same time. */
   speed?: number;
   /** The reel's visual theme (default Crayon): the cast is written as dolls only for Knitted Doll; Crayon and Red
@@ -118,11 +122,18 @@ const HOOK_CARD: Record<ReelFormat, string> = {
 
 const AUTO_TOPIC = "Topic: (none given) — CHOOSE one specific, useful topic from early parenting (0-5 years) that suits the format: a concrete problem, method, myth or phrase, never a vague one, and clearly different from the already-made reels.";
 
-/** Health topics (fever, illness, sleep, feeding, development): research §6.2 / §10.4. */
-const HEALTH_RULES = [
-  "HEALTH TOPIC (CRITICAL): soft wording only ('can help', 'is linked to', 'many pediatricians suggest'); no diagnosis, no symptom checklists, no doses, no medicines, supplements or products; never 'proven', 'cures', 'forever' or 'doctors won't tell you'. Infant sleep advice goes no further than 'back to sleep, on a flat, clear surface'. Never explain body chemistry (hormones, cortisol, adrenaline) or other medical causes as fact: describe what parents notice ('many tired toddlers get a burst of energy').",
-  "- SAFETY LINE: exactly one generic line that says when to call the doctor or pediatrician, in your own words (pattern: 'If you're worried, or it lasts more than a day or two, call your pediatrician.').",
-].join("\n");
+/** Health topics (fever, illness, sleep, feeding, development): research §6.2 / §10.4 + the bank's vetted facts. */
+function healthRules(facts?: string[], safety?: string): string {
+  return [
+    "HEALTH TOPIC (CRITICAL): soft wording only ('can help', 'many pediatricians suggest'); no diagnosis, no symptom checklists, no doses, no medicines, supplements or products; never 'proven', 'cures', 'forever' or 'doctors won't tell you'. Infant sleep advice goes no further than 'back to sleep, on a flat, clear surface'. Never explain how the body works (temperature going up or down, hormones, cortisol, adrenaline, melatonin): describe what parents notice and what to do for comfort.",
+    ...(facts?.length
+      ? ["- MEDICAL FACTS (checked sources) — these are the ONLY medical claims this reel may make: restate them in plain words, with no mechanisms, causes or numbers beyond them:", ...facts.map((f) => `  - ${f}`)]
+      : ["- No vetted facts for this topic: keep every medical claim general ('for comfort', 'ask your pediatrician'), with no mechanisms, causes or numbers."]),
+    safety
+      ? `- SAFETY LINE: exactly one line saying this, in your own words: ${safety}`
+      : "- SAFETY LINE: exactly one generic line that says when to call the doctor or pediatrician, in your own words (pattern: 'If you're worried, call your pediatrician.').",
+  ].join("\n");
+}
 
 /** Claims the script may state as fact (research §10.4 S3); anything else is a tip many parents find helps. */
 const VETTED_CLAIMS = [
@@ -205,7 +216,7 @@ function guidePictureRules(red: boolean): string[] {
  * The script prompt (value-first formats, spec 2026-10-09-reel-storylines: the format's beats, the research §10 rules,
  * the on-screen labels + the playbook's varied shot list and the style's picture rules); `alreadyMade` is newest first.
  */
-export function reelScriptPrompt({ topic, maxScenes, alreadyMade, speed, theme, format, topicHealth }: ReelScriptInput): { system: string; prompt: string } {
+export function reelScriptPrompt({ topic, maxScenes, alreadyMade, speed, theme, format, topicHealth, topicFacts, topicSafety, topicAnchor }: ReelScriptInput): { system: string; prompt: string } {
   const t = oneLine(topic ?? "");
   const made = alreadyMade
     .map((m) => ({ title: oneLine(m.title ?? ""), stage: oneLine(m.stage ?? "") }))
@@ -230,15 +241,15 @@ export function reelScriptPrompt({ topic, maxScenes, alreadyMade, speed, theme, 
     "",
     "THE SCRIPT (CRITICAL — value first: the mom must be able to USE this tonight):",
     `- LINE 1 is the hook, spoken in the first half-second: at most ${HOOK_LINE_MAX_WORDS} words (aim for 6-10). It names the SPECIFIC problem, method, myth or exact phrase of this reel, says 'you' or 'your' (child / toddler / baby), and promises something concrete. Never a vague feeling, never scene-setting about the weather or the time of day.`,
-    "- Talk to the mom in the second person ('you', 'your toddler'), like a friend who read the research. NEVER the first person: no I / me / my / we / us / our in the narration (only 'we all' in a hook like '3 things we all say…'), no personal stories, no 'as a mom' (write 'You might think…', never 'We often think…'). The words inside quotes are what the mom says, so they may use I / we.",
+    "- Talk to the mom in the second person ('you', 'your toddler'), like a friend who read the research. NEVER the first person: no I / me / my / we / us / our in the narration (only line 1 may say 'we all', as in '3 things we all say…'), no personal stories, no 'as a mom' (write 'You might think…', never 'We often think…'). The words inside quotes are what the mom says, so they may use I / we.",
     `- THE EXACT WORDS: the fix is always EXACT WORDS the mom can say tonight, in double quotes inside the line (e.g. Say "You're mad. Tower fell."): each quote at most 10 words (at most 5 for a toddler), opened and closed within ONE line. This reel needs at least ${q} quoted phrase${q === 1 ? "" : "s"}.`,
-    `- ONE soft credible anchor per reel ('pediatricians suggest…', 'psychologists call it…'); never invent studies, numbers, percentages, quotes or experts, and never 'proven', 'cures', 'forever', 'doctors won't tell you'. Facts you may state: ${VETTED_CLAIMS.join("; ")}. Anything else is a tip many parents find helps.`,
+    `- ONE soft anchor per reel: ${topicAnchor ? `use this verified term: ${topicAnchor}` : "a plain one ('pediatricians suggest…', 'many parents find…')"}. Say that experts 'call it' something ONLY for a verified term (this one, or one named in the facts below); never coin a term and attribute it to experts. Your own tip names ('the Two-Choice Rule') are fine as tip names, never credited to experts. Never invent studies, numbers, percentages, quotes or experts, and never 'proven', 'cures', 'forever', 'doctors won't tell you'. Facts you may state: ${VETTED_CLAIMS.join("; ")}. Anything else is a tip many parents find helps.`,
     "- Sentences of 4-12 words (never more than 15), one idea per line. Link beats with 'but', 'so' or 'because', never 'and then'. A short 2-4-word punch line in most beats ('Five words. Big feelings.'). A step marker or re-hook every 8-12 seconds ('One…', 'Two…', 'Here's the thing…').",
     "- Emotion: validate first ('You're not doing it wrong'), then teach, then end on relief or warmth — never on guilt, fear or sadness.",
     "- The LAST line is the warm close of the format (a reframe or a gentle 'tonight, try it once'). No tagline, no sign-off, no page name.",
     "- BANNED anywhere: greetings ('Hi/Hey mga mommies', 'Hello mama', 'Welcome back'), 'Today I want to talk about', 'In this video', 'Let me tell you', outros ('see you next time', 'thanks for watching', 'next video', 'until next time'), 'watch till the end', fear absolutes ('damages your child forever'). NEVER ask viewers to like, comment, share, tag, follow, save, subscribe or vote — no call to action of any kind.",
     "- The examples in this brief (the beats included) are PATTERNS only: they belong to other topics. Write fresh words for THIS topic and never reuse an example sentence, an example's method name or an example's fix, unless the topic is exactly that example.",
-    ...(topicHealth ? ["", HEALTH_RULES] : []),
+    ...(topicHealth ? ["", healthRules(topicFacts, topicSafety)] : []),
     "",
     `ON-SCREEN LABELS: "on_screen" is an optional short label shown big at the top of the picture while that line is spoken: at most ${ON_SCREEN_MAX_WORDS} words and 60 characters, only on the format's key lines (steps, swaps, the script to say, the verdict), 2-5 lines per reel (pattern for this format: ${LABEL_PATTERN[f.id]}). It complements the spoken line, never repeats it whole. "" on every other line, and ALWAYS "" on line 1 (the hook card owns the first seconds).`,
     "",
@@ -364,9 +375,10 @@ const FIRST_PERSON = /(?<![\p{L}'])(?:me|my|mine|myself|we|we're|we've|we'll|us|
 export { quoteCount, quotedPhrases } from "@/lib/reels/formats";
 /** A single-quoted phrase ('I'm here.') the mom says: never counted as the narrator's own words. */
 const SINGLE_QUOTE_RE = /(^|[\s:,(])'(.+?)'(?=$|[\s.,!?;:)])/g;
-/** The narrator's first-person word in the line (outside the quotes, without the hook's "we all"), or null. */
-export function narratorFirstPerson(line: string): string | null {
-  const out = line.replace(/[\u2018\u2019]/g, "'").replace(QUOTE_RE, " ").replace(SINGLE_QUOTE_RE, "$1 ").replace(/\bwe all\b/gi, " ");
+/** The narrator's first-person word in the line (outside the quotes; the hook may say "we all"), or null. */
+export function narratorFirstPerson(line: string, hook = false): string | null {
+  let out = line.replace(/[\u2018\u2019]/g, "'").replace(QUOTE_RE, " ").replace(SINGLE_QUOTE_RE, "$1 ");
+  if (hook) out = out.replace(/\bwe all\b/gi, " ");
   return (out.match(FIRST_PERSON_I) ?? out.match(FIRST_PERSON))?.[0] ?? null;
 }
 /** A health topic's safety line names the doctor. */
@@ -395,14 +407,38 @@ export function cleanOnScreen(v: unknown, index: number): string | null {
   if (index === 0) return null;
   const s = str(v);
   if (!s || words(s) > ON_SCREEN_MAX_WORDS || s.length > ON_SCREEN_MAX) return null;
-  return s;
+  return sentenceCase(s);
 }
+
+/** A label written in capitals ("HERE IS THE REAL REASON") in sentence case; any other label is kept as written. */
+export function sentenceCase(s: string): string {
+  const letters = s.replace(/[^\p{L}]/gu, "");
+  if (letters.length < 2 || letters !== letters.toUpperCase()) return s;
+  return s.toLowerCase()
+    // the first letter, and the first letter after an opening quote or a "·" separator
+    .replace(/(^|["“]|·\s*)(\p{L})/gu, (_, pre: string, c: string) => pre + c.toUpperCase())
+    .replace(/(?<![\p{L}'])i(?=$|[\s'’.,!?;:])/gu, "I");
+}
+
+/** A body-mechanism claim (temperature going up / down, hormones): never in a reel (health accuracy). */
+const MECHANISM_RE = /\b(?:rais(?:e|es|ing)|lower(?:s|ing)?|bring(?:s|ing)? (?:down|up)|drop(?:s|ping)?|reduc(?:e|es|ing)|pulls? (?:the )?heat) (?:a |the |their |his |her |your |its )?(?:mild |high |body |child's |baby's )*(?:temperature|fever)\b|\bbring(?:s|ing)? (?:a |the |their |his |her |your )?(?:body )?(?:temperature|fever) (?:down|up)\b|\b(?:cortisol|adrenaline|melatonin|hormones?|dopamine|serotonin)\b/i;
+/** "Experts call it …": only for a verified term. */
+const EXPERT_RE = /\b(?:experts?|psychologists?|pediatricians?|paediatricians?|doctors?|scientists?|researchers?|therapists?|specialists?)\b/i;
+const CALL_RE = /\b(?:call(?:s|ed)? (?:it|this|that)|(?:it|this|that)(?:'s| is) called|known as)\b/i;
+/** The terms research §10.4 S3 vetted. */
+const VETTED_TERMS = ["affect labeling", "serve and return", "serve-and-return", "labeled praise", "special time", "pcit", "parent-child interaction therapy", "division of responsibility", "co-viewing", "sportscasting"];
+/** The scene_lesson pivot. */
+const PIVOT_RE = /\b(?:really (?:happening|going on)|here's why|here is why|here's what|here is what)\b/i;
+/** A first line that reassures instead of naming the problem. */
+const REASSURE_RE = /\b(?:don't|do not) (?:feel bad|worry|panic|stress)\b/i;
 
 export interface ValidateOptions {
   /** The format the script was asked for (default: Gemini's own, else problem_fix). */
   format?: ReelFormat;
   /** A health topic: a safety line is required. */
   health?: boolean;
+  /** The topic's verified anchor ("<term> — <who>"): its term may be attributed to experts. */
+  anchor?: string;
 }
 
 /**
@@ -434,6 +470,8 @@ export function validateReelScript(raw: unknown, maxScenes: number, speed = 1, t
   if (age) cast.child_age = age;
   const format: ReelFormat = opts.format ?? (isReelFormat(str(d.format)) ? (str(d.format) as ReelFormat) : "problem_fix");
   const list = Array.isArray(d.scenes) ? d.scenes.slice(0, maxScenes) : [];
+  const anchorTerm = opts.anchor?.split(" — ")[0].trim().toLowerCase();
+  const terms = anchorTerm ? [...VETTED_TERMS, anchorTerm] : VETTED_TERMS;
   if (list.length < 2) return { ok: false, error: "The script needs at least 2 scenes." };
   const budget = reelWordBudget(maxScenes, speed);
   const lines: {
@@ -449,7 +487,12 @@ export function validateReelScript(raw: unknown, maxScenes: number, speed = 1, t
     if (CTA_RE.test(narration)) return { ok: false, error: `Line ${i + 1} asks viewers to follow, comment, tag or share.` };
     if (i === 0 && GREETING_RE.test(narration)) return { ok: false, error: "Line 1 is a greeting, not a hook." };
     if (GREETING_RE.test(narration) || OUTRO_RE.test(narration)) return { ok: false, error: `Line ${i + 1} is a greeting or an outro.` };
-    const me = narratorFirstPerson(narration);
+    if (MECHANISM_RE.test(narration)) return { ok: false, error: `Line ${i + 1} explains how the body works (temperature, hormones): keep to the vetted facts.` };
+    if (EXPERT_RE.test(narration) && CALL_RE.test(narration) && !terms.some((t) => narration.toLowerCase().includes(t))) {
+      return { ok: false, error: `Line ${i + 1} says experts call it something unverified: use a plain anchor.` };
+    }
+    if (i === 0 && REASSURE_RE.test(narration)) return { ok: false, error: "Line 1 must name the problem or the mistake, not reassure." };
+    const me = narratorFirstPerson(narration, i === 0);
     if (me) return { ok: false, error: `Line ${i + 1} speaks as I / we ("${me}"): talk to the mom as you.` };
     // A feeling Gemini made up falls back to tender; the body-language note and the setting are optional.
     const emotion = emotionOf(o.emotion) ?? "tender";
@@ -482,6 +525,9 @@ export function validateReelScript(raw: unknown, maxScenes: number, speed = 1, t
   if (words(hook_text) > HOOK_TEXT_MAX_WORDS || hook_text.length > HOOK_TEXT_MAX) return { ok: false, error: `The hook card is longer than ${HOOK_TEXT_MAX_WORDS} words.` };
   if (GREETING_RE.test(hook_text) || CTA_RE.test(hook_text)) return { ok: false, error: "The hook card is a greeting or a call to action, not a hook." };
   if (norm(hook_text) === norm(lines[0].narration)) return { ok: false, error: "The hook card repeats line 1 instead of adding to it." };
+  if (format === "scene_lesson" && !lines.slice(1, 4).some((x) => PIVOT_RE.test(x.narration))) {
+    return { ok: false, error: "The pivot (\"Here's what's really happening\") must come by line 4." };
+  }
   const need = FORMAT_SPECS[format].minQuotes;
   const quotes = quoteCount(lines.map((x) => x.narration));
   if (quotes < need) return { ok: false, error: `The script needs the exact words to say in quotes (at least ${need}, found ${quotes}).` };
@@ -514,7 +560,7 @@ export async function writeReelScript(input: ReelScriptInput): Promise<ReelScrip
       parse: (x) => (x && typeof x === "object" && !Array.isArray(x) ? (x as Record<string, unknown>) : null),
     });
     if (!r.ok) return { ok: false, error: r.error };
-    return validateReelScript(r.data, input.maxScenes, input.speed, input.theme?.id ?? DEFAULT_THEME_ID, { format: input.format, health: input.topicHealth });
+    return validateReelScript(r.data, input.maxScenes, input.speed, input.theme?.id ?? DEFAULT_THEME_ID, { format: input.format, health: input.topicHealth, anchor: input.topicAnchor });
   } catch (e) {
     return { ok: false, error: `Could not write the script (${e instanceof Error ? e.message.slice(0, 120) : "unknown error"}).` };
   }

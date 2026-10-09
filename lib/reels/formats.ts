@@ -40,7 +40,7 @@ export const FORMAT_SPECS: Record<ReelFormat, FormatSpec> = {
     id: "lola_science", label: "Lola said, science says", minQuotes: 1,
     beats: [
       "MYTH HOOK (line 1): 'Lola said: [myth]. Here's what doctors say.' (or 'Keep it or let go? [tradition].')",
-      "HONOUR LOLA: why people believed it; lola wanted to protect the child. Never mock or ridicule lola.",
+      "HONOUR LOLA, in the second person: why people believed it; your lola wanted to protect you and your child ('Your lola wanted to keep your baby safe.'), never 'our lolas' or 'we all grew up with'. Never mock or ridicule lola.",
       "THE PLAIN FACT: what is true now, with a soft source ('pediatricians', 'doctors now say').",
       "DO THIS INSTEAD: 2-3 concrete actions, with at least one exact phrase or step in quotes.",
       "SAFETY LINE: one generic line ('If you're worried, call your pediatrician.').",
@@ -50,9 +50,9 @@ export const FORMAT_SPECS: Record<ReelFormat, FormatSpec> = {
   scene_lesson: {
     id: "scene_lesson", label: "Scene, pivot, lesson", minQuotes: 1,
     beats: [
-      "HOOK (line 1): second person, in the middle of the moment, and it states the mistake or the promise ('Your toddler throws his shoe. You're late. Don't say \"Stop it.\"').",
-      "SCENE: at most 2 short lines, present tense, one sensory detail and at most one local detail (lola's house, the jeep, the sala).",
-      "PIVOT (by about second 11): 'Here's what's really happening.'",
+      "HOOK (line 1): second person, in the middle of the moment, and it NAMES the problem or the mistake, never reassurance like 'don't feel bad' ('Your toddler throws his shoe. You're late. Don't say \"Stop it.\"').",
+      "SCENE: at most 2 short lines (lines 2-3), present tense, one sensory detail and at most one local detail (lola's house, the jeep, the sala).",
+      "PIVOT (line 3 or 4 at the latest): 'Here's what's really happening.'",
       "WHY: the child's-eye reason (transitions are hard, a tired brain, a big feeling).",
       "WHAT TO DO: a named script with the EXACT WORDS in quotes ('the 2-Minute Warning plus a job: \"You carry the keys.\"').",
       "CLOSE: one warm reframe line.",

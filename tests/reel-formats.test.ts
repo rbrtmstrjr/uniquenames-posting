@@ -119,3 +119,29 @@ describe("keyPhrase", () => {
     expect(keyPhrase(["No quotes at all."])).toBeNull();
   });
 });
+
+describe("vetted facts, safety lines and anchors", () => {
+  it("every health topic has 3-5 vetted facts and a short safety line naming the doctor; other topics have none", () => {
+    for (const t of REEL_TOPICS) {
+      if (t.health) {
+        expect(t.facts?.length, t.id).toBeGreaterThanOrEqual(3);
+        expect(t.facts!.length, t.id).toBeLessThanOrEqual(5);
+        expect(t.safety, t.id).toMatch(/\b(doctor|pediatrician)\b/i);
+        expect(t.safety!.split(/\s+/).length, t.id).toBeLessThanOrEqual(15);
+      } else {
+        expect(t.facts, t.id).toBeUndefined();
+        expect(t.safety, t.id).toBeUndefined();
+      }
+    }
+    // the fever myth never claims a bath lowers a fever
+    expect(topicById("bathe-sick-child")!.facts!.join(" ")).not.toMatch(/(lower|bring|cool).*(fever|temperature)/i);
+  });
+
+  it("anchors are a verified term and who uses it", () => {
+    const anchored = REEL_TOPICS.filter((t) => t.anchor);
+    expect(anchored.length).toBeGreaterThan(5);
+    for (const t of anchored) expect(t.anchor, t.id).toMatch(/^.+ — .+$/);
+    expect(topicById("labeled-praise")!.anchor).toMatch(/^labeled praise — Parent-Child Interaction Therapy/);
+    expect(topicById("second-wind")!.anchor).toBeUndefined();
+  });
+});

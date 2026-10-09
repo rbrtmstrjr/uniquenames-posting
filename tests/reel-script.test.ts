@@ -102,8 +102,8 @@ describe("reelScriptPrompt", () => {
     expect(prompt).toMatch(/second person/);
     expect(prompt).toMatch(/NEVER the first person/);
     expect(prompt).toMatch(/EXACT WORDS .* in double quotes/);
-    expect(prompt).toMatch(/ONE soft credible anchor/);
-    expect(prompt).toMatch(/never invent studies, numbers, percentages, quotes or experts/);
+    expect(prompt).toMatch(/ONE soft anchor/);
+    expect(prompt).toMatch(/Never invent studies, numbers, percentages, quotes or experts/);
     expect(prompt).toMatch(/BANNED anywhere: .*'Welcome back'.*'Today I want to talk about'.*'In this video'.*'Let me tell you'/);
     expect(prompt).toMatch(/'see you next time', 'thanks for watching', 'next video'/);
     expect(prompt).toMatch(/like, comment, share, tag, follow, save, subscribe or vote/);
@@ -122,7 +122,7 @@ describe("reelScriptPrompt", () => {
     expect(h).toMatch(/HEALTH TOPIC/);
     expect(h).toMatch(/SAFETY LINE/);
     expect(h).toMatch(/no diagnosis, no symptom checklists, no doses/);
-    expect(h).toMatch(/Never explain body chemistry/);
+    expect(h).toMatch(/Never explain how the body works/);
     expect(reelScriptPrompt(input10).prompt).not.toMatch(/HEALTH TOPIC/);
   });
 
@@ -221,7 +221,9 @@ describe("the value-first validator", () => {
     // the mom's words in single quotes are hers too
     expect(val(withLine(5, "Then whisper, 'I'm here, we're okay.' and wait.")).ok).toBe(true);
     expect(val(withLine(5, 'Say "I see you, I\'m here with you" again.')).ok).toBe(true);
-    expect(val(withLine(5, "Three things we all say make it worse.")).ok).toBe(true);
+    // "we all" only in the hook (line 1): "We all grew up hearing this" later on is the narrator's own story
+    expect(val(withLine(0, "Three things we all say make it worse.")).ok).toBe(true);
+    expect(val(withLine(5, "We all grew up hearing this rule."))).toEqual({ ok: false, error: 'Line 6 speaks as I / we ("We"): talk to the mom as you.' });
     // "I" only as a word: "It" / "Is" are fine
     expect(val(withLine(5, "It is hard. Is it always this loud?")).ok).toBe(true);
   });
@@ -631,5 +633,76 @@ describe("Crayon / Red Thread scripts (012): the picture is written to the owner
   it("(no scene) is rejected", async () => {
     generateJson.mockResolvedValueOnce({ ok: true, data: gscript(10, (n) => (n === 2 ? { scene: "" } : {})) });
     expect(await writeReelScript({ ...input10, theme: CRAYON })).toEqual({ ok: false, error: "Line 3 has no picture scene." });
+  });
+});
+
+describe("health accuracy, verified anchors, the scene pivot (review fixes)", () => {
+  const FACTS = ["A bath is fine for comfort if your child wants one: lukewarm water, never cold.", "Never add alcohol to the bath or rub alcohol on the skin."];
+  const SAFETY = "Baby under 3 months with a fever, or very sick? Call your doctor.";
+  const val = (raw: unknown, format: ReelFormat = PF, o: { health?: boolean; anchor?: string } = {}) =>
+    validateReelScript(raw, 10, 1, "knitted", { format, health: o.health, anchor: o.anchor });
+  const withLine = (i: number, narration: string, over: Record<string, unknown> = {}) => {
+    const s = script(10, over);
+    s.scenes[i] = { ...s.scenes[i], narration };
+    return s;
+  };
+
+  it("a bank health topic: medical claims may ONLY restate its vetted facts; its safety line is given", () => {
+    const p = reelScriptPrompt({ ...input10, format: "lola_science", topic: "Lola said: never bathe a sick child", topicHealth: true, topicFacts: FACTS, topicSafety: SAFETY }).prompt;
+    expect(p).toMatch(/MEDICAL FACTS .*the ONLY medical claims/);
+    for (const f of FACTS) expect(p).toContain(`- ${f}`);
+    expect(p).toContain(SAFETY);
+    expect(p).toMatch(/no mechanisms/);
+  });
+
+  it("a typed health topic (no vetted facts): claims stay general", () => {
+    const p = reelScriptPrompt({ ...input10, topic: "Baby has a fever", topicHealth: true }).prompt;
+    expect(p).toMatch(/keep every medical claim general/);
+    expect(p).not.toMatch(/MEDICAL FACTS/);
+  });
+
+  it("a verified anchor is offered; without one, a plain anchor and never a coined expert term", () => {
+    expect(reelScriptPrompt({ ...input10, topicAnchor: "labeled praise — Parent-Child Interaction Therapy (PCIT)" }).prompt)
+      .toContain("use this verified term: labeled praise — Parent-Child Interaction Therapy (PCIT)");
+    const p = reelScriptPrompt(input10).prompt;
+    expect(p).toMatch(/never coin a term and attribute it to experts/);
+    expect(p).toMatch(/Your own tip names .* are fine/);
+  });
+
+  it("refuses body-mechanism claims (temperature, hormones) on any line", () => {
+    for (const bad of ["It brings their body temperature down gently.", "Cold water causes shivering, which raises their temperature.",
+      "Their tiny bodies pump out cortisol to stay awake.", "A warm bath helps lower a mild fever safely.", "Adrenaline keeps them bouncing at night."]) {
+      expect(val(withLine(5, bad)), bad).toEqual({ ok: false, error: "Line 6 explains how the body works (temperature, hormones): keep to the vetted facts." });
+    }
+    expect(val(withLine(5, "Use lukewarm water, never cold, just for comfort.")).ok).toBe(true);
+  });
+
+  it("refuses an expert-attributed term that isn't verified; vetted terms and the topic's anchor are fine", () => {
+    expect(val(withLine(5, "Many sleep experts call it a wakeful window."))).toEqual({ ok: false, error: "Line 6 says experts call it something unverified: use a plain anchor." });
+    expect(val(withLine(5, "Psychologists call this labeled praise.")).ok).toBe(true);
+    expect(val(withLine(5, "Pediatricians call it watching together."), PF, { anchor: "watching together — the American Academy of Pediatrics" }).ok).toBe(true);
+    // the page's own tip name, not attributed to experts
+    expect(val(withLine(5, "It's called the Two-Choice Rule, a tip to try.")).ok).toBe(true);
+  });
+
+  it("scene_lesson: line 1 names the problem (no reassurance) and the pivot comes by line 4", () => {
+    const sl = (lines: Record<number, string>) => {
+      const s = script(10, { format: "scene_lesson" });
+      for (const [i, n] of Object.entries(lines)) s.scenes[Number(i)] = { ...s.scenes[Number(i)], narration: n };
+      return val(s, "scene_lesson");
+    };
+    expect(sl({ 2: "Here's what's really happening." }).ok).toBe(true);
+    expect(sl({ 4: "Here's what's really happening." })).toEqual({ ok: false, error: "The pivot (\"Here's what's really happening\") must come by line 4." });
+    expect(sl({ 0: "Your toddler walks away from calls. Don't feel bad.", 2: "Here's why." })).toEqual({ ok: false, error: "Line 1 must name the problem or the mistake, not reassure." });
+  });
+
+  it("on-screen labels in capitals become sentence case", () => {
+    const s = script(10);
+    s.scenes[2] = { ...s.scenes[2], on_screen: "HERE IS THE REAL REASON" } as never;
+    s.scenes[4] = { ...s.scenes[4], on_screen: "1/3 · GET LOW" } as never;
+    s.scenes[5] = { ...s.scenes[5], on_screen: 'SAY: "SHOW MAMA YOUR TRUCK"' } as never;
+    s.scenes[6] = { ...s.scenes[6], on_screen: "Say: \"Walking feet\"" } as never;
+    const r = val(s);
+    expect(r.ok && [2, 4, 5, 6].map((i) => r.script.scenes[i].on_screen)).toEqual(["Here is the real reason", "1/3 · Get low", 'Say: "Show mama your truck"', 'Say: "Walking feet"']);
   });
 });

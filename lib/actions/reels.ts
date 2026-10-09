@@ -12,7 +12,7 @@ import { punchIn } from "@/lib/reels/shots";
 import { DEFAULT_THEME_ID, isThemeId, LEGACY_THEME_ID, staticTheme, THEME_PARTIAL, themeOf, type ReelTheme } from "@/lib/reels/themes";
 import { speedOf } from "@/lib/reels/voices";
 import { isReelFormat, nextFormat, type ReelFormat } from "@/lib/reels/formats";
-import { isHealthTopic, pickTopic, REEL_TOPICS, TOPIC_WINDOW, topicById } from "@/lib/reels/topics";
+import { isHealthTopic, pickTopic, REEL_TOPICS, TOPIC_WINDOW, topicById, type ReelTopic } from "@/lib/reels/topics";
 import { generateLockReason } from "./generate-guard";
 import { UUID_RE } from "./helpers";
 import { fail, requireOwner, type ActionResult } from "./result";
@@ -154,7 +154,13 @@ async function recentReels(sb: SB): Promise<{ formats: (string | null)[]; topicI
 }
 
 /** What a script is written about: the topic, its format, its bank id (null = typed by the owner) and the health flag. */
-interface ScriptBrief { topic: string | undefined; format: ReelFormat; topicId: string | null; health: boolean }
+interface ScriptBrief {
+  topic: string | undefined; format: ReelFormat; topicId: string | null; health: boolean;
+  /** The bank idea's vetted facts + safety line (health topics) and verified anchor; absent for a typed topic. */
+  facts?: string[]; safety?: string; anchor?: string;
+}
+/** The vetted extras of a bank idea. */
+const vetted = (t: ReelTopic) => ({ ...(t.facts ? { facts: t.facts } : {}), ...(t.safety ? { safety: t.safety } : {}), ...(t.anchor ? { anchor: t.anchor } : {}) });
 
 /**
  * The brief of a new script. `keep` (New script): the reel's own format and topic when it has them. Otherwise the
@@ -165,14 +171,14 @@ async function scriptBrief(sb: SB, topic: string | undefined, keep?: { format?: 
   // New script of a reel from before 014 whose topic is a bank idea: the same idea
   const bank = topicById(keep?.topicId) ?? (keep && topic ? REEL_TOPICS.find((t) => t.topic === topic) ?? null : null);
   const keptFormat = isReelFormat(keep?.format) ? keep!.format as ReelFormat : null;
-  if (keptFormat && bank) return { topic: bank.topic, format: keptFormat, topicId: bank.id, health: bank.health };
+  if (keptFormat && bank) return { topic: bank.topic, format: keptFormat, topicId: bank.id, health: bank.health, ...vetted(bank) };
   if (bank) topic = bank.topic;
   const recent = keptFormat && topic ? null : await recentReels(sb);
   const format = keptFormat ?? nextFormat(recent!.formats);
-  if (bank) return { topic: bank.topic, format, topicId: bank.id, health: bank.health };
+  if (bank) return { topic: bank.topic, format, topicId: bank.id, health: bank.health, ...vetted(bank) };
   if (topic) return { topic, format, topicId: null, health: isHealthTopic(topic) };
   const pick = pickTopic(format, recent!.topicIds);
-  return { topic: pick.topic, format, topicId: pick.id, health: pick.health };
+  return { topic: pick.topic, format, topicId: pick.id, health: pick.health, ...vetted(pick) };
 }
 
 interface Draft { script: ReelScript; theme: ReelTheme; has007: boolean; has014: boolean; brief: ScriptBrief }
@@ -194,7 +200,8 @@ async function draftScript(sb: SB, topic: string | undefined, reelThemeId?: stri
     const left = deadline - Date.now();
     if (left < CALL_MIN_MS) break;
     const r = await writeReelScript({
-      topic: brief.topic, format: brief.format, topicHealth: brief.health, maxScenes, alreadyMade, speed,
+      topic: brief.topic, format: brief.format, topicHealth: brief.health, topicFacts: brief.facts, topicSafety: brief.safety, topicAnchor: brief.anchor,
+      maxScenes, alreadyMade, speed,
       theme: { id: theme.id, faces: theme.faces }, timeoutMs: Math.min(CALL_MAX_MS, left),
     });
     if (!r.ok) { last = r.error; continue; }

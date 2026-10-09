@@ -620,6 +620,20 @@ describe("formats + topics + labels (014)", () => {
     expect(rowsOf(qs("reels", "insert")[0])).toMatchObject({ format: "lola_science", topic_id: t.id, topic: t.topic });
   });
 
+  it("write: a bank topic passes its vetted facts, safety line and verified anchor to the script writer", async () => {
+    const t = REEL_TOPICS.find((x) => x.id === "bathe-sick-child")!;
+    world({ themeId: "crayon", labels: true, reel: reelRow({ theme_id: "crayon", hook_text: "x", format: "lola_science", topic_id: t.id, topic: t.topic }) });
+    writeMock.mockResolvedValueOnce(ok(script("Another Title")));
+    await A.rewriteReelScriptAction(REEL);
+    expect(writeMock.mock.calls[0][0]).toMatchObject({ topicHealth: true, topicFacts: t.facts, topicSafety: t.safety });
+    const l = REEL_TOPICS.find((x) => x.id === "labeled-praise")!;
+    world({ themeId: "crayon", labels: true, reel: reelRow({ theme_id: "crayon", hook_text: "x", format: "say_this", topic_id: l.id, topic: l.topic }) });
+    writeMock.mockResolvedValueOnce(ok(script("Another Title")));
+    await A.rewriteReelScriptAction(REEL);
+    expect(writeMock.mock.calls[1][0]).toMatchObject({ topicHealth: false, topicAnchor: l.anchor });
+    expect(writeMock.mock.calls[1][0].topicFacts).toBeUndefined();
+  });
+
   it("write: a typed topic has no topic id; health is found from its words", async () => {
     world({ themeId: "crayon", labels: true });
     writeMock.mockResolvedValue(ok(script()));
