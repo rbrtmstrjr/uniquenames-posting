@@ -373,7 +373,11 @@ describe("Crayon / Red Thread scripts (012): the picture is written to the owner
     expect(c).toMatch(/foreground objects .* simple background/);
     expect(c).toMatch(/"feeling": the picture's feeling .*complete 'The feeling is …'/);
     expect(c).not.toMatch(/"idea":|"setting":|"action":|"thread":/);
-    expect(c).toMatch(/face-free lines are very close detail views of their hands/);
+    // proof run 3: a calm hands-only detail of the toddler came out photographic; an off-screen look drew strangers
+    expect(c).toMatch(/every picture of a person shows their face with a BIG, exaggerated expression/);
+    expect(c).not.toMatch(/face-free lines are very close detail views of their hands/);
+    expect(c).toMatch(/subject object .* on at most 1 line/);
+    expect(c).toMatch(/never looking off-screen/);
     expect(c).toMatch(/LINE 1 is the hook/);
     expect(c).toMatch(/NEVER ask viewers to follow/);
     expect(c).toMatch(/The LAST line is the payoff/);

@@ -18,9 +18,29 @@ export const isGuideTheme = (t: { id?: unknown } | null | undefined) => isGuideT
 
 // ---------------------------------------------------------------- the master prompts
 
-/** Crayon: style, depth, [SCENE] (ending "The feeling is …."), closing. */
-export function crayonPrompt(sceneWithFeeling: string): string {
-  return [CRAYON_GUIDE.style, CRAYON_GUIDE.depth, sceneWithFeeling.trim(), CRAYON_GUIDE.close].join("\n\n");
+const CRAYON_DEPTH_WHO = "the characters in the middle ground";
+const CRAYON_DEPTH_BACK = "a smaller, paler background in the distance";
+const CRAYON_LIGHT_WHO = "along the characters' hair and shoulders";
+
+/**
+ * Crayon: style, depth, [SCENE] (ending "The feeling is …."), closing. `present` = the cast in the picture by their
+ * words ("the mother", "the boy"); left out (or both characters) = the guide verbatim. Proof run 3 (real Gemini script,
+ * A/B with fixed seeds): the guide's "the characters in the middle ground" and its pale background drew people who
+ * were not cast (a mother in an object shot, a grey stranger behind a lone mother), so a picture with nobody names the
+ * main objects instead and a one-person picture names that person over an empty background; the light sentence
+ * follows. Everything else stays verbatim.
+ */
+export function crayonPrompt(sceneWithFeeling: string, present?: readonly string[]): string {
+  let depth: string = CRAYON_GUIDE.depth, close: string = CRAYON_GUIDE.close;
+  if (present && present.length === 0) {
+    depth = depth.replace(CRAYON_DEPTH_WHO, "the main objects in the middle ground");
+    close = close.replace(CRAYON_LIGHT_WHO, "along the edges of the objects");
+  } else if (present && present.length === 1) {
+    depth = depth.replace(CRAYON_DEPTH_WHO, `${present[0]} in the middle ground`)
+      .replace(CRAYON_DEPTH_BACK, "a smaller, paler, empty background in the distance");
+    close = close.replace(CRAYON_LIGHT_WHO, `along ${present[0]}'s hair and shoulders`);
+  }
+  return [CRAYON_GUIDE.style, depth, sceneWithFeeling.trim(), close].join("\n\n");
 }
 
 /**
@@ -198,6 +218,20 @@ export const GUIDE_LEAD: Record<ReelShotSize, readonly [string, string]> = {
   pov: ["Seen through the PARENT's own eyes, looking down.", "Seen through the PARENT's own eyes, looking down at the objects."],
   broll: ["A quiet view of the place.", "A quiet still view of the place, empty and calm."],
 };
+/** Crayon, one person in the picture (WHO = "the mother", "the boy"): the lead says they are alone (proof run 3: a lone
+ *  mother grew a grey stranger behind her; "alone" in the lead + the named depth kept 2 of 2 seeds clean). */
+export const CRAYON_ALONE_LEAD: Record<ReelShotSize, string> = {
+  wide: "A wide view of the whole place, with WHO alone in it.",
+  medium: "A medium view of WHO alone, from the waist up.",
+  close: "A close-up view of WHO alone: the face fills most of the picture.",
+  detail: "A very close detail view of the hands, with WHO alone in the picture.",
+  pov: "Seen through the PARENT's own eyes, looking down at WHO alone.",
+  broll: "A quiet view of the place, with WHO alone in it.",
+};
+/** Crayon, nobody in the picture: the objects keep the crayon look (proof run 3: with the object depth sentence, 2 of 2
+ *  seeds came out people-free and crayon). */
+export const CRAYON_OBJECTS_ONLY = "Everything is drawn in the same rough waxy crayon strokes with white paper grain showing through.";
+
 /** Line 1 carries the hook card up top: that band stays calm. */
 export const GUIDE_HOOK_ROOM = "The top quarter of the picture is calm, simple background.";
 
@@ -263,15 +297,18 @@ export function guideScenePrompt(theme: { id: GuideThemeId }, cast: ReelCast, sc
   const body = text.scene || (person ? `The ${pw} and the ${cw.word} share a quiet, close moment.` : "A quiet, cozy still moment.");
   const feeling = feelingFor(scene.feeling || text.feeling, scene.emotion);
 
-  const lead = GUIDE_LEAD[size][person ? 0 : 1].replace("PARENT", pw);
+  // Crayon names who is really in the picture (see crayonPrompt); Red Thread keeps the shared leads.
+  const one = person && subject !== "both" ? (subject === "mom" ? `the ${pw}` : `the ${cw.word}`) : null;
+  const lead = (!red && one ? CRAYON_ALONE_LEAD[size].replace("WHO", one) : GUIDE_LEAD[size][person ? 0 : 1]).replace("PARENT", pw);
   // The same cast sentence in every picture of a person, hand details included: the guides' fixed sentences draw the
   // characters whole anyway (proof round 3: a hands-only cue gave a different girl).
   const who = person
     ? [subject !== "baby" ? castSentence(cast, "adult", pw, fix) : "", subject !== "mom" ? castSentence(cast, "child", cw.word, fix) : ""]
     : [];
-  const sceneText = [lead, index === 0 ? GUIDE_HOOK_ROOM : "", body, ...who].filter(Boolean).map(sentence).join(" ");
+  const sceneText = [lead, index === 0 ? GUIDE_HOOK_ROOM : "", body, ...who, !red && !person ? CRAYON_OBJECTS_ONLY : ""]
+    .filter(Boolean).map(sentence).join(" ");
 
-  if (!red) return crayonPrompt(`${sceneText} The feeling is ${feeling}.`);
+  if (!red) return crayonPrompt(`${sceneText} The feeling is ${feeling}.`, person ? (one ? [one] : undefined) : []);
   const kind: ThreadWho["kind"] = subject === "both" ? "both" : subject === "mom" ? "parent" : subject === "baby" ? "child" : "none";
   const line = threadLine({ kind, parent: pw, child: cw.word, tiny: cw.tiny }, threadFor(scene.thread, scene.emotion));
   return redThreadPrompt(sceneText, line, feeling, kind === "both");

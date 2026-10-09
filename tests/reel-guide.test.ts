@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { REEL_THREADS } from "@/lib/db/types";
 import {
-  childWord, cleanFeeling, cleanScene, crayonPrompt, feelingFor, FEELING_FOR_EMOTION, greyText, GUIDE_HOOK_ROOM, GUIDE_LEAD, guidePreviewPrompt,
+  childWord, cleanFeeling, cleanScene, CRAYON_ALONE_LEAD, CRAYON_OBJECTS_ONLY, crayonPrompt, feelingFor, FEELING_FOR_EMOTION, greyText, GUIDE_HOOK_ROOM, GUIDE_LEAD, guidePreviewPrompt,
   guideScenePrompt, isGuideTheme, parentWord, redThreadPrompt, THREAD_FOR_EMOTION, threadFor, threadLine, threadOf, withPhoneFix,
 } from "@/lib/reels/guide";
 import { CRAYON_GUIDE, CRAYON_PREVIEW_SCENE, ONLY_RED, PHONE_VISIBLE, RED_THREAD_GUIDE, RED_THREAD_PREVIEW } from "@/lib/reels/guide-text";
@@ -175,7 +175,7 @@ describe("guideScenePrompt: one picture", () => {
     expect(hands).toContain("The mother is a young Filipino mother in her early thirties");
     expect(hands).toContain("The baby is a chubby 10-month-old baby boy");
     const still = guideScenePrompt({ id: "crayon" }, CAST, line({ subject: "object", shot_size: "close", idea: "A cold cup of coffee on the kitchen table." }), 6);
-    expect(still).toContain(`${GUIDE_LEAD.close[1]} A cold cup of coffee on the kitchen table. The feeling is comfort after a long day.`);
+    expect(still).toContain(`${GUIDE_LEAD.close[1]} A cold cup of coffee on the kitchen table. ${CRAYON_OBJECTS_ONLY} The feeling is comfort after a long day.`);
     expect(still).not.toMatch(/The mother|The baby/);
   });
 
@@ -229,5 +229,67 @@ describe("guideScenePrompt: one picture", () => {
     expect(imagePrompt(STATIC_THEMES.crayon, CAST, line(), 2)).toBe(guideScenePrompt({ id: "crayon" }, CAST, line(), 2));
     expect(imagePrompt(STATIC_THEMES.redthread, CAST, line(), 2)).toBe(guideScenePrompt({ id: "redthread" }, CAST, line(), 2));
     expect(imagePrompt(STATIC_THEMES.anime, CAST, line(), 2)).toBe(scenePrompt(STATIC_THEMES.anime, CAST, line(), 2));
+  });
+});
+
+describe("Crayon consistency: only the cast, always crayon (proof run 3, real Gemini + ComfyUI A/B)", () => {
+  const VERBATIM_DEPTH = "the characters in the middle ground";
+  const VERBATIM_LIGHT = "along the characters' hair and shoulders";
+  const parts = (p: string) => p.split("\n\n");
+
+  it("crayonPrompt without a cast list is the guide verbatim; with both characters the depth and light stay verbatim", () => {
+    expect(crayonPrompt("S.")).toBe([CRAYON_GUIDE.style, CRAYON_GUIDE.depth, "S.", CRAYON_GUIDE.close].join("\n\n"));
+    expect(crayonPrompt("S.", ["the mother", "the boy"])).toBe(crayonPrompt("S."));
+  });
+
+  it("nobody in the picture: the depth and light sentences name the objects (people-free shots grew a mother)", () => {
+    const p = crayonPrompt("S.", []);
+    const [style, depth, scene, close] = parts(p);
+    expect(style).toBe(CRAYON_GUIDE.style);
+    expect(scene).toBe("S.");
+    expect(depth).toBe(CRAYON_GUIDE.depth.replace(VERBATIM_DEPTH, "the main objects in the middle ground"));
+    expect(close).toBe(CRAYON_GUIDE.close.replace(VERBATIM_LIGHT, "along the edges of the objects"));
+    expect(p).not.toMatch(/character|people|person/i);
+  });
+
+  it("one person: the depth names them over an empty background, the light follows them (strangers grew in the background)", () => {
+    const [, depth, , close] = parts(crayonPrompt("S.", ["the mother"]));
+    expect(depth).toBe("The scene has depth, with detailed objects in the close foreground, the mother in the middle ground, and a smaller, paler, empty background in the distance.");
+    expect(close).toBe(CRAYON_GUIDE.close.replace(VERBATIM_LIGHT, "along the mother's hair and shoulders"));
+  });
+
+  it("an object line: objects only, a crayon clause, no cast sentence and no word that asks for a person", () => {
+    const p = guideScenePrompt({ id: "crayon" }, CAST, line({ subject: "object", shot_size: "detail", idea: "A half-eaten bread roll sits on a plate next to a mug of coffee." }), 2);
+    const scene = parts(p)[2];
+    expect(scene).toBe(`${GUIDE_LEAD.detail[1]} A half-eaten bread roll sits on a plate next to a mug of coffee. ${CRAYON_OBJECTS_ONLY} The feeling is comfort after a long day.`);
+    expect(p).toBe(crayonPrompt(scene, []));
+    expect(p).not.toMatch(/character|The mother|The baby|skin|face/i);
+  });
+
+  it("a one-person line: the lead says they are alone, the depth names them; both-character lines are unchanged", () => {
+    const mom = guideScenePrompt({ id: "crayon" }, CAST, line({ subject: "mom", shot_size: "medium" }), 3);
+    expect(parts(mom)[2]).toMatch(/^A medium view of the mother alone, from the waist up\. /);
+    expect(mom).toBe(crayonPrompt(parts(mom)[2], ["the mother"]));
+    expect(mom).not.toContain(VERBATIM_DEPTH);
+    const baby = guideScenePrompt({ id: "crayon" }, CAST, line({ subject: "baby", shot_size: "detail" }), 3);
+    expect(baby).toContain(CRAYON_ALONE_LEAD.detail.replace("WHO", "the baby"));
+    expect(baby).toContain("the baby in the middle ground, and a smaller, paler, empty background");
+    for (const s of REEL_SHOT_SIZES) {
+      const p = guideScenePrompt({ id: "crayon" }, CAST, line({ subject: "mom", shot_size: s }), 3);
+      expect(p, s).toContain(CRAYON_ALONE_LEAD[s].replace("PARENT", "mother").replace("WHO", "the mother"));
+      expect(p, s).not.toMatch(/camera|\d+\s?mm|\blens\b/i);
+    }
+    const both = guideScenePrompt({ id: "crayon" }, CAST, line(), 3);
+    expect(both).toContain(CRAYON_GUIDE.depth);
+    expect(both).toContain(CRAYON_GUIDE.close);
+  });
+
+  it("Red Thread keeps its behaviour: shared leads, verbatim depth, no 'alone'", () => {
+    for (const subject of ["mom", "baby", "object"]) {
+      const p = guideScenePrompt({ id: "redthread" }, GREY_CAST, line({ subject, shot_size: "medium" }), 3);
+      expect(p, subject).toContain(RED_THREAD_GUIDE.depth);
+      expect(p, subject).toContain(GUIDE_LEAD.medium[subject === "object" ? 1 : 0]);
+      expect(p, subject).not.toMatch(/\balone\b/);
+    }
   });
 });
