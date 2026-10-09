@@ -146,7 +146,7 @@ function guidePictureRules(red: boolean): string[] {
   return [
     `EACH LINE'S PICTURE — written to the owner's ${red ? "Red Thread" : "Crayon"} style guide (the art style, the shot framing, the cast's looks${red ? ", the red thread" : ""} and the closing 'The feeling is …' sentence are added later by the image system):`,
     red
-      ? `- "scene": the picture in 1-2 plain sentences (20-45 words) that MATCH the line and move the story: ${who}, the action, their facial expressions and gestures, plus simple furniture or plain everyday objects (a small table, a bed, a suitcase, a cup of tea, a phone held to the chest). Keep the background simple. NO colour words at all (the picture is black-and-white), and never mention the thread (it is drawn from "thread"). A one-person picture: that person alone with what they hold or look at. An object / none picture: one plain object or an empty place.`
+      ? `- "scene": the picture in 1-2 plain sentences (20-45 words) that MATCH the line and move the story: ${who}, the action, their facial expressions and gestures, plus simple furniture or plain everyday objects (a small table, a bed, a suitcase, a cup of tea, a phone held to the chest). Keep the background simple. Keep the wrists in view: a hand rests free, reaches out or holds the other's hand, and a held toy never covers the wrist (the thread is tied there). NO colour words at all (the picture is black-and-white), and never mention the thread (it is drawn from "thread"). A one-person picture: that person alone with what they hold or look at. An object / none picture: one plain object or an empty place.`
       : `- "scene": the picture in 2-3 plain sentences (25-60 words) that MATCH the line and move the story: ${who} and what they are doing together, with BIG, exaggerated facial expressions (eyes crinkled shut from smiling, an open-mouth laugh, tears streaming, bright rosy scribbled cheeks, big glossy eyes) and exactly ONE gesture between the characters (a hug, a hand reaching, a head on a shoulder, holding hands). When two characters are in the picture they look at EACH OTHER. Then name a few foreground objects (toys, flowers, cups, a blanket) and a simple background (a window, the sky, a room): that is where the place and the time of day go. A one-person picture: that person, their big expression and what they hold or reach for. An object / none picture: only the objects and the simple background.`,
     "- In \"scene\" leave out framing words (close-up, wide shot, view), art-style words, lighting and lenses. Describe only what IS in the picture (never what is absent). Pictures carry no writing: never signs, labels, books with words, screens with text, letters or numbers. The last line's scene happens in the SAME place as line 1's.",
     "- \"feeling\": the picture's feeling in 2-8 words that complete 'The feeling is …' (e.g. 'pure love and warmth', 'comfort after a long day', 'missing someone you love', 'letting go while still holding on'). Fresh words per line; never the narration.",
@@ -203,7 +203,9 @@ export function reelScriptPrompt({ topic, maxScenes, alreadyMade, speed, theme }
     "- LINE 1 shows a FACE (mom, baby or both) in a close or medium shot — a striking, readable moment, never a calm establishing view. Line 2 or 3 is the establishing WIDE (the whole place).",
     "- Never the same shot_size with the same subject on two lines in a row; never more than 2 face shots in a row.",
     "- The LAST line mirrors line 1: the same subject, the same setting and a similar framing, so the reel loops.",
-    ...(red ? ["- In this style the thread on the wrist must stay in view: face-free lines are very close detail views of the hands and wrists (subject mom, baby or both with shot_size detail); use subject object or none on at most 1 line."] : []),
+    ...(guide ? [red
+      ? "- In this style the thread on the wrist must stay in view: face-free lines are very close detail views of the hands and wrists (subject mom, baby or both with shot_size detail); use subject object or none on at most 1 line."
+      : "- In this style every picture works best with the cast in it: face-free lines are very close detail views of their hands doing something that matters to the story (subject mom, baby or both with shot_size detail); use subject object or none on at most 1 line."] : []),
     "",
     ...(guide ? guidePictureRules(red) : [
     "EACH LINE'S PICTURE (the art style and the cast details are added later by the image system, so keep it plain):",
@@ -380,7 +382,9 @@ export function validateReelScript(raw: unknown, maxScenes: number, speed = 1, t
   // the shot list follows the rules (lib/reels/shots) without overriding a size the idea implies; the repair only
   // changes the shot (the prompt's size + lens part), never the idea's words. The last line is set where line 1 is (the
   // loop) only when its own idea names no place.
-  const shots = repairShotList(raws.map((o, i) => ({ shot_size: o.shot_size, subject: o.subject, idea: lines[i].idea })));
+  // A guide scene is a few full sentences (the guide's own examples say "one tiny hand reaching", "looking down"): its
+  // wording never locks a shot size there; the builder states the shot itself.
+  const shots = repairShotList(raws.map((o, i) => ({ shot_size: o.shot_size, subject: o.subject, idea: guide ? "" : lines[i].idea })));
   const n = lines.length;
   if (n >= 3 && lines[0].setting && !namesPlace(lines[n - 1].idea)) lines[n - 1].setting = lines[0].setting;
   const punches = capPunches(lines.map((x, i) => punchIn(x.narration, raws[i].punch)));

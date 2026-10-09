@@ -164,7 +164,7 @@ describe("guideScenePrompt: one picture", () => {
     expect(p).not.toMatch(/camera|\d+\s?mm|\blens\b/i);
   });
 
-  it("the same cast sentence in every picture of that person; one person → only theirs; hands only → wardrobe", () => {
+  it("the same cast sentence in every picture of that person (hand details too); one person → only theirs; nobody → none", () => {
     const mom = guideScenePrompt({ id: "crayon" }, CAST, line({ subject: "mom", shot_size: "close" }), 2);
     expect(mom).toContain("The mother is a young Filipino mother");
     expect(mom).not.toContain("The baby is");
@@ -172,8 +172,8 @@ describe("guideScenePrompt: one picture", () => {
     expect(baby).toContain("The baby is a chubby 10-month-old baby boy");
     const hands = guideScenePrompt({ id: "crayon" }, CAST, line({ subject: "both", shot_size: "detail" }), 5);
     expect(hands).toContain(`${GUIDE_LEAD.detail[0]}`);
-    expect(hands).toContain("Only the hands are shown: tan skin, mustard cardigan, rust romper.");
-    expect(hands).not.toContain("low bun");
+    expect(hands).toContain("The mother is a young Filipino mother in her early thirties");
+    expect(hands).toContain("The baby is a chubby 10-month-old baby boy");
     const still = guideScenePrompt({ id: "crayon" }, CAST, line({ subject: "object", shot_size: "close", idea: "A cold cup of coffee on the kitchen table." }), 6);
     expect(still).toContain(`${GUIDE_LEAD.close[1]} A cold cup of coffee on the kitchen table. The feeling is comfort after a long day.`);
     expect(still).not.toMatch(/The mother|The baby/);
@@ -199,7 +199,7 @@ describe("guideScenePrompt: one picture", () => {
     expect(both.endsWith(`${RED_THREAD_GUIDE.close} ${ONLY_RED}`)).toBe(true);
 
     const mom = guideScenePrompt({ id: "redthread" }, GREY_CAST, line({ subject: "mom", shot_size: "close", thread: "stretched" }), 3).split("\n\n")[2].split("\n");
-    expect(mom[0]).toMatch(/^A close view/);
+    expect(mom[0]).toMatch(/^A close-up view/);
     expect(mom[1]).toBe(threadLine({ kind: "parent", parent: "mother", child: "baby", tiny: true }, "stretched"));
     const baby = guideScenePrompt({ id: "redthread" }, GREY_CAST, line({ subject: "baby", shot_size: "wide", thread: null, emotion: "worried" }), 4).split("\n\n")[2].split("\n");
     expect(baby[1]).toBe(threadLine({ kind: "child", parent: "mother", child: "baby", tiny: true }, "loose"));

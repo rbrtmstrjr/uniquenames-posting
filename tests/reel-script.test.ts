@@ -373,6 +373,7 @@ describe("Crayon / Red Thread scripts (012): the picture is written to the owner
     expect(c).toMatch(/foreground objects .* simple background/);
     expect(c).toMatch(/"feeling": the picture's feeling .*complete 'The feeling is …'/);
     expect(c).not.toMatch(/"idea":|"setting":|"action":|"thread":/);
+    expect(c).toMatch(/face-free lines are very close detail views of their hands/);
     expect(c).toMatch(/LINE 1 is the hook/);
     expect(c).toMatch(/NEVER ask viewers to follow/);
     expect(c).toMatch(/The LAST line is the payoff/);
@@ -380,6 +381,7 @@ describe("Crayon / Red Thread scripts (012): the picture is written to the owner
     expect(r).toMatch(/THIS STYLE \(the owner's Red Thread guide\)/);
     expect(r).toMatch(/OFW parent/);
     expect(r).toMatch(/NO colour words at all/);
+    expect(r).toMatch(/Keep the wrists in view/);
     expect(r).toMatch(/"thread": .*plain\|tight\|stretched\|tangled\|loose/);
     expect(r).toMatch(/describe hair and clothes by shape and pattern ONLY/);
     expect(r).toMatch(/face-free lines are very close detail views of the hands and wrists/);
@@ -421,6 +423,17 @@ describe("Crayon / Red Thread scripts (012): the picture is written to the owner
     expect(r.script.scenes[4].feeling).toBe("pure love and warmth");   // tender
     expect(r.script.scenes[5].idea.length).toBeLessThanOrEqual(560);
     expect(r.script.scenes[5].idea.endsWith("with crinkled eyes")).toBe(true);
+    generateJson.mockResolvedValueOnce({ ok: true, data: gscript(10, (n) => (n === 2 ? { scene: "" } : {})) });
+    expect(await writeReelScript({ ...input10, theme: CRAYON })).toEqual({ ok: false, error: "Line 3 has no picture scene." });
+  });
+
+  it("a guide scene's wording ('one tiny hand reaching', 'looking down at') never overrides the shot size", async () => {
+    generateJson.mockResolvedValueOnce({ ok: true, data: gscript(10, (n) => (n === 3 ? { scene: "The mother looking down at the baby, one tiny hand reaching toward her face. A blanket in the foreground." } : {})) });
+    const r = await writeReelScript({ ...input10, theme: CRAYON });
+    expect(r.ok && r.script.scenes[3].shot_size).toBe(SHOTS[3][0]);
+  });
+
+  it("(no scene) is rejected", async () => {
     generateJson.mockResolvedValueOnce({ ok: true, data: gscript(10, (n) => (n === 2 ? { scene: "" } : {})) });
     expect(await writeReelScript({ ...input10, theme: CRAYON })).toEqual({ ok: false, error: "Line 3 has no picture scene." });
   });

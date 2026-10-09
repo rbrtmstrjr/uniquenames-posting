@@ -1,8 +1,8 @@
 import { GUIDE_THEME_IDS, REEL_THREADS, type GuideThemeId, type ReelCast, type ReelThread } from "@/lib/db/types";
 import { CRAYON_GUIDE, CRAYON_PREVIEW_SCENE, ONLY_RED, PHONE_VISIBLE, RED_THREAD_GUIDE, RED_THREAD_PREVIEW } from "./guide-text";
 import { emotionOf, type ReelEmotion } from "./motion";
-import { castTag, childAge, childNoun, isDollCast, positiveOnly, scrubOptics, splitIdea, undoll, wardrobeCue, type PromptScene } from "./prompt";
-import { hasFace, isFaceFree, sizeOf, subjectOf, type ReelShotSize, type ReelSubject } from "./shots";
+import { childAge, childNoun, isDollCast, positiveOnly, scrubOptics, splitIdea, undoll, type PromptScene } from "./prompt";
+import { hasFace, sizeOf, subjectOf, type ReelShotSize, type ReelSubject } from "./shots";
 
 // The two reel styles of migration 012, built from the owner's guides (lib/reels/guide-text.ts). The master prompt
 // stays verbatim and in the guide's order (style, depth, [SCENE] (+ [THREAD] + "The feeling is …."), closing);
@@ -187,21 +187,20 @@ export function cleanScene(raw: unknown, opts: { red?: boolean; both?: boolean }
 
 // ---------------------------------------------------------------- one picture
 
-/** The shot, in plain words (no lens or mm words in these styles). [person, nobody in the picture]. */
+/** The shot, in plain words (no lens or mm words in these styles). [person, nobody in the picture]. A people-free
+ *  picture lets the objects fill the frame (proof round 2: naming "no people" still drew strangers, because the guides'
+ *  fixed depth and light sentences name "the characters"; the script steers face-free lines to hand details). */
 export const GUIDE_LEAD: Record<ReelShotSize, readonly [string, string]> = {
-  wide: ["A wide view of the whole place.", "A wide view of the whole place."],
-  medium: ["A medium view of the characters from the waist up.", "A medium view of the objects."],
-  close: ["A close view of the faces.", "A close view of the objects."],
-  detail: ["A very close detail view of the hands.", "A very close detail view of the objects."],
-  pov: ["Seen through the PARENT's own eyes, looking down.", "Seen through the PARENT's own eyes, looking down."],
-  broll: ["A quiet view of the place.", "A quiet still view of the place."],
+  wide: ["A wide view of the whole place.", "A wide view of the whole place, empty and quiet."],
+  medium: ["A medium view of the characters from the waist up.", "A medium view: the objects fill the picture, an empty, quiet corner."],
+  close: ["A close-up view: the faces fill most of the picture.", "A close view: the objects fill the picture, an empty, quiet corner."],
+  detail: ["A very close detail view of the hands.", "A very close detail view: the objects fill the whole picture, an empty, quiet corner."],
+  pov: ["Seen through the PARENT's own eyes, looking down.", "Seen through the PARENT's own eyes, looking down at the objects."],
+  broll: ["A quiet view of the place.", "A quiet still view of the place, empty and calm."],
 };
 /** Line 1 carries the hook card up top: that band stays calm. */
 export const GUIDE_HOOK_ROOM = "The top quarter of the picture is calm, simple background.";
 
-/** Each comma fragment once, in order. */
-const uniqueFragments = (s: string) =>
-  s.split(",").map((x) => x.trim()).filter((x, i, all) => x && all.findIndex((y) => y.toLowerCase() === x.toLowerCase()) === i).join(", ");
 const sentence = (s: string) => {
   const t = s.replace(/\s+/g, " ").trim().replace(/[\s,;]+$/, "");
   return t ? (/[.!?]$/.test(t) ? t : `${t}.`) : "";
@@ -257,7 +256,6 @@ export function guideScenePrompt(theme: { id: GuideThemeId }, cast: ReelCast, sc
   const size: ReelShotSize = sizeOf(scene.shot_size) ?? "medium";
   const subject: ReelSubject = subjectOf(scene.subject) ?? (size === "broll" ? "none" : "both");
   const person = hasFace(subject);
-  const faceFree = isFaceFree({ shot_size: size, subject });
   const pw = parentWord(cast), cw = childWord(cast);
 
   const { moment, setting } = splitIdea(people ? undoll(scene.idea ?? "") : (scene.idea ?? ""));
@@ -266,14 +264,11 @@ export function guideScenePrompt(theme: { id: GuideThemeId }, cast: ReelCast, sc
   const feeling = feelingFor(scene.feeling || text.feeling, scene.emotion);
 
   const lead = GUIDE_LEAD[size][person ? 0 : 1].replace("PARENT", pw);
-  let who: string[] = [];
-  if (person && faceFree) {
-    const tags = [subject !== "baby" ? castTag(cast, "adult", people ? undoll : undefined) : "", subject !== "mom" ? castTag(cast, "child", people ? undoll : undefined) : ""];
-    const cue = fix(uniqueFragments(wardrobeCue(tags.filter(Boolean).join(", "))));
-    who = [cue ? `Only the hands are shown: ${cue}.` : ""];
-  } else if (person) {
-    who = [subject !== "baby" ? castSentence(cast, "adult", pw, fix) : "", subject !== "mom" ? castSentence(cast, "child", cw.word, fix) : ""];
-  }
+  // The same cast sentence in every picture of a person, hand details included: the guides' fixed sentences draw the
+  // characters whole anyway (proof round 3: a hands-only cue gave a different girl).
+  const who = person
+    ? [subject !== "baby" ? castSentence(cast, "adult", pw, fix) : "", subject !== "mom" ? castSentence(cast, "child", cw.word, fix) : ""]
+    : [];
   const sceneText = [lead, index === 0 ? GUIDE_HOOK_ROOM : "", body, ...who].filter(Boolean).map(sentence).join(" ");
 
   if (!red) return crayonPrompt(`${sceneText} The feeling is ${feeling}.`);
