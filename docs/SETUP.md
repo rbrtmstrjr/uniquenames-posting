@@ -120,6 +120,14 @@ A normal post (same 9–13 cards, theme, child age, fonts, caption, closing card
 5. Press **Generate K post**. The names are picked the usual way among that letter's names. The caption says the names start with K and carries `#namesstartingwithk` among its tags; **Rewrite caption** keeps that. **Add card** on the post picks another K name (when none is left, add more with Suggest with AI). Posts and Today show **Letter K** on the post.
 6. The old **A–Z series** (two posts, one name per letter) is no longer made from Today. Series posts you already made keep their **A–Z Part 1 / Part 2** label; `011_az_series.sql` can stay in the database.
 
+## Reel story formats and step labels (existing install)
+Reels are now short, useful lessons (30–45 s) instead of slow stories. Each new reel uses one of 5 formats in turn: Named Method, Say This Not That, Lola Said Science Says, Scene to Lesson, Problem to Fix. Leave the topic empty and the AI picks a fresh one from 52 proven topics. Health topics only repeat checked facts and always end with a "call your doctor" line. Crayon and Red Thread pictures are unchanged.
+1. Supabase **SQL Editor**: paste and run `supabase/migrations/014_reel_formats.sql` (safe to run again). It stores each reel's format and each line's label, and moves the narrator speed from 1.12× to a calmer 1.05× (a speed you picked yourself is kept). Before it runs, scripts still use the new formats, just without saved labels.
+2. Restart the worker (Task Scheduler: **End** then **Run**) so it draws the labels (worker 2.5.0).
+3. Push to GitHub so Vercel redeploys the website.
+4. Review page: each reel shows its format; the key lines carry a short on-screen label (like `1/3 · "You're mad. Tower fell down."`) that you can edit or clear. **Settings > Reels > On-screen step labels** turns them off for every reel.
+5. Voice samples were recorded at the old speed, so **Settings > Narrator & music** may show them as out of date: press **Make samples** to record them again.
+
 ## When something is wrong
 - Header dot red, "PC offline": turn on the PC. The worker starts at login. **Generate** is disabled (the button says why) until the PC is back.
 - Amber dot, "ComfyUI closed": open ComfyUI Desktop. **Generate** stays disabled until then; text edits and Re-stamp still work.
