@@ -15,7 +15,7 @@ from PIL import Image
 from render import JobError, slugify, text_style
 from supa import SupaError
 
-VERSION = "2.2.0"
+VERSION = "2.3.0"
 BUCKET = "cards"
 COMFY_CLOSED = "ComfyUI is closed. Open ComfyUI Desktop on your PC, then press Retry."
 NO_NET_SAVE = "Couldn't reach the internet to save this card. Press Retry."
@@ -23,6 +23,8 @@ NO_NET_LOAD = "Couldn't reach the internet to load this card's photo. Press Retr
 NO_NET_SETTINGS = "Couldn't reach the internet to load your settings. Press Retry."
 STALE = "stale result dropped (card changed while it was being made)"
 
+
+CTA_FILENAME = "99-follow.jpg"  # the closing card's PC backup name (migration 010)
 
 REELS_RECHECK_SECONDS = 600
 PREVIEW_DAYS = 14               # reel previews leave storage after this; the full video stays on the PC
@@ -323,7 +325,7 @@ class Runner:
             raise JobError(COMFY_CLOSED)
         photo = self.renderer.generate_photo(card["prompt"], int(card["seed"]), int(s["width"]), int(s["height"]))
         photo_bytes = to_jpeg(photo, 92)
-        card_bytes = to_jpeg(self.renderer.compose(photo, card["name"], card["meaning"], s["handle"], s["style"]), 93)
+        card_bytes = to_jpeg(self._compose(card, photo, s), 93)
         v = int(card["version"])
         photo_path = "photos/%s/v%d.jpg" % (card["id"], v)
         card_path = "cards/%s/v%d.jpg" % (card["id"], v)
@@ -339,7 +341,7 @@ class Runner:
     def _restamp(self, job, s):
         card = job["card"]
         photo = Image.open(io.BytesIO(self._load_photo(card["photo_path"]))).convert("RGB")
-        card_bytes = to_jpeg(self.renderer.compose(photo, card["name"], card["meaning"], s["handle"], s["style"]), 93)
+        card_bytes = to_jpeg(self._compose(card, photo, s), 93)
         card_path = "cards/%s/v%d.jpg" % (card["id"], int(card["version"]))
         self._net(lambda: self.supa.upload(BUCKET, card_path, card_bytes), NO_NET_SAVE)
         if not self._finish(card, {"card_path": card_path}):
@@ -347,6 +349,13 @@ class Runner:
             return
         self._cleanup(card, keep={card["photo_path"], card_path})
         self._backup(job, card_bytes)
+
+    def _compose(self, card, photo, s):
+        """The stamped card: the closing card (kind 'cta', migration 010) gets its message lines
+        (name = the message, "/" = a line break) and no meaning; every other card its name + meaning."""
+        if card.get("kind") == "cta":
+            return self.renderer.compose_cta(photo, card["name"], s["handle"], s["style"])
+        return self.renderer.compose(photo, card["name"], card["meaning"], s["handle"], s["style"])
 
     # ------------------------------------------------------------ results
     def _match(self, card):
@@ -462,13 +471,15 @@ class Runner:
 
     def _backup(self, job, data):
         card = job["card"]
-        if card.get("kind") != "post" or not job.get("post_date") or not job.get("gender_label"):
+        if card.get("kind") not in ("post", "cta") or not job.get("post_date") or not job.get("gender_label"):
             return
         try:
             label = "%s %s" % (job["post_date"], job["gender_label"])
             if job.get("style_label"):
                 label += " " + job["style_label"]
-            rel = os.path.join(label, "%02d-%s.jpg" % (int(card["position"]), slugify(card["name"])))
+            # The closing card sorts last in the post's folder, whatever its position.
+            fname = CTA_FILENAME if card.get("kind") == "cta" else "%02d-%s.jpg" % (int(card["position"]), slugify(card["name"]))
+            rel = os.path.join(label, fname)
             idx = self._index_load()
             old = idx.get(card["id"])
             os.makedirs(os.path.join(self.output_root, label), exist_ok=True)

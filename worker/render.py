@@ -285,6 +285,23 @@ def fit_meaning(font_id, text, px, max_w, log=print):
     return load(size), balanced_lines(load(size), words, most)
 
 
+def _mark_and_room(W, H, handle, style, mark_left, log=print):
+    """The watermark ({text, font, xy, box}) and the vertical room (lo, bottom) a text block may use."""
+    k = W / LAYOUT["baseWidth"]
+    mk = fonts.load_safe(style.mark_font, LAYOUT["bodyWeight"], max(1, _px(style.mark_size * k)), log)
+    mb = mk.getbbox(handle)
+    # The watermark sits bottom-right, out of the text's way; bottom-right text pushes it left.
+    mx = W * LAYOUT["markInsetX"] - mb[0] if mark_left else W - W * LAYOUT["markInsetX"] - mb[2]
+    my = H - H * LAYOUT["markInsetBottom"] - mb[3]
+    mark = {"text": handle, "font": mk, "xy": (mx, my), "box": (mx + mb[0], my + mb[1], mx + mb[2], my + mb[3])}
+
+    # The text block lives between the top padding and the bottom padding, and never reaches
+    # the watermark row (on a short, wide card 10% of the height is less than a big watermark).
+    lo = H * LAYOUT["padTop"]
+    bottom = min(H - H * LAYOUT["padBottom"], mark["box"][1] - W * LAYOUT["gap"] / 2)
+    return mark, lo, bottom
+
+
 def layout_text(size, name, meaning, handle, style, band="top", log=print):
     """Where every line goes. Pure geometry (no drawing): {title, meaning: [{text, font, xy,
     box}], mark: {...}, block: ink box of title + meaning, band}. `xy` is the draw origin
@@ -304,17 +321,7 @@ def layout_text(size, name, meaning, handle, style, band="top", log=print):
             return right - bb[2]
         return W / 2 - (bb[0] + bb[2]) / 2
 
-    mk = fonts.load_safe(style.mark_font, LAYOUT["bodyWeight"], max(1, _px(style.mark_size * k)), log)
-    mb = mk.getbbox(handle)
-    # The watermark sits bottom-right, out of the text's way; bottom-right text pushes it left.
-    mx = W * LAYOUT["markInsetX"] - mb[0] if pos == "bottom-right" else W - W * LAYOUT["markInsetX"] - mb[2]
-    my = H - H * LAYOUT["markInsetBottom"] - mb[3]
-    mark = {"text": handle, "font": mk, "xy": (mx, my), "box": (mx + mb[0], my + mb[1], mx + mb[2], my + mb[3])}
-
-    # The text block lives between the top padding and the bottom padding, and never reaches
-    # the watermark row (on a short, wide card 10% of the height is less than a big watermark).
-    lo = H * LAYOUT["padTop"]
-    bottom = min(H - H * LAYOUT["padBottom"], mark["box"][1] - W * LAYOUT["gap"] / 2)
+    mark, lo, bottom = _mark_and_room(W, H, handle, style, pos == "bottom-right", log)
 
     title = name.upper() if fonts.caps(style.title_font) else name
     scale = 1.0
@@ -363,37 +370,132 @@ def compose_card(photo, name, meaning, handle, style=None, band=None, log=print)
     """Stamp the name / meaning / handle on the photo with the owner's text settings.
     Returns (image, band or fixed position, band scores)."""
     img = photo.convert("RGB")
-    W, H = img.size
     style = style or text_style({})
     scores = {}
     if style.position == "auto" and band is None:
         band, scores = pick_band(img)
     lay = layout_text(img.size, name, meaning, handle, style, band or "top", log)
+    out = _stamp(img, [(p, 255) for p in lay["title"]] + [(p, 240) for p in lay["meaning"]], lay["block"], lay["mark"])
+    return out, lay["band"], scores
 
+
+def _stamp(img, parts, bx, m):
+    """Draw text parts [(part, alpha)] whose ink box is `bx`, and the watermark `m`, on the RGB photo."""
+    W, H = img.size
     # White text with a soft dark shadow on darker backdrops; warm dark-brown text with a
     # soft light glow on bright ones (pale mint, cream, ivory), where white would wash out.
     pad = W * LAYOUT["gap"]
-    bx = lay["block"]
     block = (max(0, int(bx[0] - pad)), max(0, int(bx[1] - pad)), min(W, int(bx[2] + pad)), min(H, int(bx[3] + pad)))
-    mbx = lay["mark"]["box"]
+    mbx = m["box"]
     mark_box = (max(0, int(mbx[0]) - 4), max(0, int(mbx[1]) - 4), min(W, int(mbx[2]) + 4), min(H, int(mbx[3]) + 4))
     title_ink, title_halo = text_colors(img, block)
     mark_ink, mark_halo = text_colors(img, mark_box)
 
-    lines = [(p, title_ink, 255, title_halo) for p in lay["title"]] + [(p, title_ink, 240, title_halo) for p in lay["meaning"]]
+    lines = [(p, title_ink, a, title_halo) for p, a in parts]
     halo = Image.new("RGBA", img.size, (0, 0, 0, 0))
     sd = ImageDraw.Draw(halo)
     off = max(2, W // 400)
     for p, _ink, _a, h in lines:
         sd.text((p["xy"][0], p["xy"][1] + off), p["text"], font=p["font"], fill=h)
-    m = lay["mark"]
     sd.text((m["xy"][0], m["xy"][1] + 1), m["text"], font=m["font"], fill=mark_halo)
     out = Image.alpha_composite(img.convert("RGBA"), halo.filter(ImageFilter.GaussianBlur(max(3, W // 220))))
     d = ImageDraw.Draw(out)
     for p, ink, a, _h in lines:
         d.text(p["xy"], p["text"], font=p["font"], fill=ink + (a,))
     d.text(m["xy"], m["text"], font=m["font"], fill=mark_ink + (200,))
-    return out.convert("RGB"), lay["band"], scores
+    return out.convert("RGB")
+
+
+# ---------------------------------------------------------------- closing card (migration 010)
+CTA_MAX_LINES = 3
+# Auto position: the message block is centred at this fraction of the height, the upper-middle
+# calm area the closing card's prompt leaves open (the child and props sit in the lower half).
+CTA_CENTER_Y = 0.30
+
+
+def cta_lines(message):
+    """The closing card's lines: the message split at "/" (empty pieces dropped). More than
+    CTA_MAX_LINES pieces (an older or hand-made row) join onto the last line."""
+    parts = [" ".join(p.split()) for p in str(message or "").split("/")]
+    parts = [p for p in parts if p]
+    if len(parts) > CTA_MAX_LINES:
+        parts = parts[:CTA_MAX_LINES - 1] + [" ".join(parts[CTA_MAX_LINES - 1:])]
+    return parts
+
+
+def fit_cta(font_id, lines, px, max_w, log=print):
+    """(font, lines) for the message at about `px`: the owner's lines ("/") shrink together until
+    the widest fits max_w; a message without "/" may first wrap onto up to CTA_MAX_LINES balanced
+    lines (shrinking at most to meaningShrinkFirst of the size on each count), then shrinks."""
+    load = lambda s: fonts.load_safe(font_id, LAYOUT["bodyWeight"], s, log)
+    start = _px(px)
+    widest = lambda f, lns: max(_text_w(f, ln) for ln in lns)
+    if len(lines) == 1:
+        words = lines[0].split()
+        floor = max(LAYOUT["minPx"], _px(px * LAYOUT["meaningShrinkFirst"]))
+        most = max(1, min(CTA_MAX_LINES, len(words)))
+        for n in range(1, most + 1):
+            size = _largest(lambda s: widest(load(s), balanced_lines(load(s), words, n)) <= max_w, floor, start)
+            if size:
+                return load(size), balanced_lines(load(size), words, n)
+        size = _largest(lambda s: widest(load(s), balanced_lines(load(s), words, most)) <= max_w, LAYOUT["minPx"], floor - 1)
+        size = size or LAYOUT["minPx"]
+        return load(size), balanced_lines(load(size), words, most)
+    size = _largest(lambda s: widest(load(s), lines) <= max_w, LAYOUT["minPx"], start) or LAYOUT["minPx"]
+    return load(size), lines
+
+
+def layout_cta(size, message, handle, style, log=print):
+    """Where the closing card's message goes: centred lines in the meaning font at about the title
+    size, no meaning line, the usual watermark. The text position setting picks the height (auto =
+    the upper-middle calm area); the message is always centred across. {lines: [part], mark, block, band}."""
+    W, H = size
+    k = W / LAYOUT["baseWidth"]
+    pos = style.position if style.position in LAYOUT["positions"] else "auto"
+    vert = "auto" if pos == "auto" else pos.split("-")[0]
+    max_w = W * LAYOUT["maxWidthCenter"]
+    mark, lo, bottom = _mark_and_room(W, H, handle, style, False, log)
+    lines = cta_lines(message) or [""]
+
+    scale = 1.0
+    while True:
+        font, rows = fit_cta(style.meaning_font, lines, style.title_size * k * scale, max_w, log)
+        pitch = font.size * (1 + LAYOUT["lineGap"])
+        parts = [{"text": ln, "font": font, "y": i * pitch, "bb": font.getbbox(ln)} for i, ln in enumerate(rows)]
+        top = min(p["y"] + p["bb"][1] for p in parts)
+        height = max(p["y"] + p["bb"][3] for p in parts) - top
+        if height <= bottom - lo or scale < 0.15:
+            break
+        scale *= 0.9
+
+    hi = bottom - height
+    if vert == "top":
+        y = lo
+    elif vert == "middle":
+        y = (H - height) / 2
+    elif vert == "bottom":
+        y = hi
+    else:
+        y = H * CTA_CENTER_Y - height / 2
+    y = max(lo, min(hi, y))
+    dy = y - top
+
+    out = []
+    for p in parts:
+        bb = p["bb"]
+        x, py = W / 2 - (bb[0] + bb[2]) / 2, p["y"] + dy
+        out.append({"text": p["text"], "font": p["font"], "xy": (x, py), "box": (x + bb[0], py + bb[1], x + bb[2], py + bb[3])})
+    boxes = [p["box"] for p in out]
+    block = (min(b[0] for b in boxes), min(b[1] for b in boxes), max(b[2] for b in boxes), max(b[3] for b in boxes))
+    return {"lines": out, "mark": mark, "block": block, "band": "cta" if pos == "auto" else pos}
+
+
+def compose_cta(photo, message, handle, style=None, log=print):
+    """Stamp the closing card: the message lines and the watermark, no meaning."""
+    img = photo.convert("RGB")
+    style = style or text_style({})
+    lay = layout_cta(img.size, message, handle, style, log)
+    return _stamp(img, [(p, 255) for p in lay["lines"]], lay["block"], lay["mark"])
 
 
 LIGHT_BACKDROP = LAYOUT["lightBackdrop"]  # mean luminance (0-255) above which white text stops reading well
@@ -507,3 +609,6 @@ class ComfyRenderer:
     def compose(self, photo, name, meaning, handle, style=None):
         img, _band, _scores = compose_card(photo, name, meaning, handle, style, log=self.log)
         return img
+
+    def compose_cta(self, photo, message, handle, style=None):
+        return compose_cta(photo, message, handle, style, log=self.log)
