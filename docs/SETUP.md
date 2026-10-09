@@ -98,15 +98,6 @@ Every new post ends with one extra picture from the same photoshoot that says "F
 4. **Settings > Closing card**: switch it on or off and edit the messages, one per line (`/` = a line break, up to 3 lines; `{gender}` becomes boy or girl). Each post gets the message used longest ago, never the same as the post before.
 5. On a post the closing card has a **Closing card** badge and is always saved last (you can still unselect it). Open it to change its message (Save text re-stamps the photo) or make a new picture. Posts without one show **Add closing card**.
 
-## A–Z series (existing install)
-One run makes two posts of single names, one name per letter: **Part 1 (A–M)** and **Part 2 (N–Z)**, 13 cards each, in alphabetical order, on the same theme (one photoshoot). Everything else is a normal post: fonts, child age, caption (it says which part it is, with `#atozbabynames` among its tags), closing card, selection, order, save, mark posted.
-1. Supabase **SQL Editor**: paste and run `supabase/migrations/011_az_series.sql` (safe to run again; no worker restart needed: the PC makes these cards like any others). Until it runs, Today has no A–Z option and everything else works as before.
-2. Push to GitHub so Vercel redeploys the website.
-3. **Today > Post type > A–Z series**: pick Boy or Girl, the theme, child age and fonts as usual. The 26 letters show green (a single name is ready for that letter) or amber (none yet; a small number = ideas waiting for your approval).
-4. Amber letters: press **Fill missing letters**. Gemini suggests up to 3 real names (with their meanings) for each missing letter; they wait as **Pending** on the Names page. Use **Review … waiting** (or Names > Pending with the **Starts with** letter filter), approve the ones you like, reject the rest. Check every name and meaning before approving: rare letters (Q, U, X, Y) are where AI ideas are weakest.
-5. When all 26 letters are green, press **Make A–Z (2 posts)**. For each letter the name waiting longest is used. Pressing twice still makes one series. Both parts show on Today while they are made (26 cards + 2 closing cards; the PC makes them one by one) and on the Posts page with their **A–Z Part 1 (A–M)** / **Part 2 (N–Z)** label.
-6. Deleting one part frees its names; the theme stays used until both parts are deleted.
-
 ## Two reel styles: Crayon and Red Thread (existing install)
 Reels now come in exactly two styles, built word for word from your guides (`docs/reference/crayon-parenting-prompt.md`
 and `docs/reference/red-thread-parenting-prompt.md`): **Crayon** (the default) and **Red Thread** (black-and-white line
@@ -119,6 +110,15 @@ made again, but they are no longer offered.
 3. Push to GitHub so Vercel redeploys the website.
 4. **Settings > Theme > Make all previews**: your PC makes one preview per style (Crayon: "Mother and newborn", Red
    Thread: "2. Newborn"). Pick the default; each reel can switch style on its review page before you approve it.
+
+## Posts by letter (existing install)
+A normal post (same 9–13 cards, theme, child age, fonts, caption, closing card) where every name starts with one letter you pick, like 12 girl names starting with K. For two-word names the first name starts with the letter.
+1. Supabase **SQL Editor**: paste and run `supabase/migrations/013_letter_posts.sql` (safe to run again; no worker restart needed). It only stores the post's letter for its **Letter K** label: before it runs, posts by letter are still made, just without the label.
+2. Push to GitHub so Vercel redeploys the website.
+3. **Today > Post type > By letter**: pick Boy or Girl, the name style, child age, theme, fonts and number of cards as usual, then tap a letter. Each letter shows how many available names of that gender and style start with it: green = enough for the cards you chose, amber = too few.
+4. Amber letter: **Need N more K names** > **Suggest with AI**. Gemini suggests a few more real, uncommon names than you need (with their meanings). Tick the ones you like and press **Add**: they become available names straight away (check each name and meaning first; rare letters like Q, U, X, Y are where AI ideas are weakest).
+5. Press **Generate K post**. The names are picked the usual way among that letter's names. The caption says the names start with K and carries `#namesstartingwithk` among its tags; **Rewrite caption** keeps that. **Add card** on the post picks another K name (when none is left, add more with Suggest with AI). Posts and Today show **Letter K** on the post.
+6. The old **A–Z series** (two posts, one name per letter) is no longer made from Today. Series posts you already made keep their **A–Z Part 1 / Part 2** label; `011_az_series.sql` can stay in the database.
 
 ## When something is wrong
 - Header dot red, "PC offline": turn on the PC. The worker starts at login. **Generate** is disabled (the button says why) until the PC is back.

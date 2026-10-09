@@ -36,7 +36,7 @@ export function NamesTable({ names: serverNames, initial = {} }: { names: NameRo
   const [gender, setGender] = useState<"all" | Gender>(initial.gender ?? "all");
   const [style, setStyle] = useState<"all" | NameStyle>(initial.style ?? "all");
   const [status, setStatus] = useState<"all" | NameStatus>(initial.status ?? "available");
-  // First letter (A–Z series): "all" or A..Z.
+  // First letter: "all" or A..Z.
   const [letter, setLetter] = useState<string>(initial.letter ?? "all");
   const [form, setForm] = useState<{ open: boolean; editing: NameRow | null }>({ open: false, editing: null });
   const [bulk, setBulk] = useState(false);

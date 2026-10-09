@@ -1,4 +1,4 @@
-// Cheap, offline checks for AI name ideas (A–Z "Fill missing letters"): the page shares UNIQUE names,
+// Cheap, offline checks for AI name ideas (posts by letter: Suggest with AI): the page shares UNIQUE names,
 // so very common ones are out, and a card's meaning must be kind. Static lists, no I/O.
 import type { Gender } from "@/lib/db/types";
 
