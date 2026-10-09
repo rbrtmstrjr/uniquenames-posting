@@ -2,18 +2,24 @@
 import Link from "next/link";
 import { useState } from "react";
 import { usePathname } from "next/navigation";
-import { CalendarHeart, Images, Type, Palette, Settings } from "lucide-react";
+import { CalendarHeart, Clapperboard, Images, Type, Palette, Settings } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 
+// Phones keep 5 tabs (the most a bottom bar holds comfortably): Themes moves off the bar and is
+// reached from "More" (Settings shows a Themes link on phones) and from Today's "Manage themes".
 export const NAV = [
-  { href: "/", label: "Today", short: "Today", icon: CalendarHeart },
-  { href: "/posts", label: "Posts", short: "Posts", icon: Images },
-  { href: "/names", label: "Names", short: "Names", icon: Type },
-  { href: "/themes", label: "Themes", short: "Themes", icon: Palette },
-  { href: "/settings", label: "Settings", short: "More", icon: Settings },
+  { href: "/", label: "Today", short: "Today", icon: CalendarHeart, phone: true },
+  { href: "/posts", label: "Posts", short: "Posts", icon: Images, phone: true },
+  { href: "/reels", label: "Reels", short: "Reels", icon: Clapperboard, phone: true },
+  { href: "/names", label: "Names", short: "Names", icon: Type, phone: true },
+  { href: "/themes", label: "Themes", short: "Themes", icon: Palette, phone: false },
+  { href: "/settings", label: "Settings", short: "More", icon: Settings, phone: true },
 ];
+export const PHONE_NAV = NAV.filter((n) => n.phone);
 
 const isActive = (path: string, href: string) => (href === "/" ? path === "/" : path.startsWith(href));
+/** Phone tabs: "More" also lights up on Themes (it lives under More on phones). */
+const isPhoneActive = (path: string, href: string) => isActive(path, href) || (href === "/settings" && isActive(path, "/themes"));
 
 // The tapped tab lights up at once (the URL only changes once the new page arrives);
 // it hands back to the real path as soon as the navigation commits.
@@ -48,11 +54,11 @@ export function BottomTabs() {
   return (
     <nav aria-label="Main" className="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-surface/95 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden">
       <ul className="grid grid-cols-5">
-        {NAV.map(({ href, short, icon: Icon }) => (
+        {PHONE_NAV.map(({ href, short, icon: Icon }) => (
           <li key={href}>
-            <Link href={href} onClick={(e) => onNavigate(e, href)} aria-current={isActive(path, href) ? "page" : undefined}
+            <Link href={href} onClick={(e) => onNavigate(e, href)} aria-current={isPhoneActive(path, href) ? "page" : undefined}
               className={cn("flex min-h-14 flex-col items-center justify-center gap-0.5 text-[11px] font-semibold",
-                isActive(path, href) ? "text-accent" : "text-muted")}>
+                isPhoneActive(path, href) ? "text-accent" : "text-muted")}>
               <Icon className="size-5" aria-hidden /> {short}
             </Link>
           </li>

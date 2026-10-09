@@ -1,9 +1,10 @@
 import type { Gender, NameRow, NameStyle, SettingsRow, ThemeRow } from "@/lib/db/types";
 import { buildCaption } from "./caption";
-import { buildPrompt, pickSubject, randomSubject, type Subject } from "./prompt";
+import { buildCtaPrompt, buildPrompt, ctaShot, pickSubject, randomSubject, type Subject } from "./prompt";
 import { hashSeed, seededRandom, shuffle } from "./random";
 import { buildMixedShotSpecs, buildShots, dealAges, sessionShots, shotSpec, type ShotSpec } from "./shots";
 import { SUBJECT_AGES, type AgeChoice } from "./age";
+import { startsWith } from "@/lib/series/letter";
 
 /** One key per post for its child (look, and session for older posts): add-a-card reuses it so extra cards match. */
 export const subjectKey = (postDate: string, gender: Gender, style: NameStyle) => `${postDate}|${gender}|${style}`;
@@ -14,6 +15,8 @@ export interface PlanInput {
     gender: Gender; style: NameStyle; count: number | null; postDate: string;
     /** The child's age from Today. "random" = its own child per card; undefined/null = the original one-baby plan. */
     age?: AgeChoice | null;
+    /** A post by letter: only names starting with it (for two-word names, the first name). */
+    letter?: string | null;
   };
   names: NameRow[]; themes: ThemeRow[];
   settings: Pick<SettingsRow, "caption_template" | "hashtags" | "min_images" | "max_images">;
@@ -44,7 +47,13 @@ export function nextTheme(themes: ThemeRow[], gender: Gender): ThemeRow | undefi
 export function planPost(input: PlanInput): PlanResult {
   const { request: r, settings: s } = input;
   const label = r.gender;
-  const pool = availablePool(input.names, r.gender, r.style);
+  const pool = availablePool(input.names, r.gender, r.style).filter((n) => !r.letter || startsWith(n.name, r.letter));
+  if (r.letter) {
+    const need = r.count ?? s.min_images;
+    if (pool.length < need) {
+      return { ok: false, reason: `Only ${pool.length} unused ${label} ${r.style} names start with ${r.letter}; this post needs ${need}. Use Suggest with AI on Today to add more.` };
+    }
+  }
   if (pool.length < s.min_images) {
     return { ok: false, reason: `Only ${pool.length} unused ${label} ${r.style} names are left; a post needs at least ${s.min_images}. Add names on the Names page.` };
   }
@@ -64,24 +73,33 @@ export function planPost(input: PlanInput): PlanResult {
     return { ok: false, reason: `Number of cards must be ${s.min_images} to ${s.max_images}.` };
   }
   const chosen = shuffle(pool, rng).slice(0, Math.min(want, pool.length));
-  const key = subjectKey(r.postDate, r.gender, r.style);
-  const shotRng = seededRandom(hashSeed(`${key}|shots`));
+  const cards = galleryCards(chosen, theme, r.gender, r.postDate, subjectKey(r.postDate, r.gender, r.style), r.age);
+  return { ok: true, theme_id: theme.id, caption: buildCaption(r.gender, s), cards };
+}
+
+/**
+ * One post's gallery for these names, in this order: the shots (cover first, props frames spread
+ * through) and each card's child. `key` is the post's subjectKey (a fixed-age post's child);
+ * `salt` varies the shots and Random ages between posts sharing a key.
+ */
+function galleryCards(chosen: NameRow[], theme: ThemeRow, gender: Gender, postDate: string, key: string, age: AgeChoice | null | undefined, salt = ""): PlannedCard[] {
+  const rngKey = salt ? `${key}|${salt}` : key;
+  const shotRng = seededRandom(hashSeed(`${rngKey}|shots`));
   let frames: { shot: string; subject?: Subject }[];
-  if (r.age === "random") {
+  if (age === "random") {
     // Its own child per baby card, the ages dealt so the post shows a real spread.
-    const ageRng = seededRandom(hashSeed(`${key}|ages`));
+    const ageRng = seededRandom(hashSeed(`${rngKey}|ages`));
     const ages = dealAges(chosen.length, ageRng);
     frames = buildMixedShotSpecs(chosen.length, ages, shotRng).map((f) =>
       ({ shot: f.spec.text, subject: f.age ? randomSubject(f.age, ageRng) : undefined }));
   } else {
-    const subject = pickSubject(key, r.age ?? undefined);
+    const subject = pickSubject(key, age ?? undefined);
     frames = buildShots(chosen.length, shotRng, subject.session).map((shot) => ({ shot, subject }));
   }
-  const cards = chosen.map((n, k) => ({
+  return chosen.map((n, k) => ({
     position: k + 1, name_id: n.id, name: n.name.trim(), meaning: n.meaning.trim(), shot: frames[k].shot,
-    prompt: buildPrompt(theme!, frames[k].shot, r.gender, frames[k].subject), seed: cardSeed(r.postDate, n.name, k),
+    prompt: buildPrompt(theme, frames[k].shot, gender, frames[k].subject), seed: cardSeed(postDate, n.name, k),
   }));
-  return { ok: true, theme_id: theme.id, caption: buildCaption(r.gender, s), cards };
 }
 
 export interface ExtraCardInput {
@@ -92,6 +110,8 @@ export interface ExtraCardInput {
   age?: AgeChoice | null;
   /** The shot text of every card already in the post, so the new card never repeats one. */
   usedShots?: string[];
+  /** A post by letter: the new card's name starts with it too. */
+  letter?: string | null;
 }
 export type ExtraCardResult = { ok: true; card: PlannedCard } | { ok: false; reason: string };
 
@@ -115,8 +135,12 @@ export function pickExtraShot(lib: ShotSpec[], usedShots: string[], rng: () => n
 }
 
 export function planExtraCard(i: ExtraCardInput): ExtraCardResult {
-  const pool = availablePool(i.names, i.gender, i.style).filter((n) => !i.usedNameIds.includes(n.id));
-  if (!pool.length) return { ok: false, reason: `No unused ${i.gender} ${i.style} names left. Add names on the Names page.` };
+  const pool = availablePool(i.names, i.gender, i.style).filter((n) => !i.usedNameIds.includes(n.id) && (!i.letter || startsWith(n.name, i.letter)));
+  if (!pool.length) {
+    return { ok: false, reason: i.letter
+      ? `No unused ${i.gender} ${i.style} names starting with ${i.letter} left. On Today, pick By letter and ${i.letter}, then Suggest with AI to add more.`
+      : `No unused ${i.gender} ${i.style} names left. Add names on the Names page.` };
+  }
   const rng = seededRandom(hashSeed(i.salt));
   const pick = pool[Math.floor(rng() * pool.length)];
   const subject = i.age === "random"
@@ -127,5 +151,31 @@ export function planExtraCard(i: ExtraCardInput): ExtraCardResult {
     ok: true,
     card: { position: i.nextPosition, name_id: pick.id, name: pick.name.trim(), meaning: pick.meaning.trim(), shot,
       prompt: buildPrompt(i.theme, shot, i.gender, subject), seed: cardSeed(i.salt, pick.name, i.nextPosition) },
+  };
+}
+
+export interface CtaCardInput {
+  theme: ThemeRow; gender: Gender;
+  /** subjectKey(post_date, gender, style) of the post, so a fixed-age post shows its own child. */
+  subjectKey: string;
+  /** The post's subject_age: random = a child of a random age; a fixed age = the post's child; null = the original baby. */
+  age?: AgeChoice | null;
+  /** The post id: one stable seed per post. */
+  salt: string;
+  position: number;
+  /** The message stamped on the card (resolved, "/" = line break). */
+  text: string;
+}
+export interface PlannedCtaCard { kind: "cta"; position: number; name: string; meaning: ""; shot: string; prompt: string; seed: number }
+
+/** The closing "follow" card (migration 010): the post's set and child, the message as its text, no meaning. */
+export function planCtaCard(i: CtaCardInput): PlannedCtaCard {
+  const rng = seededRandom(hashSeed(`${i.salt}|cta`));
+  const subject = i.age === "random"
+    ? randomSubject(SUBJECT_AGES[Math.floor(rng() * SUBJECT_AGES.length)], rng)
+    : pickSubject(i.subjectKey, i.age ?? undefined);
+  return {
+    kind: "cta", position: i.position, name: i.text, meaning: "", shot: ctaShot(subject.session),
+    prompt: buildCtaPrompt(i.theme, i.gender, subject), seed: cardSeed(i.salt, "cta", 0) + 1,
   };
 }

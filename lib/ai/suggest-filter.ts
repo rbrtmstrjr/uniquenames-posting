@@ -3,6 +3,8 @@
 import type { Gender, NameStyle } from "@/lib/db/types";
 import { nameKey, normalizeName, styleOf } from "@/lib/actions/helpers";
 import { validateName, validateTheme, type ThemeInput } from "@/lib/actions/validate";
+import { letterOf } from "@/lib/series/az";
+import { isCommonName, negativeMeaning, notAGivenName, otherGenderName } from "./common-names";
 
 export interface NameSuggestion { name: string; meaning: string }
 export type ThemeFields = Omit<ThemeInput, "gender">;
@@ -133,4 +135,48 @@ export function sampleForPrompt<T>(items: T[], cap: number, rng: () => number = 
     [a[i], a[j]] = [a[j], a[i]];
   }
   return { items: a.slice(0, cap), sampled: true };
+}
+
+export interface LetterSuggestion extends NameSuggestion { letter: string }
+/** "lady or sun": a hedge between two readings. */
+const HEDGE = /\bor\b/i;
+/** What Gemini returns for a letter: the name, its accepted meaning, and who it is given to. */
+export interface LetterCandidate extends NameSuggestion { origin?: string; gender?: string }
+export interface LetterFilterResult extends FilterResult<LetterSuggestion> {
+  /** Valid and new, but another letter, or more than wanted. */
+  offLetter: number;
+  /** Very common for this gender (US/PH top 100, classics) or not a given name (a brand, a coinage). */
+  blocked: number;
+  /** Said (by Gemini, or by the common lists) to be the other gender's name. */
+  wrongGender: number;
+  /** A sad or harsh meaning ("wounded", "bitter"...). */
+  negative: number;
+}
+
+/**
+ * Names for a post by letter: the usual name filter for the style (valid, a meaning of 2 to 6 words, new
+ * against every name in the database and earlier in the batch, case-insensitive), then out go very common
+ * names, non-names, the other gender's names and unkind meanings; of the rest, names that start with the
+ * letter (a two-word name: its first name), at most `want`, in Gemini's order (it lists the best first).
+ * For a two-word name the common check reads the first name; the gender and non-name checks read both words.
+ */
+export function filterLetterSuggestions(cands: LetterCandidate[], existing: Iterable<string>, need: { letter: string; want: number; style: NameStyle }, gender: Gender): LetterFilterResult {
+  const said = new Map(cands.map((c) => [typeof c?.name === "string" ? nameKey(c.name) : "", typeof c?.gender === "string" ? c.gender.trim().toLowerCase() : ""]));
+  const other = gender === "boy" ? "girl" : "boy";
+  const { fresh, duplicates, invalid: bad } = filterNameSuggestions(cands, existing, need.style);
+  let invalid = bad;
+  let left = need.want;
+  const kept: LetterSuggestion[] = [];
+  let offLetter = 0, blocked = 0, wrongGender = 0, negative = 0;
+  for (const s of fresh) {
+    const words = s.name.split(" ");
+    if (HEDGE.test(s.meaning)) { invalid++; continue; }
+    if (isCommonName(words[0], gender) || words.some(notAGivenName)) { blocked++; continue; }
+    if (said.get(nameKey(s.name)) === other || words.some((w) => otherGenderName(w, gender))) { wrongGender++; continue; }
+    if (negativeMeaning(s.meaning)) { negative++; continue; }
+    if (letterOf(s.name) !== need.letter || left <= 0) { offLetter++; continue; }
+    left--;
+    kept.push({ ...s, letter: need.letter });
+  }
+  return { fresh: kept, duplicates, invalid, offLetter, blocked, wrongGender, negative };
 }

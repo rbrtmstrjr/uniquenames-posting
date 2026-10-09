@@ -1,8 +1,102 @@
 -- Unique Names posting: database. Paste the whole file into the Supabase SQL editor and run it once.
--- A project created before v2 runs supabase/migrations/002_v2.sql, 003_post_fonts.sql then 004_subject_age.sql instead (this file already includes them).
+-- A project created before v2 runs supabase/migrations/002_v2.sql, 003_post_fonts.sql, 004_subject_age.sql, 005_reels.sql, 006_reel_voices.sql, 007_reel_themes.sql, 008_reel_playbook.sql, 009_captions.sql, 010_cta_card.sql, 011_az_series.sql, 012_two_styles.sql, 013_letter_posts.sql then 014_reel_formats.sql instead (this file already includes them).
 -- Status 'pending' = an AI-suggested name/theme waiting for approval; nothing here ever plans it (only 'available').
 
 -- ---------------------------------------------------------------- tables
+-- reels (006): narrator voices (30 Gemini voices cloned by Chatterbox + the built-in one); before settings, which references them
+create table if not exists public.reel_voices (
+  id text primary key,               -- the Gemini voice name in lower case, or 'builtin'
+  label text not null,
+  tone text not null default '',     -- Gemini's descriptor ("Warm", "Firm", ...)
+  gender text check (gender in ('female', 'male')),
+  ref_path text,                     -- voices/<id>/ref.wav (null for builtin, or until Set up voices made it)
+  sample_path text,                  -- voices/<id>/sample-v<version>.wav
+  sample_status text not null default 'missing' check (sample_status in ('missing', 'queued', 'making', 'ready', 'failed')),
+  sample_key text,                   -- the calm/speed settings the sample was made with (stale when they change)
+  error text,
+  version int not null default 1,
+  claimed_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+insert into public.reel_voices (id, label, tone) values
+  ('zephyr', 'Zephyr', 'Bright'), ('puck', 'Puck', 'Upbeat'), ('charon', 'Charon', 'Informative'),
+  ('kore', 'Kore', 'Firm'), ('fenrir', 'Fenrir', 'Excitable'), ('leda', 'Leda', 'Youthful'),
+  ('orus', 'Orus', 'Firm'), ('aoede', 'Aoede', 'Breezy'), ('callirrhoe', 'Callirrhoe', 'Easy-going'),
+  ('autonoe', 'Autonoe', 'Bright'), ('enceladus', 'Enceladus', 'Breathy'), ('iapetus', 'Iapetus', 'Clear'),
+  ('umbriel', 'Umbriel', 'Easy-going'), ('algieba', 'Algieba', 'Smooth'), ('despina', 'Despina', 'Smooth'),
+  ('erinome', 'Erinome', 'Clear'), ('algenib', 'Algenib', 'Gravelly'), ('rasalgethi', 'Rasalgethi', 'Informative'),
+  ('laomedeia', 'Laomedeia', 'Upbeat'), ('achernar', 'Achernar', 'Soft'), ('alnilam', 'Alnilam', 'Firm'),
+  ('schedar', 'Schedar', 'Even'), ('gacrux', 'Gacrux', 'Mature'), ('pulcherrima', 'Pulcherrima', 'Forward'),
+  ('achird', 'Achird', 'Friendly'), ('zubenelgenubi', 'Zubenelgenubi', 'Casual'), ('vindemiatrix', 'Vindemiatrix', 'Gentle'),
+  ('sadachbia', 'Sadachbia', 'Lively'), ('sadaltager', 'Sadaltager', 'Knowledgeable'), ('sulafat', 'Sulafat', 'Warm'),
+  ('builtin', 'Built-in', 'Default')
+on conflict (id) do nothing;
+
+-- reels (007): visual themes, each a positive-only style block + one preview picture; before settings, which references them
+create table if not exists public.reel_themes (
+  id text primary key,               -- crayon | redthread (012) + knitted | animated3d | watercolor | clay | papercraft | anime | sketch | cinematic (007)
+  label text not null,
+  emoji text not null default '',
+  blurb text not null default '',
+  style text not null,               -- the positive-only style block put in front of every image prompt
+  faces boolean not null default true,      -- expressive faces (false: feelings show through pose only)
+  grayscale boolean not null default false, -- the worker turns the picture grey after Z-Image (sketch)
+  sort int not null default 0,
+  active boolean not null default true,     -- 012: offered in the pickers (the 8 themes of 007 stay only for old reels)
+  keep_red boolean not null default false,  -- 012: the worker keeps only strong reds, the rest turns grey (redthread)
+  preview_prompt text,               -- 012: the whole preview prompt, used verbatim (null = the worker's fixed moment)
+  preview_path text,                 -- themes/<id>/preview-v<version>.jpg in the reels bucket
+  preview_status text not null default 'missing' check (preview_status in ('missing', 'queued', 'making', 'ready', 'failed')),
+  error text,
+  version int not null default 1,
+  claimed_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+insert into public.reel_themes as t (id, label, emoji, blurb, faces, grayscale, sort, style) values
+  ('knitted', 'Knitted Doll', '🧶', 'Soft crocheted wool dolls in a felt and yarn world; feelings show through pose.', false, false, 1,
+   'Handmade amigurumi doll scene: every character is a soft crocheted wool doll, captured as premium handcrafted toy photography. A tight, clearly visible crochet stitch grid covers the whole face and body, with fine fuzzy wool fibres on every surface; a slightly oversized round head and soft chubby rounded limbs. Large glossy round black bead eyes with a small bright catchlight, a tiny stitched nose bump, a simple curved embroidered smile, thin embroidered eyebrows, and hair made of loose chunky yarn strands, each strand individually visible and softly fuzzy. The whole world is sewn and knitted by hand: every setting is built from felt and linen — felt walls or felt sky, felt ground and floors, felt furniture and shelves, knitted blankets, stitched felt props and yarn details, with small charming irregularities in the stitching. Soft diffused warm daylight from the front and a little to the side, gentle low contrast, soft contact shadows, gentle highlights on the wool fibres and the bead eyes. Palette: warm beige, cream, oatmeal and natural linen with mustard yellow, warm orange, rust and sage accents. Soft rounded edges everywhere, cozy and tender.'),
+  ('animated3d', '3D Animated', '🎬', 'Family-movie 3D with big, expressive faces and warm window light.', true, false, 2,
+   'Stylized 3D animated feature-film still: characters with appealing rounded proportions, slightly oversized heads and large expressive eyes with bright catchlights, soft smooth skin with a subtle warm glow, rich and clearly readable facial expressions with expressive brows and mouths, softly sculpted hair. Polished family-movie rendering with global illumination, soft volumetric window light, a warm rim light, gentle bounce light and soft ambient shadows. A cozy, richly detailed home set with rounded furniture and tactile fabrics. Palette: warm cream, honey gold, soft peach and terracotta with teal accents. Shallow depth of field, heartwarming and full of life.'),
+  ('watercolor', 'Storybook Watercolor', '🎨', 'Hand-painted washes and fine ink lines, like a picture-book page.', true, false, 3,
+   'Storybook watercolor illustration painted by hand on textured cold-press paper: soft transparent washes, gentle wet-in-wet blooms and pigment granulation, visible paper grain, delicate fine ink and pencil linework around the figures, soft painted edges. Characters drawn with simple, gentle rounded features, rosy cheeks and warm expressive faces. Warm light painted as luminous washes of pale yellow and peach. Palette: soft peach, warm ochre, rose, sage green and sky blue on warm ivory paper. Airy and tender, a classic children''s picture-book page.'),
+  ('clay', 'Clay Stop-motion', '🏺', 'Sculpted matte clay figures on a tiny handmade set.', true, false, 4,
+   'Handmade clay stop-motion animation still: every character and object is sculpted from smooth matte modelling clay with subtle fingerprints and tool marks, soft rounded chunky forms, slightly oversized heads, small glossy bead eyes and sculpted expressive mouths and brows. A miniature handcrafted set built from clay, painted card and fabric, with tiny clay props. Soft warm light from the window, gentle soft shadows, miniature tabletop scale with a shallow depth of field. Palette: warm cream, terracotta, mustard, soft teal and dusty pink. Charming, tactile and playful.'),
+  ('papercraft', 'Paper Craft', '✂️', 'A layered cut-paper diorama with real depth and soft shadows.', false, false, 5,
+   'Handmade layered paper-craft diorama, photographed up close as a real tabletop paper model: every character, object and wall is cut from thick coloured cardstock and textured craft paper, built in many stacked layers that stand apart with real depth and soft shadows between them, crisp hand-cut edges with tiny white paper cores showing, visible paper fibre texture, gentle folds and curls. Characters are cut-paper figures made of simple layered paper shapes, with cut-paper hair, small dot eyes and curved paper smiles, posed with clear expressive gestures. A cozy paper room with a layered paper window, paper curtains and paper sunbeams. Soft warm light from the side casting gentle depth shadows between the layers. Palette: warm cream, coral, mustard, teal and soft pink paper. Handmade, whimsical and tactile.'),
+  ('anime', 'Soft Anime', '🌸', 'Gentle slice-of-life anime: clean lines, soft shading, sunlit rooms.', true, false, 6,
+   'Soft anime illustration in a gentle slice-of-life film style: clean confident line art, smooth cel shading with soft gradient shadows, large expressive eyes with layered highlights, a delicate blush on the cheeks, softly flowing hair drawn in clean shapes. A painterly, detailed background of a cozy sunlit home, warm afternoon light streaming in with a soft bloom and glowing dust motes. Palette: warm cream, soft peach, butter yellow, sky blue and leafy green. Tender, heartfelt and luminous.'),
+  ('sketch', 'Pencil Sketch (B&W)', '✏️', 'A black-and-white graphite drawing on sketchbook paper.', true, true, 7,
+   'Black-and-white grayscale pencil drawing, a pure black-and-white graphite study made by hand on white sketchbook paper: the whole picture is pure greyscale, drawn entirely in shades of pencil grey, so every garment, skin tone, hair colour and object reads only as a lighter or darker graphite grey, from soft silver to deep charcoal black, on white paper. Confident graphite line work, expressive loose strokes, soft cross-hatching and smudged tonal shading, visible paper texture, the brightest highlights left as bare white paper, the drawing filling the whole page. Faces drawn with care and clear, readable expressions. Gentle light from the window rendered with soft shading. Intimate, artistic and timeless, a classic monochrome pencil study.'),
+  ('cinematic', 'Cinematic Real', '📷', 'Real people, golden-hour light and a 35mm film look.', true, false, 8,
+   'Cinematic real-life photograph, a still from a modern drama film: real people with natural skin texture, fine hair detail and genuine, readable emotion. 35mm film look with soft natural grain, shallow depth of field and creamy background bokeh. Warm golden-hour sunlight streaming through the window, a soft haze in the light, a gentle rim light on the hair, rich natural colour grading with warm highlights and soft teal shadows. A lived-in, cozy home with real textures. Intimate, emotional and true to life.')
+on conflict (id) do update set
+  label = excluded.label, emoji = excluded.emoji, blurb = excluded.blurb, faces = excluded.faces,
+  grayscale = excluded.grayscale, sort = excluded.sort, style = excluded.style
+where (t.label, t.emoji, t.blurb, t.faces, t.grayscale, t.sort, t.style)
+  is distinct from (excluded.label, excluded.emoji, excluded.blurb, excluded.faces, excluded.grayscale, excluded.sort, excluded.style);
+-- reels (012): the two styles from the owner's prompt guides (Crayon = the default); the 8 themes above stay for old reels only
+insert into public.reel_themes as t (id, label, emoji, blurb, faces, grayscale, keep_red, active, sort, style, preview_prompt) values
+  ('crayon', 'Crayon', '🖍️', 'A rough wax crayon drawing on white paper: bold colours, big feelings, paper grain showing through.', true, false, false, true, 9,
+   'A rough wax crayon drawing on white paper, drawn by hand with heavy pressure. Thick waxy crayon strokes going in visible directions, streaky uneven coloring, white paper grain showing through the gaps between strokes, coloring slightly outside the lines, scribbly cross-hatching for shading, and bold wobbly dark crayon outlines around every shape. Looks like a real crayon artwork scanned from paper, not a painting.',
+   E'A rough wax crayon drawing on white paper, drawn by hand with heavy pressure. Thick waxy crayon strokes going in visible directions, streaky uneven coloring, white paper grain showing through the gaps between strokes, coloring slightly outside the lines, scribbly cross-hatching for shading, and bold wobbly dark crayon outlines around every shape. Looks like a real crayon artwork scanned from paper, not a painting.\n\nThe scene has depth, with detailed objects in the close foreground, the characters in the middle ground, and a smaller, paler background in the distance.\n\nA young mother with long flowing hair holds a swaddled baby close to her chest, head tilted down, gazing at the baby with a wide joyful smile, eyes crinkled shut from happiness, and bright rosy scribbled cheeks. The baby laughs up at her with a big open-mouth smile and sparkling eyes, one tiny hand reaching toward her face. Tall grass and wildflowers in the foreground, small pale mountains under a sunset sky behind. The feeling is pure love and warmth.\n\nWarm soft light from one side, with a glowing crayon outline along the characters'' hair and shoulders, and darker crayon hatching on the shadow side. Bold saturated colors, expressive emotional storybook crayon style. Not a painting, not smooth, no blending, no gradients, not photorealistic, no crayons or art supplies visible in the image, no text.'),
+  ('redthread', 'Red Thread', '🧵', 'Black-and-white storybook line art with one red thread tying parent and child in every picture.', true, false, true, true, 10,
+   'A clean black and white ink line illustration in a simple modern storybook style. Smooth confident outlines of even thickness, simple rounded shapes, minimal details, and soft flat grey tones. Light warm grey background with subtle paper texture. The entire image is monochrome grayscale except for one single thin bright red thread, the only color in the image.',
+   E'The red thread is the only color in the image. A clean black and white ink line illustration in a simple modern storybook style. Smooth confident outlines of even thickness, simple rounded shapes, minimal details, and soft flat grey tones. Light warm grey background with subtle paper texture. The entire image is monochrome grayscale except for one single thin bright red thread, the only color in the image.\n\nThe scene has depth: the main characters in the foreground with the boldest black outlines, simple furniture in the middle ground with thinner grey lines, and the background faded into pale grey.\n\nA clearly visible thin bright red thread, thick enough to be clearly visible on a phone screen, is tied in a small bow around the mother''s wrist and tied around the baby''s tiny wrist, one continuous thread connecting both wrists, with a short end trailing onto the blanket.\nA young mother sits on a bed holding her newborn baby in her arms, looking down with a soft loving smile and closed curved eyes. The baby sleeps peacefully with a tiny smile.\nThe feeling is a love that just began.\n\nGrayscale everything except the red thread. Not photorealistic, not 3D, no pencil sketch texture, no other colors, no text. The red thread is the only color in the image.')
+on conflict (id) do update set
+  label = excluded.label, emoji = excluded.emoji, blurb = excluded.blurb, faces = excluded.faces, grayscale = excluded.grayscale,
+  keep_red = excluded.keep_red, active = excluded.active, sort = excluded.sort, style = excluded.style, preview_prompt = excluded.preview_prompt
+where (t.label, t.emoji, t.blurb, t.faces, t.grayscale, t.keep_red, t.active, t.sort, t.style, t.preview_prompt)
+  is distinct from (excluded.label, excluded.emoji, excluded.blurb, excluded.faces, excluded.grayscale, excluded.keep_red, excluded.active,
+                    excluded.sort, excluded.style, excluded.preview_prompt);
+
+-- the 8 themes of 007: kept for old reels, no longer offered (a preview still waiting for one is dropped from the line)
+update public.reel_themes set active = false
+where id in ('knitted', 'animated3d', 'watercolor', 'clay', 'papercraft', 'anime', 'sketch', 'cinematic') and active;
+update public.reel_themes set preview_status = case when preview_path is null then 'missing' else 'ready' end
+where not active and preview_status = 'queued';
+
 create table if not exists public.settings (
   id int primary key default 1 check (id = 1),
   caption_template text not null default 'Here are some beautiful names you can give to your baby {gender}. 🥰',
@@ -24,6 +118,26 @@ create table if not exists public.settings (
     'auto', 'top-left', 'top-center', 'top-right', 'middle-left', 'middle-center', 'middle-right',
     'bottom-left', 'bottom-center', 'bottom-right')),
   caption_ai boolean not null default true,
+  -- reels (005): max images per reel; a 5-10 s reference clip in the reels bucket (null = Chatterbox's built-in voice)
+  reel_max_images int not null default 40 constraint settings_reel_max_images_check check (reel_max_images between 10 and 40),
+  reel_voice_path text,
+  -- reels (006): default narrator, narration speed (atempo), background music on/off and its volume in %
+  reel_voice_id text not null default 'gacrux' references public.reel_voices (id),
+  reel_speed numeric(3,2) not null default 1.05 constraint settings_reel_speed_check check (reel_speed between 1.00 and 1.25),
+  reel_music boolean not null default true,
+  reel_music_volume int not null default 18 constraint settings_reel_music_volume_check check (reel_music_volume between 5 and 40),
+  -- reels (007): the default visual theme
+  reel_theme_id text not null default 'crayon' references public.reel_themes (id),
+  -- captions (009): the hashtags on every post + the pool one tag per post is rotated from (`hashtags` is kept for older app versions)
+  hashtags_always text not null default '#uniquenames',
+  hashtag_pool text not null default
+    '#babynames #babygirlnames #babyboynames #uniquebabynames #namemeaning #momlife #newmom #pregnancy #momtobe #babynameideas',
+  -- closing card (010): on/off and its messages, one per line ("/" = a line break, {gender} = boy / girl); rotated per post
+  cta_enabled boolean not null default true,
+  cta_messages text not null default
+    E'Follow for more / baby name ideas.\nFollow us for a new / name list every day.\nStill searching? Follow for / more unique names.\nSave this post and follow / for more name ideas.\nMore {gender} names tomorrow. / Follow so you don''t miss them.\nFound a favorite? / Follow for more like it.\nFollow for a fresh list / of unique {gender} names.\nNew names every day. / Follow along!',
+  -- reels (014): draw the on-screen step labels
+  reel_labels boolean not null default true,
   updated_at timestamptz not null default now(),
   check (min_images <= max_images)
 );
@@ -71,8 +185,22 @@ create table if not exists public.posts (
   meaning_font text,
   mark_font text,
   -- the child's age chosen on Today (004): 'random' or 'newborn'/'1'..'7'; null = a post made before ages existed
-  subject_age text check (subject_age in ('random', 'newborn', '1', '2', '3', '4', '5', '6', '7'))
+  subject_age text check (subject_age in ('random', 'newborn', '1', '2', '3', '4', '5', '6', '7')),
+  -- captions (009): the caption style used and the hashtag set (the next post differs from both)
+  caption_style text,
+  hashtag_set text,
+  -- A–Z series (011): 'az' + the series id (shared by both parts) + the part (1 = A–M, 2 = N–Z); all null on an ordinary post
+  series text,
+  series_id uuid,
+  series_part int,
+  constraint posts_series_check check (
+    (series is null and series_id is null and series_part is null)
+    or (series = 'az' and series_id is not null and series_part between 1 and 2)),
+  -- a post by letter (013): the capital letter every name starts with; null on any other post
+  letter text,
+  constraint posts_letter_check check (letter is null or letter ~ '^[A-Z]$')
 );
+create index if not exists posts_series on public.posts (series_id) where series_id is not null;
 
 create table if not exists public.names (
   id uuid primary key default gen_random_uuid(),
@@ -92,7 +220,8 @@ create table if not exists public.cards (
   id uuid primary key default gen_random_uuid(),
   post_id uuid references public.posts (id) on delete cascade,
   theme_id uuid not null references public.themes (id) on delete cascade,
-  kind text not null default 'post' check (kind in ('post', 'preview')),
+  -- 'cta' (010) = the closing "follow" card of a post: name = the message ("/" = a line break), meaning = ''
+  kind text not null default 'post' constraint cards_kind_check check (kind in ('post', 'preview', 'cta')),
   position int not null default 1,
   name_id uuid references public.names (id) on delete set null,
   name text not null, meaning text not null, shot text not null, prompt text not null,
@@ -112,6 +241,81 @@ create table if not exists public.cards (
 );
 create index if not exists cards_queue on public.cards (status, queued_at) where status in ('queued', 'restamp');
 create index if not exists cards_post on public.cards (post_id, position);
+-- 010: at most one closing card per post
+create unique index if not exists cards_one_cta on public.cards (post_id) where kind = 'cta';
+-- reels (005): a script the PC turns into a video: voice -> timing -> one image per scene -> render
+create table if not exists public.reels (
+  id uuid primary key default gen_random_uuid(),
+  title text not null,
+  topic text,
+  stage text,
+  doll_cast jsonb not null default '{}'::jsonb,
+  status text not null default 'script' check (status in (
+    'script', 'queued', 'voicing', 'imaging', 'rendering', 'ready', 'needs_attention', 'failed')),
+  error text,
+  voice_path text,
+  words jsonb,
+  preview_path text,
+  pc_path text,
+  -- 006: the narrator (null = settings.reel_voice_id); music: null = not made yet, '' = the music step failed (voice only)
+  voice_id text references public.reel_voices (id) on delete set null,
+  music_path text,
+  -- 007: the visual theme; the app pins it on every new reel (null = legacy / theme deleted -> knitted)
+  theme_id text references public.reel_themes (id) on delete set null,
+  -- 008: the hook card shown over the first 3.5 s (null = none)
+  hook_text text,
+  -- 009: the post caption written after the script, and its hashtags
+  caption text,
+  hashtags text,
+  -- 014: the script's format (one of the 5 rotating formats) and the topic-bank idea it came from (null = typed topic)
+  format text constraint reels_format_check
+    check (format is null or format in ('named_method', 'say_this', 'lola_science', 'scene_lesson', 'problem_fix')),
+  topic_id text,
+  duration_s numeric,
+  version int not null default 1,
+  claimed_at timestamptz, started_at timestamptz, finished_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create index if not exists reels_queue on public.reels (created_at) where status in ('queued', 'voicing', 'imaging', 'rendering');
+
+create table if not exists public.reel_scenes (
+  id uuid primary key default gen_random_uuid(),
+  reel_id uuid not null references public.reels (id) on delete cascade,
+  position int not null check (position >= 1),
+  beat text not null default '',
+  idea text not null default '',
+  narration text not null,
+  image_prompt text not null,
+  seed bigint not null,
+  status text not null default 'pending' check (status in ('pending', 'queued', 'generating', 'done', 'failed', 'skipped')),
+  photo_path text,
+  attempts int not null default 0,
+  error text,
+  start_s numeric, end_s numeric,
+  version int not null default 1,
+  claimed_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  -- 007: the line's feeling, body language + hands, framing, a key moment ('punch' emphasis) and its camera move
+  emotion text,
+  action text,
+  shot text,
+  key_moment boolean not null default false,
+  motion text constraint reel_scenes_motion_check
+    check (motion in ('push_in', 'pull_out', 'pan_left', 'pan_right', 'tilt_up', 'tilt_down', 'punch', 'hold')),
+  -- 008: the shot size, who is in the picture, a stressed word for a punch-in, a time jump before the line
+  shot_size text constraint reel_scenes_shot_size_check check (shot_size in ('wide', 'medium', 'close', 'detail', 'pov', 'broll')),
+  subject text constraint reel_scenes_subject_check check (subject in ('mom', 'baby', 'both', 'object', 'none')),
+  punch text,
+  time_jump boolean not null default false,
+  -- 012: the guide styles' "The feeling is ..." phrase and Red Thread's thread state
+  feeling text,
+  thread text constraint reel_scenes_thread_check check (thread in ('plain', 'tight', 'stretched', 'tangled', 'loose')),
+  -- 014: an optional short label drawn while the line is spoken
+  on_screen text constraint reel_scenes_on_screen_len check (on_screen is null or char_length(on_screen) <= 80),
+  unique (reel_id, position)
+);
 alter table public.themes drop constraint if exists themes_preview_fk;
 alter table public.themes add constraint themes_preview_fk foreign key (preview_card_id) references public.cards (id) on delete set null;
 
@@ -120,7 +324,7 @@ create or replace function public.touch_updated_at() returns trigger language pl
 begin new.updated_at := now(); return new; end $$;
 
 do $$ declare t text; begin
-  foreach t in array array['settings', 'worker_status', 'themes', 'posts', 'names', 'cards'] loop
+  foreach t in array array['settings', 'worker_status', 'themes', 'posts', 'names', 'cards', 'reels', 'reel_scenes', 'reel_voices', 'reel_themes'] loop
     execute format('drop trigger if exists touch on public.%I', t);
     execute format('create trigger touch before update on public.%I for each row execute function public.touch_updated_at()', t);
   end loop;
@@ -211,6 +415,82 @@ begin
 exception when unique_violation then
   select id into v_existing from public.posts where request_id = (p->>'request_id')::uuid;
   return jsonb_build_object('status', 'ok', 'post_id', v_existing);
+end $$;
+
+-- ---------------------------------------------------------------- create_series (011)
+-- Both parts of an A–Z series (A–M, N–Z) in one transaction: one shared theme, idempotent per request_id (= series_id),
+-- names locked like create_post. Part 2 is created a millisecond after part 1 (newest-first lists read Part 2, Part 1).
+create or replace function public.create_series(p jsonb) returns jsonb language plpgsql as $$
+declare
+  v_req uuid := (p->>'request_id')::uuid;
+  v_theme_id uuid := (p->>'theme_id')::uuid;
+  v_theme public.themes%rowtype;
+  v_ids uuid[]; v_locked int; v_part jsonb; v_n int := 0; v_post uuid; v_posts uuid[] := '{}';
+begin
+  select array_agg(id order by series_part) into v_posts from public.posts where series_id = v_req;
+  if v_posts is not null then return jsonb_build_object('status', 'ok', 'post_ids', to_jsonb(v_posts)); end if;
+  v_posts := '{}';
+
+  if jsonb_typeof(p->'parts') is distinct from 'array' or jsonb_array_length(p->'parts') <> 2 then
+    return jsonb_build_object('status', 'error', 'reason', 'A series has two parts.');
+  end if;
+  if exists (select 1 from jsonb_array_elements(p->'parts') part
+             where jsonb_typeof(part->'cards') is distinct from 'array' or jsonb_array_length(part->'cards') = 0) then
+    return jsonb_build_object('status', 'error', 'reason', 'A part of the series has no cards.');
+  end if;
+  select array_agg((c->>'name_id')::uuid) into v_ids
+    from jsonb_array_elements(p->'parts') part, jsonb_array_elements(part->'cards') c;
+  if (select count(distinct x) from unnest(v_ids) x) <> array_length(v_ids, 1) then
+    return jsonb_build_object('status', 'error', 'reason', 'A name is in the series twice.');
+  end if;
+
+  select * into v_theme from public.themes where id = v_theme_id for update;
+  -- A twin request that held the theme lock until it committed: its series is visible now, so answer with it.
+  select array_agg(id order by series_part) into v_posts from public.posts where series_id = v_req;
+  if v_posts is not null then return jsonb_build_object('status', 'ok', 'post_ids', to_jsonb(v_posts)); end if;
+  v_posts := '{}';
+  if v_theme.id is null or v_theme.status <> 'available' or v_theme.gender <> p->>'gender' then
+    return jsonb_build_object('status', 'conflict', 'reason', 'theme');
+  end if;
+
+  select count(*) into v_locked from (
+    select id from public.names
+    where id = any (v_ids) and status = 'available' and gender = p->>'gender' and style = 'single'
+    for update
+  ) s;
+  if v_locked <> array_length(v_ids, 1) then
+    return jsonb_build_object('status', 'conflict', 'reason', 'names');
+  end if;
+
+  for v_part in select value from jsonb_array_elements(p->'parts') loop
+    v_n := v_n + 1;
+    insert into public.posts (request_id, post_date, gender, style, theme_id, caption, title_font, meaning_font, mark_font, subject_age,
+                              caption_style, hashtag_set, series, series_id, series_part, created_at)
+    values (case when v_n = 1 then v_req else md5(v_req::text || '|part' || v_n)::uuid end,
+            (p->>'post_date')::date, p->>'gender', 'single', v_theme_id, coalesce(v_part->>'caption', ''),
+            nullif(btrim(p->>'title_font'), ''), nullif(btrim(p->>'meaning_font'), ''), nullif(btrim(p->>'mark_font'), ''),
+            nullif(btrim(p->>'subject_age'), ''), nullif(btrim(v_part->>'caption_style'), ''), nullif(btrim(v_part->>'hashtag_set'), ''),
+            'az', v_req, v_n, now() + (v_n - 1) * interval '1 millisecond')
+    returning id into v_post;
+
+    insert into public.cards (post_id, theme_id, kind, position, name_id, name, meaning, shot, prompt, seed, order_index)
+    select v_post, v_theme_id, 'post', (c->>'position')::int, (c->>'name_id')::uuid, c->>'name', c->>'meaning',
+           c->>'shot', c->>'prompt', (c->>'seed')::bigint, (c->>'position')::int
+    from jsonb_array_elements(v_part->'cards') c;
+
+    update public.names n set status = 'reserved', post_id = v_post, position = (c->>'position')::int
+    from jsonb_array_elements(v_part->'cards') c where n.id = (c->>'name_id')::uuid;
+
+    v_posts := v_posts || v_post;
+  end loop;
+
+  update public.themes set status = 'used', used_on = (p->>'post_date')::date where id = v_theme_id;
+
+  return jsonb_build_object('status', 'ok', 'post_ids', to_jsonb(v_posts));
+exception when unique_violation then
+  select array_agg(id order by series_part) into v_posts from public.posts where series_id = v_req;
+  if v_posts is null then return jsonb_build_object('status', 'error', 'reason', 'The series could not be saved. Try again.'); end if;
+  return jsonb_build_object('status', 'ok', 'post_ids', to_jsonb(v_posts));
 end $$;
 
 -- ---------------------------------------------------------------- add_card
@@ -305,6 +585,236 @@ begin
   return v_n;
 end $$;
 
+-- ---------------------------------------------------------------- worker: reel claim + stuck recovery
+-- The next step of one reel: {step, scene_id} or null when it can't move on right now. Shared by
+-- claim_next_reel_step (which claims it) and claim_next_voice_sample (samples only run when no reel step can).
+-- p_music: the worker can make music (an older worker passes nothing: no music step at all, never waits for one).
+drop function if exists public.reel_next_step(public.reels, boolean);  -- the first 006 draft: keep one signature
+create or replace function public.reel_next_step(p_reel public.reels, p_no_comfy boolean, p_music boolean) returns jsonb language plpgsql stable as $$
+declare v_id uuid; v_open int; v_done int; v_music boolean;
+begin
+  if p_reel.voice_path is null then
+    if not p_no_comfy then return jsonb_build_object('step', 'voice', 'scene_id', null); end if;
+    return null;
+  end if;
+  if p_reel.words is null then return jsonb_build_object('step', 'timing', 'scene_id', null); end if;
+  select coalesce(reel_music, true) into v_music from public.settings where id = 1;
+  if p_music and coalesce(v_music, true) and p_reel.music_path is null and p_reel.preview_path is null then
+    if not p_no_comfy then return jsonb_build_object('step', 'music', 'scene_id', null); end if;
+    return null;  -- wait for ComfyUI: never render without the bed when music is on
+  end if;
+  if not p_no_comfy then
+    select id into v_id from public.reel_scenes
+      where reel_id = p_reel.id and (status = 'queued' or (status = 'failed' and attempts < 3))
+      order by position limit 1;
+    if v_id is not null then return jsonb_build_object('step', 'image', 'scene_id', v_id); end if;
+  end if;
+  select count(*) filter (where status not in ('done', 'skipped')), count(*) filter (where status = 'done')
+    into v_open, v_done from public.reel_scenes where reel_id = p_reel.id;
+  if v_open = 0 and v_done > 0 and p_reel.preview_path is null then return jsonb_build_object('step', 'render', 'scene_id', null); end if;
+  return null;
+end $$;
+
+-- The next unit of reel work: {step: voice|timing|music|image|render, reel, scene (image only, else null)}, or null.
+-- Nothing while a card is waiting or being made (a card claim younger than requeue_stuck_cards' 5 minutes).
+-- Oldest reel first; a reel whose next step can't run (a scene failed 3 times, scenes still pending,
+-- every image skipped) is passed over. Render only runs when at least one scene is done.
+-- Music (006): after timing, before the images, while settings.reel_music is on and reels.music_path is null, and
+-- only for a worker that passes p_music = true (the 006 worker does; an older worker never sees a music step).
+-- It runs under the existing 'voicing' status (no new status: the app shows it as part of the audio).
+-- WORKER CONTRACT:
+--   * after each step, save its result version-guarded AND clear reels.claimed_at (and the scene's claimed_at);
+--     until then the reel is not claimable again.
+--   * during long sub-steps (Chatterbox chunks, ACE-Step, ffmpeg passes) re-touch reels.claimed_at = now() as a
+--     heartbeat: requeue_stuck_reels() releases any claim older than 10 minutes.
+--   * on an image's 3rd failure set the reel needs_attention; after render set it ready.
+--   * music: on success music_path = '<reelId>/music-v<version>.flac'; on failure music_path = '' (not retried, the
+--     reel is NOT failed) and the render uses the voice only. The render mixes music only when settings.reel_music
+--     is on AND music_path is non-empty. Whoever clears voice_path (a new voice) clears music_path too.
+-- p_no_comfy: ComfyUI is closed on the PC, so only the steps that don't need it (timing, render) are handed out;
+-- a reel waiting for its music waits for ComfyUI.
+drop function if exists public.claim_next_reel_step();  -- the first 005 draft had no argument: keep one signature
+drop function if exists public.claim_next_reel_step(boolean);  -- 005's signature: 006 adds p_music
+create or replace function public.claim_next_reel_step(p_no_comfy boolean default false, p_music boolean default false) returns jsonb language plpgsql as $$
+declare v_reel public.reels%rowtype; v_next jsonb; v_scene jsonb; v_step text; v_id uuid;
+begin
+  perform 1 from public.cards
+    where status in ('queued', 'generating', 'restamp')
+      and (claimed_at is null or claimed_at >= now() - interval '5 minutes')
+    limit 1;
+  if found then return null; end if;
+
+  for v_reel in
+    select * from public.reels
+    where claimed_at is null and status in ('queued', 'voicing', 'imaging', 'rendering')
+    order by created_at, id
+    for update skip locked
+  loop
+    v_next := public.reel_next_step(v_reel, p_no_comfy, p_music);
+    continue when v_next is null;
+    v_step := v_next ->> 'step';
+    v_id := (v_next ->> 'scene_id')::uuid;
+    v_scene := null;
+
+    update public.reels set
+      claimed_at = now(), started_at = coalesce(started_at, now()), error = null,
+      status = case v_step when 'image' then 'imaging' when 'render' then 'rendering' else 'voicing' end
+    where id = v_reel.id
+    returning * into v_reel;
+    if v_step = 'image' then
+      update public.reel_scenes set status = 'generating', attempts = attempts + 1, claimed_at = now(), error = null
+      where id = v_id
+      returning to_jsonb(reel_scenes.*) into v_scene;
+    end if;
+    return jsonb_build_object('step', v_step, 'reel', to_jsonb(v_reel), 'scene', v_scene);
+  end loop;
+  return null;
+end $$;
+
+-- The next voice sample to make: {voice: reel_voices row} or null. Only when the GPU has nothing better to do:
+-- no card waiting or being made, no reel step in progress (claim younger than 10 minutes) and no reel step
+-- runnable (with ComfyUI). Oldest queued voice that has a reference clip (or the built-in voice) -> 'making'.
+-- Call it only while ComfyUI is up (Chatterbox needs it).
+-- WORKER CONTRACT: write voices/<id>/sample-v<version>.wav, then save sample_path, sample_key, sample_status 'ready',
+-- claimed_at null WHERE id and version match the claimed row (the app bumps version when it re-queues a sample; a
+-- mismatch means the work is stale: discard it). On failure: sample_status 'failed', error, claimed_at null.
+-- requeue_stuck_reels() puts a 'making' sample claimed more than 10 minutes ago back in the queue.
+create or replace function public.claim_next_voice_sample() returns jsonb language plpgsql as $$
+declare v_voice public.reel_voices%rowtype; v_reel public.reels%rowtype;
+begin
+  perform 1 from public.cards
+    where status in ('queued', 'generating', 'restamp')
+      and (claimed_at is null or claimed_at >= now() - interval '5 minutes')
+    limit 1;
+  if found then return null; end if;
+
+  perform 1 from public.reels
+    where status in ('queued', 'voicing', 'imaging', 'rendering') and claimed_at >= now() - interval '10 minutes'
+    limit 1;
+  if found then return null; end if;
+  for v_reel in
+    select * from public.reels where claimed_at is null and status in ('queued', 'voicing', 'imaging', 'rendering')
+  loop
+    if public.reel_next_step(v_reel, false, true) is not null then return null; end if;
+  end loop;
+
+  select * into v_voice from public.reel_voices
+    where sample_status = 'queued' and (ref_path is not null or id = 'builtin')
+    order by updated_at, id
+    limit 1
+    for update skip locked;
+  if not found then return null; end if;
+  update public.reel_voices set sample_status = 'making', claimed_at = now(), error = null
+  where id = v_voice.id
+  returning * into v_voice;
+  return jsonb_build_object('voice', to_jsonb(v_voice));
+end $$;
+
+-- The next theme preview to make: {theme: reel_themes row} or null. Lowest priority of all GPU work: no card waiting
+-- or being made, no reel step in progress (claim younger than 10 minutes) or runnable (with ComfyUI), and no voice
+-- sample waiting (queued with a reference clip, or the built-in voice) or being made. Oldest queued theme -> 'making'.
+-- Call it only while ComfyUI is up (Z-Image needs it).
+-- WORKER CONTRACT: Z-Image with the theme's style + the fixed preview moment (grayscale themes are turned grey
+-- after), write themes/<id>/preview-v<version>.jpg, then save preview_path, preview_status 'ready', claimed_at null
+-- WHERE id and version match the claimed row (the app bumps version when it re-queues a preview; a mismatch means
+-- the work is stale: discard it). On failure: preview_status 'failed', error, claimed_at null.
+-- requeue_stuck_reels() puts a 'making' preview claimed more than 10 minutes ago back in the queue.
+create or replace function public.claim_next_theme_preview() returns jsonb language plpgsql as $$
+declare v_theme public.reel_themes%rowtype; v_reel public.reels%rowtype;
+begin
+  perform 1 from public.cards
+    where status in ('queued', 'generating', 'restamp')
+      and (claimed_at is null or claimed_at >= now() - interval '5 minutes')
+    limit 1;
+  if found then return null; end if;
+
+  perform 1 from public.reels
+    where status in ('queued', 'voicing', 'imaging', 'rendering') and claimed_at >= now() - interval '10 minutes'
+    limit 1;
+  if found then return null; end if;
+  for v_reel in
+    select * from public.reels where claimed_at is null and status in ('queued', 'voicing', 'imaging', 'rendering')
+  loop
+    if public.reel_next_step(v_reel, false, true) is not null then return null; end if;
+  end loop;
+
+  perform 1 from public.reel_voices
+    where (sample_status = 'queued' and (ref_path is not null or id = 'builtin'))
+       or (sample_status = 'making' and claimed_at >= now() - interval '10 minutes')
+    limit 1;
+  if found then return null; end if;
+
+  select * into v_theme from public.reel_themes
+    where preview_status = 'queued'
+    order by updated_at, sort, id
+    limit 1
+    for update skip locked;
+  if not found then return null; end if;
+  update public.reel_themes set preview_status = 'making', claimed_at = now(), error = null
+  where id = v_theme.id
+  returning * into v_theme;
+  return jsonb_build_object('theme', to_jsonb(v_theme));
+end $$;
+
+-- Releases reel and scene claims older than 10 minutes (the PC was switched off mid-step); the worker then
+-- resumes at the first unfinished step. A scene stuck on its 3rd try fails and its reel needs attention.
+-- Also settles unclaimed reels that can't progress (needs_attention / failed) and puts voice samples stuck in
+-- 'making' for 10 minutes back in the queue; 007: theme previews too. Returns the rows changed.
+create or replace function public.requeue_stuck_reels() returns int language plpgsql as $$
+declare v_scenes int; v_reels int; v_flagged int; v_empty int; v_samples int; v_previews int;
+  v_gave_up constant text := 'Gave up after 3 tries: the PC stopped responding in the middle of this image.';
+begin
+  with stuck as (
+    select id, attempts from public.reel_scenes
+    where claimed_at < now() - interval '10 minutes' and status = 'generating'
+    for update skip locked
+  )
+  update public.reel_scenes s set
+    claimed_at = null,
+    status = case when k.attempts >= 3 then 'failed' else 'queued' end,
+    error = case when k.attempts >= 3 then v_gave_up else null end
+  from stuck k where s.id = k.id;
+  get diagnostics v_scenes = row_count;
+
+  with stuck as (
+    select id from public.reels
+    where claimed_at < now() - interval '10 minutes'
+    for update skip locked
+  ), gave_up as (
+    select k.id from stuck k
+    where exists (select 1 from public.reel_scenes s where s.reel_id = k.id and s.status = 'failed' and s.attempts >= 3)
+  )
+  update public.reels r set
+    claimed_at = null,
+    status = case when r.id in (select id from gave_up) and r.status in ('queued', 'voicing', 'imaging', 'rendering')
+      then 'needs_attention' else r.status end,
+    error = case when r.id in (select id from gave_up) and r.status in ('queued', 'voicing', 'imaging', 'rendering')
+      then v_gave_up else r.error end
+  from stuck k where r.id = k.id;
+  get diagnostics v_reels = row_count;
+
+  -- Unclaimed working reels that can never move on: an image failed 3 times (the worker didn't flag it) ...
+  update public.reels r set status = 'needs_attention', error = 'An image failed 3 times.'
+  where r.claimed_at is null and r.status in ('queued', 'voicing', 'imaging', 'rendering')
+    and exists (select 1 from public.reel_scenes s where s.reel_id = r.id and s.status = 'failed' and s.attempts >= 3);
+  get diagnostics v_flagged = row_count;
+  -- ... or, once timed, nothing is left to show (every image skipped, or no scenes at all).
+  update public.reels r set status = 'failed', error = 'Every image was skipped.'
+  where r.claimed_at is null and r.status in ('queued', 'voicing', 'imaging', 'rendering')
+    and r.words is not null and r.preview_path is null
+    and not exists (select 1 from public.reel_scenes s where s.reel_id = r.id and s.status <> 'skipped');
+  get diagnostics v_empty = row_count;
+
+  update public.reel_voices set sample_status = 'queued', claimed_at = null
+  where sample_status = 'making' and claimed_at < now() - interval '10 minutes';
+  get diagnostics v_samples = row_count;
+
+  update public.reel_themes set preview_status = 'queued', claimed_at = null
+  where preview_status = 'making' and claimed_at < now() - interval '10 minutes';
+  get diagnostics v_previews = row_count;
+  return v_scenes + v_reels + v_flagged + v_empty + v_samples + v_previews;
+end $$;
+
 -- @supabase-only begin
 -- ---------------------------------------------------------------- security
 alter table public.settings enable row level security;
@@ -313,9 +823,13 @@ alter table public.themes enable row level security;
 alter table public.posts enable row level security;
 alter table public.names enable row level security;
 alter table public.cards enable row level security;
+alter table public.reels enable row level security;
+alter table public.reel_scenes enable row level security;
+alter table public.reel_voices enable row level security;
+alter table public.reel_themes enable row level security;
 
 do $$ declare t text; begin
-  foreach t in array array['settings', 'themes', 'posts', 'names', 'cards'] loop
+  foreach t in array array['settings', 'themes', 'posts', 'names', 'cards', 'reels', 'reel_scenes', 'reel_voices', 'reel_themes'] loop
     execute format('drop policy if exists owner_all on public.%I', t);
     execute format('create policy owner_all on public.%I for all to authenticated using (true) with check (true)', t);
   end loop;
@@ -333,13 +847,24 @@ revoke execute on function public.claim_next_card(boolean) from public, anon, au
 revoke execute on function public.requeue_stuck_cards() from public, anon, authenticated;
 grant execute on function public.claim_next_card(boolean) to service_role;
 grant execute on function public.requeue_stuck_cards() to service_role;
+revoke execute on function public.reel_next_step(public.reels, boolean, boolean) from public, anon, authenticated;
+revoke execute on function public.claim_next_reel_step(boolean, boolean) from public, anon, authenticated;
+revoke execute on function public.claim_next_voice_sample() from public, anon, authenticated;
+revoke execute on function public.requeue_stuck_reels() from public, anon, authenticated;
+revoke execute on function public.claim_next_theme_preview() from public, anon, authenticated;
+grant execute on function public.reel_next_step(public.reels, boolean, boolean) to service_role;
+grant execute on function public.claim_next_reel_step(boolean, boolean) to service_role;
+grant execute on function public.claim_next_voice_sample() to service_role;
+grant execute on function public.requeue_stuck_reels() to service_role;
+grant execute on function public.claim_next_theme_preview() to service_role;
 revoke execute on function public.create_post(jsonb) from public, anon;
 revoke execute on function public.add_card(uuid, jsonb) from public, anon;
 revoke execute on function public.delete_card(uuid) from public, anon;
 revoke execute on function public.delete_post(uuid) from public, anon;
 revoke execute on function public.refresh_post(uuid) from public, anon;
+revoke execute on function public.create_series(jsonb) from public, anon;
 grant execute on function public.create_post(jsonb), public.add_card(uuid, jsonb), public.delete_card(uuid),
-  public.delete_post(uuid), public.refresh_post(uuid) to authenticated, service_role;
+  public.delete_post(uuid), public.refresh_post(uuid), public.create_series(jsonb) to authenticated, service_role;
 
 -- ---------------------------------------------------------------- storage
 insert into storage.buckets (id, name, public) values ('cards', 'cards', false) on conflict (id) do nothing;
@@ -347,12 +872,26 @@ drop policy if exists cards_read on storage.objects;
 create policy cards_read on storage.objects for select to authenticated using (bucket_id = 'cards');
 drop policy if exists cards_delete on storage.objects;
 create policy cards_delete on storage.objects for delete to authenticated using (bucket_id = 'cards');
+-- reels (005): preview MP4s, voice WAVs, scene images
+insert into storage.buckets (id, name, public) values ('reels', 'reels', false) on conflict (id) do nothing;
+drop policy if exists reels_read on storage.objects;
+create policy reels_read on storage.objects for select to authenticated using (bucket_id = 'reels');
+drop policy if exists reels_delete on storage.objects;
+create policy reels_delete on storage.objects for delete to authenticated using (bucket_id = 'reels');
+-- reels (006): the owner's Set up voices action uploads voices/<id>/ref.wav with the owner's session
+drop policy if exists reels_voice_refs_insert on storage.objects;
+create policy reels_voice_refs_insert on storage.objects for insert to authenticated
+  with check (bucket_id = 'reels' and name ~ '^voices/[a-z]+/ref\.wav$');
 
 -- ---------------------------------------------------------------- realtime
 alter table public.cards replica identity full;
 alter table public.posts replica identity full;
+alter table public.reels replica identity full;
+alter table public.reel_scenes replica identity full;
+alter table public.reel_voices replica identity full;
+alter table public.reel_themes replica identity full;
 do $$ declare t text; begin
-  foreach t in array array['cards', 'posts', 'worker_status', 'themes', 'names'] loop
+  foreach t in array array['cards', 'posts', 'worker_status', 'themes', 'names', 'reels', 'reel_scenes', 'reel_voices', 'reel_themes'] loop
     begin execute format('alter publication supabase_realtime add table public.%I', t);
     exception when duplicate_object then null; end;
   end loop;

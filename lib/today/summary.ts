@@ -6,12 +6,15 @@ const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 const ageText = (age: AgeChoice) =>
   age === "random" ? "Random ages" : age === "newborn" ? "Newborn" : age === "1" ? "1 year old" : `${age} years old`;
 
-/** The Today footer line: "10 cards · Boy · Two-word · Random ages · Modern Realism" ("Auto" → "6–15 cards"). */
-export function postSummary({ count, min, max, gender, style, age, themeTitle }: {
-  count: string; min: number; max: number; gender: Gender; style: NameStyle; age: AgeChoice; themeTitle?: string;
+/**
+ * The Today footer line: "10 cards · Boy · Two-word · Random ages · Modern Realism" ("Auto" → "6–15 cards");
+ * a post by letter adds "names starting with K" after the cards.
+ */
+export function postSummary({ count, min, max, gender, style, age, themeTitle, letter }: {
+  count: string; min: number; max: number; gender: Gender; style: NameStyle; age: AgeChoice; themeTitle?: string; letter?: string | null;
 }) {
   const cards = count === "auto" ? `${min}–${max} cards` : `${count} cards`;
-  return [cards, cap(gender), cap(style), ageText(age), themeTitle].filter(Boolean).join(" · ");
+  return [cards, letter ? `names starting with ${letter}` : null, cap(gender), cap(style), ageText(age), themeTitle].filter(Boolean).join(" · ");
 }
 
 /** Names left for one gender + style: none, low (under 15 or under the biggest post), or fine. */

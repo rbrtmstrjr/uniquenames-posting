@@ -11,6 +11,16 @@ const v1 = stripSupabase(read("tests", "sql", "fixtures", "schema-v1.sql"));
 const m002 = read("supabase", "migrations", "002_v2.sql");
 const m003 = read("supabase", "migrations", "003_post_fonts.sql");
 const m004 = read("supabase", "migrations", "004_subject_age.sql");
+const m005 = stripSupabase(read("supabase", "migrations", "005_reels.sql"));
+const m006 = stripSupabase(read("supabase", "migrations", "006_reel_voices.sql"));
+const m007 = stripSupabase(read("supabase", "migrations", "007_reel_themes.sql"));
+const m008 = read("supabase", "migrations", "008_reel_playbook.sql");
+const m009 = read("supabase", "migrations", "009_captions.sql");
+const m010 = read("supabase", "migrations", "010_cta_card.sql");
+const m011 = stripSupabase(read("supabase", "migrations", "011_az_series.sql"));
+const m012 = stripSupabase(read("supabase", "migrations", "012_two_styles.sql"));
+const m013 = stripSupabase(read("supabase", "migrations", "013_letter_posts.sql"));
+const m014 = stripSupabase(read("supabase", "migrations", "014_reel_formats.sql"));
 
 async function liveDb() {
   const db = new PGlite();
@@ -91,7 +101,7 @@ describe("003_post_fonts.sql on the live schema (v1 + 002)", () => {
   });
 });
 
-describe("fresh schema.sql matches v1 + 002 + 003 + 004", () => {
+describe("fresh schema.sql matches v1 + 002..009", () => {
   const shape = async (db: PGlite) => ({
     columns: (await db.query(`select table_name, column_name, data_type, is_nullable, column_default from information_schema.columns
       where table_schema='public' and table_name in ('posts','settings') order by table_name, column_name`)).rows,
@@ -104,6 +114,16 @@ describe("fresh schema.sql matches v1 + 002 + 003 + 004", () => {
     const migrated = await liveDb();
     await migrated.exec(m003);
     await migrated.exec(m004);
+    await migrated.exec(m005);
+    await migrated.exec(m006);
+    await migrated.exec(m007);
+    await migrated.exec(m008);
+    await migrated.exec(m009);
+    await migrated.exec(m010);
+    await migrated.exec(m011);
+    await migrated.exec(m012);
+    await migrated.exec(m013);
+    await migrated.exec(m014);
     const want = await shape(migrated);
     expect(want.functions).toHaveLength(2);
     expect(await shape(await freshDb())).toEqual(want);

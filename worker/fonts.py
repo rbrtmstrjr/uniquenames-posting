@@ -146,3 +146,29 @@ def load_safe(font_id, weight, size, log=print):
     except Exception as e:
         log("font %r could not be loaded (%s); using %s" % (font_id, e, FALLBACK))
         return load(FALLBACK, weight, size)
+
+
+# Reel captions + hook card (playbook v2): Montserrat ExtraBold (the catalog's variable file at wght 800), else
+# Poppins Bold (fetched once), else Poppins SemiBold; None = Pillow's built-in font.
+REEL_FONT = ("montserrat", 800)
+POPPINS_BOLD = "Poppins-Bold.ttf"
+
+
+def reel_caption_font(log=print):
+    """(path, weight) of the reel caption font, or (None, 800) if no font file can be had."""
+    try:
+        return font_file(*REEL_FONT), REEL_FONT[1]
+    except Exception as e:
+        log("Montserrat could not be fetched (%s); reel captions use Poppins Bold" % e)
+    dest = os.path.join(FONTS_DIR, POPPINS_BOLD)
+    try:
+        if not os.path.exists(dest):
+            os.makedirs(FONTS_DIR, exist_ok=True)
+            _download(file_url("poppins", POPPINS_BOLD), dest, timeout=30)
+        return dest, 700
+    except Exception as e:
+        log("Poppins Bold could not be fetched (%s); using Poppins SemiBold" % e)
+    try:
+        return font_file(FALLBACK, 600), 600
+    except Exception:
+        return None, 800

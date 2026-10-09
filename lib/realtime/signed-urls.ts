@@ -2,7 +2,14 @@
 import { useEffect, useReducer } from "react";
 import { createClient } from "@/lib/supabase/client";
 
-const cache = new Map<string, { url: string; exp: number }>();
+type Cache = Map<string, { url: string; exp: number }>;
+// One cache per storage bucket ("cards" for post images, "reels" for reel images and previews).
+const caches = new Map<string, Cache>();
+const cacheFor = (bucket: string): Cache => {
+  let c = caches.get(bucket);
+  if (!c) { c = new Map(); caches.set(bucket, c); }
+  return c;
+};
 
 const TTL_S = 3600;
 // Re-sign anything that expires within this window, so an image never goes blank.
@@ -33,12 +40,13 @@ export function nextResignDelay(paths: string[], cached: Map<string, { exp: numb
 // Paths include the card version, so a regenerated card never shows the old image.
 // The signing re-runs when the tab/app becomes visible again and on a ~50 min timer, so a
 // phone that resumes the same page after an hour gets fresh URLs instead of blank images.
-export function useSignedUrls(paths: (string | null | undefined)[]) {
+export function useSignedUrls(paths: (string | null | undefined)[], bucket: "cards" | "reels" = "cards") {
   const [, bump] = useReducer((x: number) => x + 1, 0);
   const wanted = [...new Set(paths.filter((p): p is string => !!p))];
   const key = wanted.join("|");
   useEffect(() => {
     const list = key ? key.split("|") : [];
+    const cache = cacheFor(bucket);
     if (!list.length) return;
     let alive = true;
     let inFlight = false;
@@ -52,7 +60,7 @@ export function useSignedUrls(paths: (string | null | undefined)[]) {
       const need = pathsNeedingSignature(list, cache, Date.now());
       if (!need.length) { schedule(); return; }
       inFlight = true;
-      createClient().storage.from("cards").createSignedUrls(need, TTL_S).then(({ data }) => {
+      createClient().storage.from(bucket).createSignedUrls(need, TTL_S).then(({ data }) => {
         const exp = Date.now() + TTL_S * 1000;
         (data ?? []).forEach((d) => { if (d.path && d.signedUrl) cache.set(d.path, { url: d.signedUrl, exp }); });
         if (alive) bump();
@@ -67,12 +75,19 @@ export function useSignedUrls(paths: (string | null | undefined)[]) {
       document.removeEventListener("visibilitychange", onVisible);
       clearTimeout(timer);
     };
-  }, [key]);
+  }, [key, bucket]);
   // An expired URL would only render a broken image; return nothing until it is re-signed.
+  const cache = cacheFor(bucket);
   return (p?: string | null) => { const c = p ? cache.get(p) : undefined; return c && c.exp > Date.now() ? c.url : undefined; };
 }
 
 export async function signedUrlsNow(paths: string[]): Promise<Record<string, string>> {
   const { data } = await createClient().storage.from("cards").createSignedUrls(paths, 600);
   return Object.fromEntries((data ?? []).filter((d) => d.path && d.signedUrl).map((d) => [d.path!, d.signedUrl!]));
+}
+
+/** A short-lived signed URL that downloads the file under `name` (Content-Disposition: attachment). */
+export async function signedDownloadUrl(path: string, name: string, bucket: "cards" | "reels" = "cards"): Promise<string | null> {
+  const { data } = await createClient().storage.from(bucket).createSignedUrl(path, 600, { download: name });
+  return data?.signedUrl ?? null;
 }

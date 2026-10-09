@@ -6,6 +6,8 @@ import { nextSeed, normalizeName, restampMode, styleOf } from "./helpers";
 import { generateLockReason } from "./generate-guard";
 import { fail, requireOwner, type ActionResult } from "./result";
 import { textChanged } from "@/lib/status/card-dialog";
+import { resolveCta, validateCtaMessage } from "@/lib/cta/messages";
+import type { Gender } from "@/lib/db/types";
 
 type SB = Awaited<ReturnType<typeof createClient>>;
 
@@ -21,6 +23,7 @@ async function getCard(id: string) {
 const STALE = "This card just changed (it may be being made right now). Try again.";
 const BUSY = "This card is being made right now. Wait for it to finish.";
 const DUP = "Another name in your list already has that spelling.";
+const CTA_TEXT = "The closing card has a message, not a name: edit it in its Message field.";
 
 const cleanText = (name: string, meaning: string) => ({ name: normalizeName(name), meaning: meaning.trim().toLowerCase() });
 
@@ -72,6 +75,7 @@ export async function regenerateCardAction(cardId: string, text?: { name: string
   if (!card) return fail("Card not found.");
   if (card.status === "generating") return fail(BUSY);
   if (lock) return fail(lock);
+  if (text && card.kind === "cta") return fail(CTA_TEXT);
   const clean = text && textChanged(card, text.name, text.meaning) ? cleanText(text.name, text.meaning) : null;
   if (clean && (await spellingTaken(sb, card, clean.name))) return fail(DUP);
 
@@ -87,6 +91,7 @@ export async function restampCardAction(cardId: string, name: string, meaning: s
   if (bad) return fail(bad);
   const { sb, card, lock } = await getCard(cardId);
   if (!card) return fail("Card not found.");
+  if (card.kind === "cta") return fail(CTA_TEXT);
   if (card.status === "generating") return fail(BUSY);
   // Restamp only when a clean photo is current; a pending regenerate or an imported card regenerates instead.
   // A re-stamp only needs Pillow, so only the regenerate path is locked by the PC / ComfyUI state.
@@ -101,6 +106,36 @@ export async function restampCardAction(cardId: string, name: string, meaning: s
     ? { ...clean, status: "restamp", claimed_at: null, error: null, version, queued_at: now }
     : { ...clean, ...REQUEUE, version, seed: nextSeed(card.id, version, card.seed), queued_at: now };
   const err = await updateCardWithName(sb, card, clean, patch);
+  return err ? fail(err) : { ok: true, mode };
+}
+
+/**
+ * The closing card's message (migration 010): "/" = a line break, {gender} = the post's boy / girl.
+ * Re-stamps the current photo (Pillow only); with `newPicture`, or when there is no clean photo,
+ * the card is remade with the message instead (that needs the PC and ComfyUI).
+ */
+export async function ctaTextAction(cardId: string, message: string, newPicture = false): Promise<ActionResult<{ mode: "restamp" | "regenerate" }>> {
+  await requireOwner();
+  const bad = validateCtaMessage(message);
+  if (bad) return fail(bad);
+  const { sb, card, lock } = await getCard(cardId);
+  if (!card) return fail("Card not found.");
+  if (card.kind !== "cta") return fail("Only the closing card has a message.");
+  if (card.status === "generating") return fail(BUSY);
+  const mode = newPicture ? "regenerate" : restampMode(card);
+  if (mode === "regenerate" && lock) return fail(lock);
+  let gender: Gender = "boy";
+  if (/\{gender\}/i.test(message) && card.post_id) {
+    const { data: post } = await sb.from("posts").select("gender").eq("id", card.post_id).maybeSingle();
+    if (post && (post as { gender: Gender }).gender === "girl") gender = "girl";
+  }
+  const text = { name: resolveCta(message, gender), meaning: "" };
+  const version = card.version + 1;
+  const now = new Date().toISOString();
+  const patch = mode === "restamp"
+    ? { ...text, status: "restamp", claimed_at: null, error: null, version, queued_at: now }
+    : { ...text, ...REQUEUE, version, seed: nextSeed(card.id, version, card.seed), queued_at: now };
+  const err = await updateCardWithName(sb, card, null, patch);
   return err ? fail(err) : { ok: true, mode };
 }
 

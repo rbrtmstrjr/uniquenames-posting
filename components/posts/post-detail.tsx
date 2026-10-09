@@ -2,7 +2,7 @@
 import { useCallback, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, CheckCircle2, CircleDashed, GripVertical, Loader2, PlugZap, Plus, Trash2, Type } from "lucide-react";
+import { ArrowLeft, CheckCircle2, CircleDashed, Flag, GripVertical, Loader2, PlugZap, Plus, Trash2, Type } from "lucide-react";
 import { toast } from "sonner";
 import { DndContext, KeyboardSensor, PointerSensor, TouchSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, arrayMove, rectSortingStrategy, sortableKeyboardCoordinates, useSortable } from "@dnd-kit/sortable";
@@ -23,33 +23,38 @@ import { useWorkerContext } from "@/components/shell/app-shell";
 import { createClient } from "@/lib/supabase/client";
 import { queuePosition } from "@/lib/status/card-state";
 import { canGenerate } from "@/lib/status/worker-health";
-import { uploadNumbers } from "@/lib/files/save";
-import { addCardAction, deletePostAction, restampPostAction, setPostedAction } from "@/lib/actions/posts";
+import { cardOrder, uploadNumbers } from "@/lib/files/save";
+import { addCardAction, addClosingCardAction, deletePostAction, restampPostAction, setPostedAction } from "@/lib/actions/posts";
 import { restampSelection } from "@/lib/actions/helpers";
 import { regenerateCardAction, reorderCardsAction, selectAllAction, setSelectedAction } from "@/lib/actions/cards";
 import { callAction, optimistic } from "@/lib/actions/call";
 import type { ActionResult } from "@/lib/actions/result";
+import { postLabel } from "@/lib/series/letter";
 import { useUndoableDelete } from "@/components/cards/use-undoable-delete";
 import type { PostFonts } from "@/lib/fonts/post-fonts";
 import { RestampDialog } from "./restamp-dialog";
 
-const byOrder = (a: CardRow, b: CardRow) => a.order_index - b.order_index || a.position - b.position;
+// The owner's order, with the closing card (010) always last.
+const byOrder = cardOrder;
 
 // The tile wrapper takes pointer/touch drags (press and hold on a phone). Keyboard reordering
 // lives on a dedicated 44 px handle, so the tile never becomes a focusable role=button that
 // nests the open/select buttons, and Space/Enter on those buttons cannot start a drag.
-function Sortable({ id, name, children }: { id: string; name: string; children: React.ReactNode }) {
-  const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({ id });
+// `locked`: the closing card stays last, so it has no drag and no reorder handle.
+function Sortable({ id, name, locked, children }: { id: string; name: string; locked?: boolean; children: React.ReactNode }) {
+  const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({ id, disabled: locked });
   const { onKeyDown, ...pointerListeners } = (listeners ?? {}) as Record<string, React.KeyboardEventHandler & React.EventHandler<never>>;
   return (
     <div ref={setNodeRef} style={{ transform: CSS.Transform.toString(transform), transition, zIndex: isDragging ? 10 : undefined }}
       className={`relative select-none [-webkit-touch-callout:none] ${isDragging ? "scale-[1.03] opacity-90 shadow-soft" : ""}`} {...pointerListeners}>
       {children}
-      <button type="button" ref={setActivatorNodeRef} {...attributes} onKeyDown={onKeyDown}
-        aria-label={`Reorder ${name}. Press space, then the arrow keys, then space again.`}
-        className="absolute right-0 top-0 z-[4] grid size-11 place-items-center text-white focus-visible:outline-2 focus-visible:outline-accent">
-        <span className="grid size-7 place-items-center rounded-lg bg-black/30 shadow-soft"><GripVertical className="size-4" aria-hidden /></span>
-      </button>
+      {!locked && (
+        <button type="button" ref={setActivatorNodeRef} {...attributes} onKeyDown={onKeyDown}
+          aria-label={`Reorder ${name}. Press space, then the arrow keys, then space again.`}
+          className="absolute right-0 top-0 z-[4] grid size-11 place-items-center text-white focus-visible:outline-2 focus-visible:outline-accent">
+          <span className="grid size-7 place-items-center rounded-lg bg-black/30 shadow-soft"><GripVertical className="size-4" aria-hidden /></span>
+        </button>
+      )}
     </div>
   );
 }
@@ -112,7 +117,9 @@ export function PostDetail({ post: initialPost, theme, initialCards, settingsFon
 
   const onDragEnd = async (e: DragEndEvent) => {
     if (!e.over || e.active.id === e.over.id) return;
-    const ids = visible.map((c) => c.id);
+    // The closing card never moves: name cards are ordered among themselves, the closing card stays last.
+    const ids = visible.filter((c) => c.kind !== "cta").map((c) => c.id);
+    if (!ids.includes(String(e.over.id))) return;
     const next = arrayMove(ids, ids.indexOf(String(e.active.id)), ids.indexOf(String(e.over.id)));
     const before = new Map(cards.map((c) => [c.id, c.order_index]));
     const r = await optimistic(
@@ -166,7 +173,10 @@ export function PostDetail({ post: initialPost, theme, initialCards, settingsFon
   const restampable = restampSelection(visible);
 
   const label = post.gender === "girl" ? "Girl" : "Boy";
+  const kind = postLabel(post);
   const failed = visible.filter((c) => c.status === "failed");
+  const hasCta = cards.some((c) => c.kind === "cta");
+  const nameCards = visible.filter((c) => c.kind !== "cta").length;
 
   return (
     <div className="space-y-4">
@@ -176,7 +186,10 @@ export function PostDetail({ post: initialPost, theme, initialCards, settingsFon
           <h1 className="font-display text-2xl text-ink sm:text-3xl">
             {new Date(post.post_date + "T00:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })} · {label}
           </h1>
-          <p className="mt-1 text-sm text-muted">{theme.title} · {post.style} · {visible.length} cards</p>
+          <p className="mt-1 text-sm text-muted">
+            {kind && <><span className="font-semibold text-accent">{kind}</span> · </>}
+            {theme.title} · {post.style} · {nameCards} cards{visible.length > nameCards ? " + closing card" : ""}
+          </p>
         </div>
         <div className="flex items-center gap-2">
           {statusBadge({ status: post.status, cards: visible })}
@@ -204,7 +217,7 @@ export function PostDetail({ post: initialPost, theme, initialCards, settingsFon
             <SortableContext items={visible.map((c) => c.id)} strategy={rectSortingStrategy}>
               <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 xl:grid-cols-4">
                 {visible.map((c) => (
-                  <Sortable key={c.id} id={c.id} name={c.name}>
+                  <Sortable key={c.id} id={c.id} name={c.kind === "cta" ? "Closing card" : c.name} locked={c.kind === "cta"}>
                     <CardTile card={c} url={urlFor(c.card_path)} health={health} queuePos={queuePosition(c, visible)}
                       onOpen={() => setOpenId(c.id)} onRetry={() => retry(c)}
                       selection={{ selected: c.selected, order: numbers.get(c.id) ?? null, onToggle: () => void toggle(c) }} />
@@ -230,6 +243,14 @@ export function PostDetail({ post: initialPost, theme, initialCards, settingsFon
               <CaptionBox postId={post.id} initial={post.caption} />
             </div>
           </Panel>
+          {!hasCta && (
+            <div className="rounded-2xl border border-dashed border-line p-3 text-sm">
+              <p className="text-xs text-muted">No closing card yet: a last picture from the same photoshoot asking people to follow.</p>
+              <Button variant="subtle" size="sm" className="mt-2" loading={busy === "cta"} disabled={busy === "cta" || !gen.ok}
+                onClick={() => void run("cta", () => addClosingCardAction(post.id), "Adding the closing card…")}><Flag className="size-4" /> Add closing card</Button>
+              {!gen.ok && <p className="mt-1 text-xs font-semibold text-warn-text">{gen.reason}</p>}
+            </div>
+          )}
           <div className="flex flex-wrap gap-2">
             <Button variant="subtle" size="sm" disabled={!restampable.restamp.length} onClick={() => setConfirmRestamp(true)}><Type className="size-4" /> Re-stamp with current text settings</Button>
             <Button variant="danger" size="sm" onClick={() => setConfirmDelete(true)}><Trash2 className="size-4" /> Delete post</Button>

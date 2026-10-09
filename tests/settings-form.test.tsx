@@ -107,4 +107,102 @@ describe("SettingsForm (shadcn controls)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
     expect(callAction).toHaveBeenCalledTimes(1);
   });
+
+  it("Reels: 'Images per reel' slider 10–40 with a value label; it is sent on Save", async () => {
+    render(<SettingsForm initial={{ ...initial, reel_max_images: 10 }} />);
+    const sl = screen.getByRole("slider", { name: "Images per reel" });
+    expect([sl.getAttribute("aria-valuemin"), sl.getAttribute("aria-valuemax"), sl.getAttribute("aria-valuenow")]).toEqual(["10", "40", "10"]);
+    fireEvent.keyDown(sl, { key: "ArrowRight" });
+    expect(sl.getAttribute("aria-valuenow")).toBe("11");
+    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+    expect(await captured()).toMatchObject({ reel_max_images: 11 });
+  });
+
+  it("Reels (014): an 'On-screen step labels' switch bound to reel_labels, sent on Save", async () => {
+    render(<SettingsForm initial={{ ...initial, reel_max_images: 20, reel_labels: true }} />);
+    const sw = screen.getByRole("switch", { name: "On-screen step labels" });
+    expect(sw.getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(sw);
+    expect(sw.getAttribute("aria-checked")).toBe("false");
+    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+    expect(await captured()).toMatchObject({ reel_labels: false });
+  });
+
+  it("Reels: before 014 (no reel_labels) the switch is hidden and never sent", async () => {
+    render(<SettingsForm initial={{ ...initial, reel_max_images: 20 }} />);
+    expect(screen.queryByRole("switch", { name: "On-screen step labels" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+    expect(await captured()).not.toHaveProperty("reel_labels");
+  });
+
+  it("Reels: before migration 005 (no column) the slider shows 40 and says to run 005", () => {
+    render(<SettingsForm initial={initial} />);
+    expect(screen.getByRole("slider", { name: "Images per reel" }).getAttribute("aria-valuenow")).toBe("40");
+    expect(screen.getByText(/005_reels\.sql/)).toBeTruthy();
+  });
+});
+
+describe("SettingsForm hashtags (009)", () => {
+  const with009 = { ...initial, hashtags_always: "#uniquenames", hashtag_pool: "#babynames #babygirlnames #babyboynames #momlife" };
+
+  it("Always + Pool fields replace the single Hashtags field; the help says ≤ 4 per post, rotated", () => {
+    render(<SettingsForm initial={with009} />);
+    expect((screen.getByRole("textbox", { name: /Always/ }) as HTMLInputElement).value).toBe("#uniquenames");
+    expect((screen.getByRole("textbox", { name: /Pool/ }) as HTMLTextAreaElement).value).toContain("#momlife");
+    expect(screen.queryByRole("textbox", { name: /^Hashtags$/ })).toBeNull();
+    expect(screen.getByText(/At most 4 hashtags per post/)).toBeTruthy();
+  });
+
+  it("the fallback preview shows the template + the always-tag + 2 pool tags (no boy tag on the girl preview)", () => {
+    render(<SettingsForm initial={with009} />);
+    expect(screen.getByText(/Fallback preview/).parentElement!.textContent).toContain("Unique girl names\n\n#uniquenames #babynames #babygirlnames");
+  });
+
+  it("edits are sent on Save; a bait tag blocks Save with a clear message", async () => {
+    render(<SettingsForm initial={with009} />);
+    const pool = screen.getByRole("textbox", { name: /Pool/ });
+    fireEvent.change(pool, { target: { value: "#babynames #fyp #momlife" } });
+    expect(screen.getByRole("alert").textContent).toMatch(/#fyp.*bait/);
+    expect((screen.getByRole("button", { name: "Save settings" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(pool, { target: { value: "#babynames #newmom #momlife" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+    expect(await captured()).toMatchObject({ hashtags_always: "#uniquenames", hashtag_pool: "#babynames #newmom #momlife" });
+  });
+
+  it("before 009: the fields show what posts use (old tags merged into the default pool), are read-only, are not sent, and say to run 009", async () => {
+    render(<SettingsForm initial={{ ...initial, hashtags: "#parenting #fypシ" }} />);
+    const pool = screen.getByRole("textbox", { name: /Pool/ }) as HTMLTextAreaElement;
+    expect(pool.value).toMatch(/^#babynames .* #parenting$/);
+    expect(pool.disabled).toBe(true);
+    expect(screen.getByText(/009_captions\.sql/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+    const sent = await captured();
+    expect(sent).not.toHaveProperty("hashtag_pool");
+    expect(sent).not.toHaveProperty("hashtags_always");
+  });
+});
+
+describe("SettingsForm: closing card", () => {
+  it("before 010: shown with the default messages, disabled, never sent", async () => {
+    render(<SettingsForm initial={initial} />);
+    const sw = screen.getByRole("switch", { name: /Add a closing card to every post/ });
+    expect(sw.hasAttribute("disabled")).toBe(true);
+    expect(screen.getByText(/010_cta_card\.sql/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+    const sent = await captured();
+    expect(sent).not.toHaveProperty("cta_enabled");
+    expect(sent).not.toHaveProperty("cta_messages");
+  });
+
+  it("after 010: the switch and the messages are sent; a bad message blocks Save", async () => {
+    render(<SettingsForm initial={{ ...initial, cta_enabled: true, cta_messages: "Follow for more / baby name ideas." }} />);
+    const sw = screen.getByRole("switch", { name: /Add a closing card to every post/ });
+    fireEvent.click(sw);
+    const box = screen.getByDisplayValue("Follow for more / baby name ideas.");
+    fireEvent.change(box, { target: { value: "Follow us / every day\nMore {gender} names" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+    expect(await captured()).toMatchObject({ cta_enabled: false, cta_messages: "Follow us / every day\nMore {gender} names" });
+    fireEvent.change(box, { target: { value: "a / b / c / d" } });
+    expect(screen.getByRole("alert").textContent).toMatch(/3 lines/);
+  });
 });

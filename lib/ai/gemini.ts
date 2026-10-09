@@ -1,8 +1,8 @@
 import "server-only";
 
-/** The one Gemini model the app uses (captions now, name/theme suggestions next). */
+/** The default Gemini model (captions, name/theme suggestions); reel scripts pass their own. */
 export const GEMINI_MODEL = "gemini-2.5-flash";
-const ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
+const endpoint = (model: string) => `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
 
 /** Gemini's OpenAPI-subset schema (types are upper-case: OBJECT, ARRAY, STRING, INTEGER, BOOLEAN). */
 export interface GeminiSchema {
@@ -12,6 +12,7 @@ export interface GeminiSchema {
   required?: string[];
   items?: GeminiSchema;
   enum?: string[];
+  nullable?: boolean;
   maxItems?: number;
   minItems?: number;
 }
@@ -27,6 +28,10 @@ export interface GenerateJsonInput<T> {
   parse?: (raw: unknown) => T | null;
   /** Gemini 2.5 "thinking" tokens; 0 turns thinking off (fast, cheap). Default 0. */
   thinkingBudget?: number;
+  /** Model id; default GEMINI_MODEL. */
+  model?: string;
+  /** Gemini 3 thinking level (those models cannot turn thinking off); replaces thinkingBudget when set. */
+  thinkingLevel?: "low" | "medium" | "high";
 }
 
 export type GenerateJsonResult<T> = { ok: true; data: T } | { ok: false; error: string };
@@ -34,6 +39,16 @@ export type GenerateJsonResult<T> = { ok: true; data: T } | { ok: false; error: 
 const RETRY_DELAY_MS = 600;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const retryable = (status: number) => status === 429 || status >= 500;
+
+/** Shown instead of Gemini's 402 text: the prepaid balance is empty and every AI button fails until it is topped up. */
+export const GEMINI_CREDITS_OUT =
+  "Your Gemini credits have run out. Top up in Google AI Studio (Billing), then try again.";
+
+/** The error text for a failed Gemini HTTP call (shared with tts.ts). */
+export function geminiHttpError(status: number, message?: string): string {
+  if (status === 402) return GEMINI_CREDITS_OUT;
+  return `Gemini error ${status}${message ? `: ${message.slice(0, 200)}` : ""}`;
+}
 
 interface GeminiResponse {
   candidates?: { content?: { parts?: { text?: string; thought?: boolean }[] }; finishReason?: string }[];
@@ -58,7 +73,7 @@ export async function generateJson<T>(input: GenerateJsonInput<T>): Promise<Gene
       responseMimeType: "application/json",
       responseSchema: input.schema,
       temperature: input.temperature ?? 0.9,
-      thinkingConfig: { thinkingBudget: input.thinkingBudget ?? 0 },
+      thinkingConfig: input.thinkingLevel ? { thinkingLevel: input.thinkingLevel } : { thinkingBudget: input.thinkingBudget ?? 0 },
     },
   });
 
@@ -70,7 +85,7 @@ export async function generateJson<T>(input: GenerateJsonInput<T>): Promise<Gene
     const timer = setTimeout(() => ctrl.abort(), left);
     let res: Response;
     try {
-      res = await fetch(ENDPOINT, {
+      res = await fetch(endpoint(input.model ?? GEMINI_MODEL), {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-goog-api-key": key },
         body,
@@ -92,7 +107,7 @@ export async function generateJson<T>(input: GenerateJsonInput<T>): Promise<Gene
       clearTimeout(timer);
     }
     if (!res.ok) {
-      lastError = `Gemini error ${res.status}${json?.error?.message ? `: ${json.error.message.slice(0, 200)}` : ""}`;
+      lastError = geminiHttpError(res.status, json?.error?.message);
       if (attempt === 0 && retryable(res.status) && deadline - Date.now() > RETRY_DELAY_MS) { await sleep(RETRY_DELAY_MS); continue; }
       return { ok: false, error: lastError };
     }

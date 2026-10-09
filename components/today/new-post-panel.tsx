@@ -21,6 +21,8 @@ import { CatalogFontsLink, FontFields, FontSummary, fontStyle } from "@/componen
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/shadcn/collapsible";
 import { AGE_CHOICES, AGE_LABELS, type AgeChoice } from "@/lib/planner/age";
 import { postSummary } from "@/lib/today/summary";
+import { letterKey, type LetterStock } from "@/lib/series/letter";
+import { LetterPicker } from "@/components/today/letter-picker";
 import { useTodaySelection } from "@/components/today/selection";
 import { cn } from "@/lib/utils/cn";
 
@@ -79,8 +81,12 @@ function manilaToday() {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Manila" }).format(new Date());
 }
 
-export function NewPostPanel({ settings, themes, stock, busy }: {
+type Mode = "post" | "letter";
+
+export function NewPostPanel({ settings, themes, stock, busy, letters }: {
   settings: SettingsRow; themes: ThemeRow[]; stock: { gender: Gender; style: NameStyle; count: number }[]; busy: boolean;
+  /** Posts by letter: available names per letter for each gender + style (the By letter option shows with it). */
+  letters?: LetterStock;
 }) {
   const { health } = useWorkerContext();
   // Shared with the Stock card on Today (it highlights the matching count).
@@ -93,6 +99,10 @@ export function NewPostPanel({ settings, themes, stock, busy }: {
   // Always starts on Random (a different child and age per card); the owner picks a fixed age per post.
   const [age, setAge] = useState<AgeChoice>("random");
   const [pending, start] = useTransition();
+  // By letter: a normal post where every name starts with the chosen letter.
+  const [mode, setMode] = useState<Mode>("post");
+  const [letter, setLetter] = useState<string | null>(null);
+  const byLetter = mode === "letter" && !!letters;
 
   const genderThemes = useMemo(() => themes.filter((t) => t.gender === gender), [themes, gender]);
   const theme = genderThemes.find((t) => t.id === themeId) ?? genderThemes[0];
@@ -100,17 +110,24 @@ export function NewPostPanel({ settings, themes, stock, busy }: {
   const counts = Array.from({ length: settings.max_images - settings.min_images + 1 }, (_, i) => String(settings.min_images + i));
   const wanted = count === "auto" ? settings.min_images : Number(count);
   const gen = canGenerate(health);
-  const summary = postSummary({ count, min: settings.min_images, max: settings.max_images, gender, style, age, themeTitle: theme?.title });
+  const letterCounts = letters?.[letterKey(gender, style)] ?? {};
+  const forLetter = byLetter && letter ? letterCounts[letter] ?? 0 : 0;
+  const summary = postSummary({ count, min: settings.min_images, max: settings.max_images, gender, style, age, themeTitle: theme?.title, letter: byLetter ? letter : null });
   // The PC lock comes first: it is the one the owner fixes at the PC, not on this form.
-  const blocked = !gen.ok ? gen.reason : left < wanted ? `Only ${left} ${gender} ${style} names left${count === "auto" ? "" : `, but you chose ${count} cards`}. Add names or pick fewer cards.` : !theme ? `No ${gender} theme left. Add a theme first.` : null;
+  const blocked = !gen.ok ? gen.reason
+    : byLetter && !letter ? "Pick a letter."
+      : byLetter && forLetter < wanted ? `Only ${forLetter} ${gender} ${style} names start with ${letter}${count === "auto" ? "" : `, but you chose ${count} cards`}. Suggest more with AI or pick fewer cards.`
+        : left < wanted ? `Only ${left} ${gender} ${style} names left${count === "auto" ? "" : `, but you chose ${count} cards`}. Add names or pick fewer cards.` : !theme ? `No ${gender} theme left. Add a theme first.` : null;
 
   const generate = () => {
     if (blocked || pending) return;
     start(async () => {
-      const r = await callAction(() => createPostAction({ gender, style, count: count === "auto" ? null : Number(count), postDate: date || manilaToday(), themeId: theme?.id, requestId: crypto.randomUUID(), fonts, subjectAge: age }));
+      const postDate = date || manilaToday();
+      const only = byLetter && letter ? { letter } : {};
+      const r = await callAction(() => createPostAction({ gender, style, count: count === "auto" ? null : Number(count), postDate, themeId: theme?.id, requestId: crypto.randomUUID(), fonts, subjectAge: age, ...only }));
       if (!r.ok) { toast.error(r.error); return; }
       // The action's revalidatePath re-renders Today with the new post in the same response.
-      toast.success("Post queued. Cards will appear as they are made.");
+      toast.success(only.letter ? `${only.letter} post queued. Cards will appear as they are made.` : "Post queued. Cards will appear as they are made.");
     });
   };
   useHotkey("g", generate);
@@ -122,6 +139,11 @@ export function NewPostPanel({ settings, themes, stock, busy }: {
           <h2 className="font-display text-xl text-ink sm:text-2xl">New post</h2>
           <DatePicker label="Post date" value={date} onChange={setDate} today={manilaToday()} className="w-auto" />
         </div>
+
+        {letters && (
+          <Segmented fill label="Post type" value={mode} onChange={setMode}
+            options={[{ value: "post", label: "Normal post" }, { value: "letter", label: "By letter" }]} />
+        )}
 
         <Section label="Who">
           {/* Phone: gender + style side by side (style gets more room for "Two-word"), age below. Wider: one row. */}
@@ -179,6 +201,12 @@ export function NewPostPanel({ settings, themes, stock, busy }: {
           </div>
         </Section>
 
+        {byLetter && (
+          <Section label="Letters">
+            <LetterPicker gender={gender} style={style} counts={letterCounts} need={wanted} value={letter} onChange={setLetter} />
+          </Section>
+        )}
+
         <Section label="Cards">
           {/* Phone: an even 6-column grid (Auto takes two). Wider: one full-width track. */}
           <Segmented fill label="Number of cards" value={count} onChange={setCount} className="grid h-auto grid-cols-6 @2xl:flex @2xl:h-11"
@@ -197,10 +225,10 @@ export function NewPostPanel({ settings, themes, stock, busy }: {
                 ? <span className="block text-xs font-semibold text-warn-text">{blocked}</span>
                 : busy
                   ? <span className="block text-xs text-muted">If a post is still being made, the new cards wait in line.</span>
-                  : <span className="block text-xs text-muted">{left} names left<span className="hidden sm:inline"> · press G</span></span>}
+                  : <span className="block text-xs text-muted">{byLetter ? `${forLetter} ${letter} names left` : `${left} names left`}<span className="hidden sm:inline"> · press G</span></span>}
           </div>
           <Button size="lg" onClick={generate} loading={pending} disabled={!!blocked} className="w-full shrink-0 sm:w-auto">
-            <Sparkles className="size-4" /> Generate post
+            <Sparkles className="size-4" /> {byLetter && letter ? `Generate ${letter} post` : "Generate post"}
           </Button>
         </div>
       </div>

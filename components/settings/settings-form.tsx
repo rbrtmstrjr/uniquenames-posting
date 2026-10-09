@@ -3,7 +3,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Bell, LogOut } from "lucide-react";
-import { TEXT_SETTINGS_DEFAULTS, type SettingsRow } from "@/lib/db/types";
+import { TEXT_SETTINGS_DEFAULTS, type ReelThemeId, type ReelThemeRow, type ReelVoiceRow, type SettingsRow } from "@/lib/db/types";
 import { Panel } from "@/components/ui/panel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/shadcn/input";
@@ -14,10 +14,15 @@ import { ThemeToggle } from "@/components/shell/theme-toggle";
 import { saveSettingsAction } from "@/lib/actions/settings";
 import { callAction } from "@/lib/actions/call";
 import { validateSettings } from "@/lib/actions/validate";
-import { buildCaption } from "@/lib/planner";
+import { ALWAYS_MAX, HASHTAGS_ALWAYS_DEFAULT, legacyPool, MAX_TAGS, parseTags, pickPostTags } from "@/lib/captions/hashtags";
 import { createClient } from "@/lib/supabase/client";
-import { TEXT_SETTING_KEYS, type TextSettings } from "@/lib/actions/validate";
+import { REEL_IMAGES_DEFAULT, REEL_IMAGES_MAX, REEL_IMAGES_MIN, TEXT_SETTING_KEYS, type TextSettings } from "@/lib/actions/validate";
 import { CardTextSettings, type PreviewSample } from "./card-text";
+import { NarratorMusic, type NarratorValue } from "./narrator-music";
+import { ThemeGrid } from "./theme-grid";
+import { DEFAULT_THEME_ID, isThemeId } from "@/lib/reels/themes";
+import { MUSIC_DEFAULT, speedOf, VOICE_DEFAULT, VOLUME_DEFAULT } from "@/lib/reels/voices";
+import { CTA_MAX_LINES, CTA_MESSAGES_DEFAULT } from "@/lib/cta/messages";
 
 // Card counts are picked on sliders, so a value is always a whole number in range;
 // validateSettings still rejects "fewest" above "most" with a clear message.
@@ -30,11 +35,63 @@ const DEFAULT_SAMPLE: PreviewSample = { photoUrl: null, name: "Arlo Zenith", mea
 const textOf = (row: Partial<SettingsRow>): TextSettings =>
   Object.fromEntries(TEXT_SETTING_KEYS.map((k) => [k, row[k] ?? TEXT_SETTINGS_DEFAULTS[k]])) as unknown as TextSettings;
 
-export function SettingsForm({ initial, sample = DEFAULT_SAMPLE }: { initial: SettingsRow; sample?: PreviewSample }) {
+/** The narrator + music settings; null until migration 006 runs (the form then never sends them). */
+const narratorOf = (row: Partial<SettingsRow>): NarratorValue | null => row.reel_voice_id === undefined ? null : {
+  reel_voice_id: row.reel_voice_id || VOICE_DEFAULT, reel_speed: speedOf(row.reel_speed),
+  reel_music: row.reel_music ?? MUSIC_DEFAULT, reel_music_volume: row.reel_music_volume ?? VOLUME_DEFAULT,
+};
+
+/** The hashtag fields; absent until migration 009 runs (the form then shows what posts use and never sends them). */
+const hashtagsOf = (row: Partial<SettingsRow>): { hashtags_always?: string; hashtag_pool?: string } =>
+  row.hashtag_pool === undefined ? {} : { hashtags_always: row.hashtags_always ?? HASHTAGS_ALWAYS_DEFAULT, hashtag_pool: row.hashtag_pool };
+
+/** The fallback caption as a girl post would get it: the template + the always-tags and 2 pool tags. */
+function fallbackPreview(template: string, always: string, pool: string): string {
+  const tags = pickPostTags({ always: parseTags(always), themeTags: [], pool: parseTags(pool), gender: "girl", history: [], poolCount: 2 });
+  const line = template.replace(/\{gender\}/g, "girl").trim();
+  return tags.length ? `${line}
+
+${tags.join(" ")}` : line;
+}
+
+/** The closing card fields; absent until migration 010 runs (the form then shows the defaults, disabled, and never sends them). */
+const ctaOf = (row: Partial<SettingsRow>): { cta_enabled?: boolean; cta_messages?: string } =>
+  row.cta_enabled === undefined ? {} : { cta_enabled: row.cta_enabled, cta_messages: row.cta_messages ?? CTA_MESSAGES_DEFAULT };
+
+/** The on-screen step labels switch; absent until migration 014 runs (the form then hides it and never sends it). */
+const labelsOf = (row: Partial<SettingsRow>): { reel_labels?: boolean } =>
+  row.reel_labels === undefined ? {} : { reel_labels: row.reel_labels !== false };
+
+/** The default visual theme; absent until migration 007 runs (the form then never sends it). */
+const themeIdOf = (row: Partial<SettingsRow>): { reel_theme_id?: ReelThemeId } =>
+  row.reel_theme_id === undefined ? {} : { reel_theme_id: isThemeId(row.reel_theme_id) ? row.reel_theme_id : DEFAULT_THEME_ID };
+
+export function SettingsForm({ initial, sample = DEFAULT_SAMPLE, voices = null, themes = null }: {
+  initial: SettingsRow; sample?: PreviewSample; voices?: ReelVoiceRow[] | null; themes?: ReelThemeRow[] | null;
+}) {
   const router = useRouter();
-  const [s, setS] = useState({ caption_template: initial.caption_template, hashtags: initial.hashtags, handle: initial.handle, min_images: initial.min_images, max_images: initial.max_images, sound_on: initial.sound_on,
+  const [s, setS] = useState({ caption_template: initial.caption_template, handle: initial.handle, min_images: initial.min_images, max_images: initial.max_images, sound_on: initial.sound_on,
     // undefined until migration 002 runs: the column default (on) is what the app uses then.
-    caption_ai: initial.caption_ai ?? TEXT_SETTINGS_DEFAULTS.caption_ai, ...textOf(initial) });
+    caption_ai: initial.caption_ai ?? TEXT_SETTINGS_DEFAULTS.caption_ai, ...textOf(initial),
+    // undefined until migration 005 runs: the column default (40) is what the app uses then.
+    reel_max_images: initial.reel_max_images ?? REEL_IMAGES_DEFAULT,
+    // undefined until migration 006 runs: not sent then.
+    ...narratorOf(initial),
+    // undefined until migration 007 runs: not sent then.
+    ...themeIdOf(initial),
+    // undefined until migration 009 runs: not sent then.
+    ...hashtagsOf(initial),
+    // undefined until migration 010 runs: not sent then.
+    ...ctaOf(initial),
+    // undefined until migration 014 runs: hidden and not sent then.
+    ...labelsOf(initial) });
+  const has010 = s.cta_enabled !== undefined;
+  const has009 = s.hashtag_pool !== undefined;
+  // Before 009 posts use the default always-tag + the pool made from the old hashtags field.
+  const always = s.hashtags_always ?? HASHTAGS_ALWAYS_DEFAULT;
+  const pool = s.hashtag_pool ?? legacyPool(initial.hashtags);
+  // The speed the saved samples are compared with (Make samples uses the saved one).
+  const [savedSpeed, setSavedSpeed] = useState(speedOf(initial.reel_speed));
   const [busy, setBusy] = useState(false);
   const problem = validateSettings(s);
 
@@ -45,7 +102,7 @@ export function SettingsForm({ initial, sample = DEFAULT_SAMPLE }: { initial: Se
     // layout (chime setting) in the same response, so no extra router.refresh() round trip.
     const r = await callAction(() => saveSettingsAction(s));
     setBusy(false);
-    if (r.ok) toast.success("Settings saved"); else toast.error(r.error);
+    if (r.ok) { toast.success("Settings saved"); if (s.reel_speed !== undefined) setSavedSpeed(s.reel_speed); } else toast.error(r.error);
   };
   const enableNotifications = async () => {
     // Undefined on iOS Safari outside a home-screen app.
@@ -66,14 +123,24 @@ export function SettingsForm({ initial, sample = DEFAULT_SAMPLE }: { initial: Se
               <Switch id="caption-ai" checked={s.caption_ai} onCheckedChange={(v) => setS({ ...s, caption_ai: v })} /> Write captions with AI
             </label>
             <p className="text-xs text-muted">{s.caption_ai
-              ? "Each new post gets its own 1–2 sentences about its theme, then your hashtags. The fallback caption below is used if AI is unavailable."
+              ? "Each new post gets its own 1–2 sentences in a rotating style (a story moment, a name spotlight, a question, A or B, a name fact or a kind word to moms), written to read differently from your recent captions, then its hashtags. The fallback caption below is used if AI is unavailable."
               : "New posts use the fallback caption below. You can still tap Rewrite caption on a post."}</p>
           </div>
           <label className="block"><span className="text-xs font-semibold text-muted">Fallback caption ({"{gender}"} becomes boy or girl)</span>
             <Textarea value={s.caption_template} onChange={(e) => setS({ ...s, caption_template: e.target.value })} rows={2} className="mt-1" /></label>
-          <label className="block"><span className="text-xs font-semibold text-muted">Hashtags</span>
-            <Input value={s.hashtags} onChange={(e) => setS({ ...s, hashtags: e.target.value })} className="mt-1" /></label>
-          <div className="rounded-xl bg-surface-2 p-3 text-sm whitespace-pre-wrap text-ink"><span className="mb-1 block text-xs font-semibold text-muted">Fallback preview</span>{buildCaption("girl", s)}</div>
+          <fieldset className="space-y-3">
+            <legend className="text-sm font-semibold text-ink">Hashtags</legend>
+            <label className="block"><span className="text-xs font-semibold text-muted">Always (on every post and reel, up to {ALWAYS_MAX})</span>
+              <Input value={always} disabled={!has009} onChange={(e) => setS({ ...s, hashtags_always: e.target.value })} className="mt-1"
+                autoCapitalize="none" autoCorrect="off" spellCheck={false} /></label>
+            <label className="block"><span className="text-xs font-semibold text-muted">Pool (1 rotated into each post)</span>
+              <Textarea value={pool} disabled={!has009} onChange={(e) => setS({ ...s, hashtag_pool: e.target.value })} rows={3} className="mt-1"
+                autoCapitalize="none" autoCorrect="off" spellCheck={false} /></label>
+            <p className="text-xs text-muted">{has009
+              ? `At most ${MAX_TAGS} hashtags per post: your Always tags, 1–2 picked for the post's theme and 1 from the pool (the one used longest ago, never a boy tag on a girl post), and never the same set as the last 10 posts. Reels get topic tags instead of the pool.`
+              : "Rotating hashtags need the database update first (run supabase/migrations/009_captions.sql). Until then posts use the tags shown here."}</p>
+          </fieldset>
+          <div className="rounded-xl bg-surface-2 p-3 text-sm whitespace-pre-wrap text-ink"><span className="mb-1 block text-xs font-semibold text-muted">Fallback preview</span>{fallbackPreview(s.caption_template, always, pool)}</div>
         </div>
       </Panel>
       <Panel title="Cards">
@@ -84,6 +151,43 @@ export function SettingsForm({ initial, sample = DEFAULT_SAMPLE }: { initial: Se
           <CountSlider label="Most cards (Auto)" value={s.max_images} onChange={(v) => setS({ ...s, max_images: v })} />
         </div>
         <p className="mt-2 text-xs text-muted">The handle change applies to cards made from now on.</p>
+      </Panel>
+      <Panel title="Closing card">
+        <div className="space-y-3">
+          <div>
+            <label htmlFor="cta-on" className="inline-flex min-h-11 cursor-pointer items-center gap-3 text-sm font-semibold text-ink">
+              <Switch id="cta-on" checked={s.cta_enabled ?? true} disabled={!has010} onCheckedChange={(v) => setS({ ...s, cta_enabled: v })} /> Add a closing card to every post
+            </label>
+            <p className="text-xs text-muted">The last picture of each new post: the same photoshoot with a gentle follow message instead of a name. It is not one of the name cards, and you can still unselect it before saving.</p>
+          </div>
+          <label className="block"><span className="text-xs font-semibold text-muted">Messages, one per line (/ = a line break, up to {CTA_MAX_LINES} lines; {"{gender}"} becomes boy or girl)</span>
+            <Textarea value={s.cta_messages ?? CTA_MESSAGES_DEFAULT} disabled={!has010} onChange={(e) => setS({ ...s, cta_messages: e.target.value })} rows={8} className="mt-1" /></label>
+          <p className="text-xs text-muted">{has010
+            ? "Each post gets a different message: the one used longest ago, never the same as the post before."
+            : "The closing card needs the database update first (run supabase/migrations/010_cta_card.sql)."}</p>
+        </div>
+      </Panel>
+      <Panel title="Reels">
+        <div className="max-w-sm">
+          <CountSlider label="Images per reel" min={REEL_IMAGES_MIN} max={REEL_IMAGES_MAX} value={s.reel_max_images} onChange={(v) => setS({ ...s, reel_max_images: v })} />
+        </div>
+        <p className="mt-2 text-xs text-muted">{initial.reel_max_images === undefined
+          ? "Reels need the database update first (run supabase/migrations/005_reels.sql); until then 40 is used."
+          : "The most pictures a new script can have. Fewer images make a reel faster on your PC."}</p>
+        {s.reel_labels !== undefined && (
+          <div className="mt-3 border-t border-line pt-3">
+            <label htmlFor="reel-labels" className="inline-flex min-h-11 cursor-pointer items-center gap-3 text-sm font-semibold text-ink">
+              <Switch id="reel-labels" checked={s.reel_labels} onCheckedChange={(v) => setS({ ...s, reel_labels: v })} /> On-screen step labels
+            </label>
+            <p className="text-xs text-muted">Short labels at the top of the picture while a step, swap or verdict is spoken (e.g. 1/3 · Get low). You can edit or clear them on each script.</p>
+          </div>
+        )}
+      </Panel>
+      <Panel title="Theme">
+        <ThemeGrid themes={themes} value={s.reel_theme_id ?? null} onChange={(id) => setS({ ...s, reel_theme_id: id })} />
+      </Panel>
+      <Panel title="Narrator & music">
+        <NarratorMusic voices={voices} value={narratorOf(s)} savedSpeed={savedSpeed} onChange={(p) => setS({ ...s, ...p })} />
       </Panel>
       <Panel title="Card text">
         <CardTextSettings value={textOf(s)} onChange={(t) => setS({ ...s, ...t })} sample={sample}
@@ -107,14 +211,14 @@ export function SettingsForm({ initial, sample = DEFAULT_SAMPLE }: { initial: Se
   );
 }
 
-function CountSlider({ label, value, onChange }: { label: string; value: number; onChange: (v: number) => void }) {
+function CountSlider({ label, value, onChange, min = COUNT_MIN, max = COUNT_MAX }: { label: string; value: number; onChange: (v: number) => void; min?: number; max?: number }) {
   return (
     <div>
       <div className="flex items-baseline justify-between gap-2">
         <span className="text-xs font-semibold text-muted">{label}</span>
         <span className="text-sm font-bold tabular-nums text-ink" aria-hidden>{value}</span>
       </div>
-      <Slider aria-label={label} min={COUNT_MIN} max={COUNT_MAX} step={1} value={[value]} onValueChange={([v]) => onChange(v)} className="mt-1" />
+      <Slider aria-label={label} min={min} max={max} step={1} value={[value]} onValueChange={([v]) => onChange(v)} className="mt-1" />
     </div>
   );
 }

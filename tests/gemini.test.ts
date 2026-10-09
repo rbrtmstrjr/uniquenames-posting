@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { GEMINI_MODEL, generateJson } from "@/lib/ai/gemini";
+import { GEMINI_CREDITS_OUT, GEMINI_MODEL, generateJson } from "@/lib/ai/gemini";
 
 const KEY = "test-key-SECRET-123";
 const schema = { type: "OBJECT", properties: { caption: { type: "STRING" } }, required: ["caption"] } as const;
@@ -31,6 +31,14 @@ describe("generateJson", () => {
     expect(body.generationConfig).toMatchObject({ responseMimeType: "application/json", responseSchema: base.schema, thinkingConfig: { thinkingBudget: 0 } });
   });
 
+  it("can call another model and send a thinking level instead of a budget", async () => {
+    fetchMock.mockResolvedValueOnce(ok({ caption: "Hi" }));
+    await generateJson({ ...base, model: "gemini-3.1-pro-preview", thinkingLevel: "low" });
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-pro-preview:generateContent");
+    expect(JSON.parse(init.body).generationConfig.thinkingConfig).toEqual({ thinkingLevel: "low" });
+  });
+
   it("works for arrays of objects (name/theme suggestions) and skips thought parts", async () => {
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: "thinking…", thought: true }, { text: '[{"name":"Arlo"},{"name":"Juno"}]' }] } }] })));
     const r = await generateJson<{ name: string }[]>({ ...base, schema: { type: "ARRAY", items: { type: "OBJECT", properties: { name: { type: "STRING" } } } } });
@@ -41,6 +49,15 @@ describe("generateJson", () => {
     fetchMock.mockResolvedValueOnce(status(500)).mockResolvedValueOnce(ok({ caption: "Again" }));
     expect(await generateJson(base)).toEqual({ ok: true, data: { caption: "Again" } });
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("says plainly when the prepaid credits have run out (402), without retrying", async () => {
+    fetchMock.mockImplementation(async () => status(402, "Your prepayment credits are depleted. Please go to AI Studio at https://ai.studio/projects to manage your project and billing."));
+    const r = await generateJson(base);
+    expect(r).toEqual({ ok: false, error: GEMINI_CREDITS_OUT });
+    expect(GEMINI_CREDITS_OUT).toMatch(/credits have run out/i);
+    expect(GEMINI_CREDITS_OUT).toMatch(/AI Studio/);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("retries a 429 only once and reports the error", async () => {

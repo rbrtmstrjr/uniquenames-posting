@@ -55,6 +55,79 @@ Do these in order:
 5. Fonts per post: in the SQL Editor run `supabase/migrations/003_post_fonts.sql` (safe to run again), then restart the worker once more. Until then posts use the last-used fonts from settings, and changing a post's fonts in Re-stamp asks you to run it.
 6. Child age per post: in the SQL Editor run `supabase/migrations/004_subject_age.sql` (safe to run again; no worker restart needed). Until then Today's age choice still shapes the photos (it is baked into each card's prompt), but it is not saved on the post, so **Add a card** on such a post shows the original one-baby look instead of following the post's age.
 
+## Adding Reels (existing install)
+Do these in order (this order never leaves a reel failed):
+1. Supabase **SQL Editor**: paste and run `supabase/migrations/005_reels.sql` (safe to run again).
+2. In the worker's Python: `python -m pip install faster-whisper imageio-ffmpeg` (already done on this PC). The Whisper model (~460 MB) downloads on the first reel.
+3. Install the Chatterbox voice node in ComfyUI Desktop as in `docs/reference/reel-pc-spike.md` (section 2: clone `ComfyUI_Fill-ChatterBox` into `custom_nodes`, pip-install its requirements with ComfyUI's own Python), then **restart ComfyUI Desktop** so it loads the node.
+4. Restart the worker: Task Scheduler, **End** then **Run** "Unique Names card worker". `worker/worker.log` must not say "reels are off".
+5. Push to GitHub so Vercel redeploys the website with the Reels page.
+
+Optional: **Settings > Reels > Images per reel** (10–40, default 40); fewer images make a reel faster.
+Full videos land in `OneDrive\Pictures\Unique Names\Reels\`.
+
+## Adding narrator voices and music (existing install)
+Any order is safe; this one is the smoothest:
+1. Restart the worker (Task Scheduler: **End** then **Run** "Unique Names card worker"). The new worker runs fine before step 2.
+2. Supabase **SQL Editor**: paste and run `supabase/migrations/006_reel_voices.sql` (safe to run again).
+3. Push to GitHub so Vercel redeploys the website.
+4. **Settings > Narrator & music > Set up voices**: Gemini records a ~10 s clip of each of the 30 voices once (about $0.30 in total; voices already set up are skipped). Your PC then records a sample of each voice with Chatterbox; they appear one by one with a ▶ button.
+5. Pick the default narrator, speed (default 1.12×) and music volume (default 18 %). Each reel can use a different voice on its review page.
+
+Music: ACE-Step 1.5 in ComfyUI makes a new instrumental bed for every reel. Its model files (~10 GB, in ComfyUI's models folders: `diffusion_models/acestep_v1.5_turbo`, `text_encoders/qwen_0.6b_ace15` + `qwen_1.7b_ace15`, `vae/ace_1.5_vae`) are already installed on this PC; see `docs/reference/reel-voices-music-spike.md` to set up another PC. If music fails, the reel is still made with the voice only.
+
+## Adding themes, feelings and camera moves (existing install)
+Any order is safe; this one is the smoothest:
+1. Restart the worker (Task Scheduler: **End** then **Run**). It runs fine before step 2.
+2. Supabase **SQL Editor**: paste and run `supabase/migrations/007_reel_themes.sql` (safe to run again; it also sets older reels to Knitted Doll).
+3. Push to GitHub so Vercel redeploys the website.
+4. **Settings > Theme > Make all previews**: your PC makes one preview picture per theme (~1 min each).
+5. **Settings > Narrator & music > Make samples**: re-records the voice samples with the tighter delivery (the old ones show as out of date).
+6. Pick a default theme. Each reel can use another theme on its review page (before you approve it).
+
+## Unique captions and rotating hashtags (existing install)
+1. Supabase **SQL Editor**: paste and run `supabase/migrations/009_captions.sql` (safe to run again; no worker restart needed). It moves your old Hashtags field into the new pool, minus #fyp / #follower / #highlights.
+2. Push to GitHub so Vercel redeploys the website. Until step 1 runs, posts still get varied captions and rotating tags (from your old field), but nothing is remembered on the post, and reels get no caption.
+3. **Settings > Caption**: check the **Always** tags (on every post and reel, up to 2) and the **Pool** (one rotated into each post). Each post gets at most 4 hashtags and never the exact set of the last 10 posts; each reel gets a caption + topic tags on its page (Copy / Rewrite caption).
+
+## Closing card (existing install)
+Every new post ends with one extra picture from the same photoshoot that says "Follow for more / baby name ideas." (or another message from your list) instead of a name. It is not one of the 9–13 name cards and the caption never mentions it.
+1. Supabase **SQL Editor**: paste and run `supabase/migrations/010_cta_card.sql` (safe to run again). Until it runs, posts are made exactly as before, without a closing card.
+2. Restart the worker (Task Scheduler: **End** then **Run** "Unique Names card worker"). The new worker (2.3.0) stamps the message on its own lines; an older one would stamp it like a name with an empty meaning.
+3. Push to GitHub so Vercel redeploys the website.
+4. **Settings > Closing card**: switch it on or off and edit the messages, one per line (`/` = a line break, up to 3 lines; `{gender}` becomes boy or girl). Each post gets the message used longest ago, never the same as the post before.
+5. On a post the closing card has a **Closing card** badge and is always saved last (you can still unselect it). Open it to change its message (Save text re-stamps the photo) or make a new picture. Posts without one show **Add closing card**.
+
+## Two reel styles: Crayon and Red Thread (existing install)
+Reels now come in exactly two styles, built word for word from your guides (`docs/reference/crayon-parenting-prompt.md`
+and `docs/reference/red-thread-parenting-prompt.md`): **Crayon** (the default) and **Red Thread** (black-and-white line
+art where a red thread on the wrist is the only colour). The 8 old themes stay in the database so old reels can still be
+made again, but they are no longer offered.
+1. Supabase **SQL Editor**: paste and run `supabase/migrations/012_two_styles.sql` (safe to run again). It adds the two
+   styles, hides the old ones and moves your default to Crayon if it was an old theme.
+2. Restart the worker (Task Scheduler: **End** then **Run** "Unique Names card worker"). The new worker (2.4.0) keeps
+   only the red thread in colour on Red Thread pictures and makes each style's preview from its guide's example scene.
+3. Push to GitHub so Vercel redeploys the website.
+4. **Settings > Theme > Make all previews**: your PC makes one preview per style (Crayon: "Mother and newborn", Red
+   Thread: "2. Newborn"). Pick the default; each reel can switch style on its review page before you approve it.
+
+## Posts by letter (existing install)
+A normal post (same 9–13 cards, theme, child age, fonts, caption, closing card) where every name starts with one letter you pick, like 12 girl names starting with K. For two-word names the first name starts with the letter.
+1. Supabase **SQL Editor**: paste and run `supabase/migrations/013_letter_posts.sql` (safe to run again; no worker restart needed). It only stores the post's letter for its **Letter K** label: before it runs, posts by letter are still made, just without the label.
+2. Push to GitHub so Vercel redeploys the website.
+3. **Today > Post type > By letter**: pick Boy or Girl, the name style, child age, theme, fonts and number of cards as usual, then tap a letter. Each letter shows how many available names of that gender and style start with it: green = enough for the cards you chose, amber = too few.
+4. Amber letter: **Need N more K names** > **Suggest with AI**. Gemini suggests a few more real, uncommon names than you need (with their meanings). Tick the ones you like and press **Add**: they become available names straight away (check each name and meaning first; rare letters like Q, U, X, Y are where AI ideas are weakest).
+5. Press **Generate K post**. The names are picked the usual way among that letter's names. The caption says the names start with K and carries `#namesstartingwithk` among its tags; **Rewrite caption** keeps that. **Add card** on the post picks another K name (when none is left, add more with Suggest with AI). Posts and Today show **Letter K** on the post.
+6. The old **A–Z series** (two posts, one name per letter) is no longer made from Today. Series posts you already made keep their **A–Z Part 1 / Part 2** label; `011_az_series.sql` can stay in the database.
+
+## Reel story formats and step labels (existing install)
+Reels are now short, useful lessons (30–45 s) instead of slow stories. Each new reel uses one of 5 formats in turn: Named Method, Say This Not That, Lola Said Science Says, Scene to Lesson, Problem to Fix. Leave the topic empty and the AI picks a fresh one from 52 proven topics. Health topics only repeat checked facts and always end with a "call your doctor" line. Crayon and Red Thread pictures are unchanged.
+1. Supabase **SQL Editor**: paste and run `supabase/migrations/014_reel_formats.sql` (safe to run again). It stores each reel's format and each line's label, and moves the narrator speed from 1.12× to a calmer 1.05× (a speed you picked yourself is kept). Before it runs, scripts still use the new formats, just without saved labels.
+2. Restart the worker (Task Scheduler: **End** then **Run**) so it draws the labels (worker 2.5.0).
+3. Push to GitHub so Vercel redeploys the website.
+4. Review page: each reel shows its format; the key lines carry a short on-screen label (like `1/3 · "You're mad. Tower fell down."`) that you can edit or clear. **Settings > Reels > On-screen step labels** turns them off for every reel.
+5. Voice samples were recorded at the old speed, so **Settings > Narrator & music** may show them as out of date: press **Make samples** to record them again.
+
 ## When something is wrong
 - Header dot red, "PC offline": turn on the PC. The worker starts at login. **Generate** is disabled (the button says why) until the PC is back.
 - Amber dot, "ComfyUI closed": open ComfyUI Desktop. **Generate** stays disabled until then; text edits and Re-stamp still work.

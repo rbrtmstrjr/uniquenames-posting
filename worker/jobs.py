@@ -8,19 +8,43 @@ import re
 import threading
 import time
 import traceback
+import urllib.parse
 
 from PIL import Image
 
 from render import JobError, slugify, text_style
 from supa import SupaError
 
-VERSION = "2.0.0"
+VERSION = "2.5.0"
 BUCKET = "cards"
 COMFY_CLOSED = "ComfyUI is closed. Open ComfyUI Desktop on your PC, then press Retry."
 NO_NET_SAVE = "Couldn't reach the internet to save this card. Press Retry."
 NO_NET_LOAD = "Couldn't reach the internet to load this card's photo. Press Retry."
 NO_NET_SETTINGS = "Couldn't reach the internet to load your settings. Press Retry."
 STALE = "stale result dropped (card changed while it was being made)"
+
+
+CTA_FILENAME = "99-follow.jpg"  # the closing card's PC backup name (migration 010)
+
+REELS_RECHECK_SECONDS = 600
+PREVIEW_DAYS = 14               # reel previews leave storage after this; the full video stays on the PC
+PREVIEW_SWEEP_SECONDS = 86400   # once a day
+
+
+def is_missing_function(e):
+    """PostgREST's answer when an RPC does not exist (yet): HTTP 404 / PGRST202."""
+    return "PGRST202" in str(e) or re.search(r"HTTP 404", str(e)) is not None
+
+
+def _age_days(stamp, now):
+    """Days since an ISO timestamp from Supabase Storage; 0 when it is missing or unreadable (kept)."""
+    try:
+        t = datetime.datetime.fromisoformat(str(stamp).replace("Z", "+00:00"))
+    except ValueError:
+        return 0.0
+    if t.tzinfo is None:
+        t = t.replace(tzinfo=datetime.timezone.utc)
+    return (now - t.timestamp()) / 86400.0
 
 
 class PhotoMissing(Exception):
@@ -77,6 +101,25 @@ def sweep_parts(root, hours=1, now=None):
                 pass
 
 
+def prune_render_temps(tmp_dir=None, hours=24, now=None):
+    """Leftover reel render folders (%TEMP%/reel-render-*, from a crash or a power cut) older than `hours`."""
+    import shutil
+    import tempfile
+    tmp_dir = tmp_dir or tempfile.gettempdir()
+    now = now or time.time()
+    try:
+        names = os.listdir(tmp_dir)
+    except OSError:
+        return
+    for n in names:
+        d = os.path.join(tmp_dir, n)
+        try:
+            if n.startswith("reel-render-") and os.path.isdir(d) and now - os.path.getmtime(d) > hours * 3600:
+                shutil.rmtree(d, ignore_errors=True)
+        except OSError:
+            pass
+
+
 FONT_KEYS = ("title_font", "meaning_font", "mark_font")
 
 
@@ -93,7 +136,8 @@ def with_post_fonts(settings, fonts):
 
 
 class Runner:
-    def __init__(self, supa, renderer, output_root, cache_dir, poll_seconds=3.0, heartbeat_seconds=15.0, log=print):
+    def __init__(self, supa, renderer, output_root, cache_dir, poll_seconds=3.0, heartbeat_seconds=15.0, log=print,
+                 reels=None):
         self.supa = supa
         self.renderer = renderer
         self.output_root = output_root
@@ -103,6 +147,14 @@ class Runner:
         self.log = log
         self.current = None
         self.stop_event = threading.Event()
+        self.reels = reels             # reels.ReelRunner, or None (cards only)
+        self.reels_off_until = 0.0     # the reel functions are missing (migration 005 not run): re-check later
+        self.reels_missing_logged = False
+        self.music_off_until = 0.0     # the 006 functions are missing: claim without music, no voice samples
+        self.music_state = None        # None = not known yet, True = 006 there, False = 006 missing
+        self.themes_off_until = 0.0    # claim_next_theme_preview is missing (007 not run): re-check later
+        self.themes_state = None       # None = not known yet, True = 007 there, False = 007 missing
+        self.next_preview_sweep = 0.0
 
     # ------------------------------------------------------------ heartbeat
     def heartbeat_once(self):
@@ -128,7 +180,9 @@ class Runner:
         comfy_ok = bool(self.renderer.health()["ok"])
         job = self.supa.rpc("claim_next_card", None if comfy_ok else {"p_restamp_only": True})
         if not job:
-            return False
+            # Cards always go first: a reel step only when there is no card to make.
+            # With ComfyUI closed, only the steps that don't need it (timing, render) are handed out.
+            return self._reel_tick(comfy_ok) if self.reels else False
         card = job["card"]
         self.current = card["id"]
         self.log("%s: %s (%s)" % (job["job"], card["name"], card["id"]))
@@ -150,6 +204,100 @@ class Runner:
             self._fail(card, e)
         finally:
             self.current = None
+        return True
+
+    def _reel_tick(self, comfy_ok):
+        if time.time() < self.reels_off_until:
+            return False
+        try:
+            self.supa.rpc("requeue_stuck_reels")
+            step = self._claim_reel_step(comfy_ok)
+        except SupaError as e:
+            if not is_missing_function(e):
+                raise
+            if not self.reels_missing_logged:
+                self.log("reels are off until supabase/migrations/005_reels.sql is run (%s)" % str(e)[:120])
+                self.reels_missing_logged = True
+            self.reels_off_until = time.time() + REELS_RECHECK_SECONDS
+            return False
+        if not step:
+            # Voice samples, then theme previews, only when no reel step can run and only with ComfyUI up
+            # (Chatterbox / Z-Image).
+            if not comfy_ok:
+                return False
+            return self._sample_tick() or self._preview_tick()
+        reel = step.get("reel") or {}
+        scene = step.get("scene") or {}
+        self.log("reel %s: %s%s (%s)" % (step.get("step"), reel.get("title"),
+                                         " image %s" % scene.get("position") if scene else "", reel.get("id")))
+        self.reels.run_step(step)
+        return True
+
+    def _claim_reel_step(self, comfy_ok):
+        """claim_next_reel_step with the music step (006: p_music). A database without 006 has only 005's
+        one-argument function (PostgREST answers PGRST202): then ask without music, re-checked every
+        REELS_RECHECK_SECONDS. Each switch (off, and back on once 006 is run) is logged once."""
+        if time.time() >= self.music_off_until:
+            try:
+                step = self.supa.rpc("claim_next_reel_step", {"p_no_comfy": not comfy_ok, "p_music": True})
+            except SupaError as e:
+                if "PGRST202" not in str(e):
+                    raise
+                self._music_off()
+            else:
+                self._music_on()
+                return step
+        return self.supa.rpc("claim_next_reel_step", {"p_no_comfy": not comfy_ok})
+
+    def _music_off(self):
+        self.music_off_until = time.time() + REELS_RECHECK_SECONDS
+        if self.music_state is not False:
+            self.log("reel music and voices are off until supabase/migrations/006_reel_voices.sql is run")
+        self.music_state = False
+
+    def _music_on(self):
+        if self.music_state is False:
+            self.log("reel music and voices are on (006 found)")
+        self.music_state = True
+
+    def _sample_tick(self):
+        if time.time() < self.music_off_until or not hasattr(self.reels, "run_sample"):
+            return False
+        try:
+            job = self.supa.rpc("claim_next_voice_sample")
+        except SupaError as e:
+            if "PGRST202" not in str(e):
+                raise
+            self._music_off()
+            return False
+        if not isinstance(job, dict) or not job.get("voice"):
+            return False
+        self.log("voice sample: %s" % (job["voice"].get("id")))
+        self.reels.run_sample(job)
+        return True
+
+    def _preview_tick(self):
+        """One theme preview (007). A database without 007 has no claim_next_theme_preview: previews are off,
+        logged once, re-checked every REELS_RECHECK_SECONDS (also off while 006 is missing: 007 needs it)."""
+        if time.time() < max(self.themes_off_until, self.music_off_until) or not hasattr(self.reels, "run_theme_preview"):
+            return False
+        try:
+            job = self.supa.rpc("claim_next_theme_preview")
+        except SupaError as e:
+            if not is_missing_function(e):
+                raise
+            self.themes_off_until = time.time() + REELS_RECHECK_SECONDS
+            if self.themes_state is not False:
+                self.log("theme previews are off until supabase/migrations/007_reel_themes.sql is run")
+            self.themes_state = False
+            return False
+        if self.themes_state is False:
+            self.log("theme previews are on (007 found)")
+        self.themes_state = True
+        if not isinstance(job, dict) or not job.get("theme"):
+            return False
+        self.log("theme preview: %s" % job["theme"].get("id"))
+        self.reels.run_theme_preview(job)
         return True
 
     def _settings(self):
@@ -177,7 +325,7 @@ class Runner:
             raise JobError(COMFY_CLOSED)
         photo = self.renderer.generate_photo(card["prompt"], int(card["seed"]), int(s["width"]), int(s["height"]))
         photo_bytes = to_jpeg(photo, 92)
-        card_bytes = to_jpeg(self.renderer.compose(photo, card["name"], card["meaning"], s["handle"], s["style"]), 93)
+        card_bytes = to_jpeg(self._compose(card, photo, s), 93)
         v = int(card["version"])
         photo_path = "photos/%s/v%d.jpg" % (card["id"], v)
         card_path = "cards/%s/v%d.jpg" % (card["id"], v)
@@ -193,7 +341,7 @@ class Runner:
     def _restamp(self, job, s):
         card = job["card"]
         photo = Image.open(io.BytesIO(self._load_photo(card["photo_path"]))).convert("RGB")
-        card_bytes = to_jpeg(self.renderer.compose(photo, card["name"], card["meaning"], s["handle"], s["style"]), 93)
+        card_bytes = to_jpeg(self._compose(card, photo, s), 93)
         card_path = "cards/%s/v%d.jpg" % (card["id"], int(card["version"]))
         self._net(lambda: self.supa.upload(BUCKET, card_path, card_bytes), NO_NET_SAVE)
         if not self._finish(card, {"card_path": card_path}):
@@ -201,6 +349,13 @@ class Runner:
             return
         self._cleanup(card, keep={card["photo_path"], card_path})
         self._backup(job, card_bytes)
+
+    def _compose(self, card, photo, s):
+        """The stamped card: the closing card (kind 'cta', migration 010) gets its message lines
+        (name = the message, "/" = a line break) and no meaning; every other card its name + meaning."""
+        if card.get("kind") == "cta":
+            return self.renderer.compose_cta(photo, card["name"], s["handle"], s["style"])
+        return self.renderer.compose(photo, card["name"], card["meaning"], s["handle"], s["style"])
 
     # ------------------------------------------------------------ results
     def _match(self, card):
@@ -316,13 +471,15 @@ class Runner:
 
     def _backup(self, job, data):
         card = job["card"]
-        if card.get("kind") != "post" or not job.get("post_date") or not job.get("gender_label"):
+        if card.get("kind") not in ("post", "cta") or not job.get("post_date") or not job.get("gender_label"):
             return
         try:
             label = "%s %s" % (job["post_date"], job["gender_label"])
             if job.get("style_label"):
                 label += " " + job["style_label"]
-            rel = os.path.join(label, "%02d-%s.jpg" % (int(card["position"]), slugify(card["name"])))
+            # The closing card sorts last in the post's folder, whatever its position.
+            fname = CTA_FILENAME if card.get("kind") == "cta" else "%02d-%s.jpg" % (int(card["position"]), slugify(card["name"]))
+            rel = os.path.join(label, fname)
             idx = self._index_load()
             old = idx.get(card["id"])
             os.makedirs(os.path.join(self.output_root, label), exist_ok=True)
@@ -342,11 +499,45 @@ class Runner:
         except OSError as e:
             self.log("backup copy failed: %s" % e)
 
+    # ------------------------------------------------------------ reel previews
+    def sweep_old_previews(self, now=None):
+        """Once a day, best effort: delete reel previews older than PREVIEW_DAYS from the reels bucket and
+        clear preview_path on their reels (the site then says the preview expired). Returns files removed."""
+        now = now or time.time()
+        if not self.reels or now < self.next_preview_sweep:
+            return 0
+        self.next_preview_sweep = now + PREVIEW_SWEEP_SECONDS
+        removed = 0
+        try:
+            folders, offset = [], 0
+            while True:
+                page = self.supa.list("reels", "", 1000, offset) or []
+                folders += [f["name"] for f in page if not f.get("id") and f.get("name")]
+                if len(page) < 1000:
+                    break
+                offset += 1000
+            for folder in folders:
+                old = ["%s/%s" % (folder, f["name"]) for f in self.supa.list("reels", folder) or []
+                       if f.get("id") and re.match(r"preview-v\d+\.mp4$", f.get("name") or "")
+                       and _age_days(f.get("created_at"), now) > PREVIEW_DAYS]
+                if not old:
+                    continue
+                self.supa.remove("reels", old)
+                removed += len(old)
+                for path in old:
+                    self.supa.update("reels", "preview_path=eq.%s" % urllib.parse.quote(path, safe=""), {"preview_path": None})
+            if removed:
+                self.log("removed %d reel preview(s) older than %d days" % (removed, PREVIEW_DAYS))
+        except Exception as e:
+            self.log("reel preview clean-up skipped: %s" % str(e)[:200])
+        return removed
+
     # ------------------------------------------------------------ forever
     def run_forever(self):
         threading.Thread(target=self._heartbeat_loop, daemon=True).start()
         backoff = self.poll_seconds
         while not self.stop_event.is_set():
+            self.sweep_old_previews()
             try:
                 ran = self.tick()
                 backoff = self.poll_seconds

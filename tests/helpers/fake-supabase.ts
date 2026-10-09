@@ -26,10 +26,24 @@ export function fakeSupabase(respond: Respond) {
     const r = respond({ table: `rpc:${fn}`, ops: [["rpc", args]] }) ?? {};
     return Promise.resolve({ data: r.data ?? null, error: r.error ?? null });
   };
-  // Storage: records removed paths per bucket; always succeeds.
+  // Storage: records removed paths per bucket; always succeeds. `list(prefix)` is answered through
+  // `respond` as { table: "storage:<bucket>", ops: [["list", prefix]] } (default: an empty folder).
   const removed: { bucket: string; paths: string[] }[] = [];
-  const storage = { from: (bucket: string) => ({ remove: (paths: string[]) => { removed.push({ bucket, paths }); return Promise.resolve({ data: [], error: null }); } }) };
-  return { client: { from, rpc, storage }, queries, rpcs, removed };
+  // `upload(path, body, opts)` is recorded and answered as { table: "storage:<bucket>", ops: [["upload", path, opts]] }.
+  const uploads: { bucket: string; path: string; body: unknown; opts: unknown }[] = [];
+  const storage = { from: (bucket: string) => ({
+    upload: (path: string, body: unknown, opts?: unknown) => {
+      uploads.push({ bucket, path, body, opts });
+      const r = respond({ table: `storage:${bucket}`, ops: [["upload", path, opts]] }) ?? {};
+      return Promise.resolve({ data: r.error ? null : (r.data ?? { path }), error: r.error ?? null });
+    },
+    remove: (paths: string[]) => { removed.push({ bucket, paths }); return Promise.resolve({ data: [], error: null }); },
+    list: (prefix: string) => {
+      const r = respond({ table: `storage:${bucket}`, ops: [["list", prefix]] }) ?? {};
+      return Promise.resolve({ data: r.data ?? [], error: r.error ?? null });
+    },
+  }) };
+  return { client: { from, rpc, storage }, queries, rpcs, removed, uploads };
 }
 
 export const op = (q: Query, m: string) => q.ops.find((o) => o[0] === m);

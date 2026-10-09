@@ -77,13 +77,19 @@ class FakeRenderer:
         self.styles.append(style)
         return photo
 
+    def compose_cta(self, photo, message, handle, style=None):
+        self.composed.append(("cta", message, handle))
+        self.styles.append(style)
+        return photo
+
 
 def job(job_type="generate", **over):
     card = {"id": "c1", "kind": "post", "position": 3, "name": "Arlo Zenith", "meaning": "peak strength", "prompt": "p", "seed": 7,
             "version": 1, "photo_path": None, "card_path": None}
     card.update(over)
-    return {"job": job_type, "card": card, "post_date": "2026-10-05", "gender_label": "Boy" if card["kind"] == "post" else None,
-            "style_label": "Two-word" if card["kind"] == "post" else None}
+    in_post = card["kind"] in ("post", "cta")
+    return {"job": job_type, "card": card, "post_date": "2026-10-05", "gender_label": "Boy" if in_post else None,
+            "style_label": "Two-word" if in_post else None}
 
 
 class JobsTest(unittest.TestCase):
@@ -305,6 +311,37 @@ class JobsTest(unittest.TestCase):
         self.supa.jobs.append(job(kind="preview"))
         self.run_.tick()
         self.assertFalse(os.path.exists(os.path.join(self.root, "out")))
+
+    def test_closing_card_is_stamped_with_its_message_and_backed_up_last(self):
+        self.supa.jobs.append(job(kind="cta", position=12, name="Follow for more / baby name ideas.", meaning=""))
+        self.assertTrue(self.run_.tick())
+        self.assertEqual(self.r.composed, [("cta", "Follow for more / baby name ideas.", "@unique_names")])
+        self.assertEqual(self.last_card_update()[2]["status"], "done")
+        folder = os.path.join(self.root, "out", "2026-10-05 Boy Two-word")
+        self.assertEqual(os.listdir(folder), [jobs.CTA_FILENAME])
+        self.assertEqual(jobs.CTA_FILENAME, "99-follow.jpg")
+
+    def test_closing_card_restamp_keeps_the_photo_and_stamps_the_new_message(self):
+        b = io.BytesIO()
+        Image.new("RGB", (1080, 1080), (10, 10, 10)).save(b, "JPEG")
+        self.supa.uploads["photos/c1/v1.jpg"] = b.getvalue()
+        self.supa.jobs.append(job("restamp", kind="cta", version=2, name="Still searching? / Follow", meaning="",
+                                  photo_path="photos/c1/v1.jpg", card_path="cards/c1/v1.jpg"))
+        self.run_.tick()
+        self.assertEqual(self.r.generated, 0)
+        self.assertEqual(self.r.composed, [("cta", "Still searching? / Follow", "@unique_names")])
+        self.assertIn("cards/c1/v2.jpg", self.supa.uploads)
+        # still one backup file, overwritten in place
+        self.run_.tick()
+        self.assertEqual(os.listdir(os.path.join(self.root, "out", "2026-10-05 Boy Two-word")), ["99-follow.jpg"])
+
+    def test_closing_card_with_the_real_renderer_draws_text(self):
+        real = render.ComfyRenderer("http://127.0.0.1:1", 5, log=lambda m: None)
+        photo = Image.new("RGB", (1080, 1080), (70, 110, 170))
+        card = {"kind": "cta", "name": "Follow for more / baby name ideas.", "meaning": ""}
+        self.run_.renderer = real
+        out = self.run_._compose(card, photo, {"handle": "@unique_names", "style": render.text_style({})})
+        self.assertGreater(out.crop((100, 220, 980, 440)).convert("L").getextrema()[1], 240)
 
     def test_heartbeat(self):
         self.run_.current = "c9"

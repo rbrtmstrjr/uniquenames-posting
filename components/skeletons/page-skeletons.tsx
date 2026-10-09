@@ -212,3 +212,70 @@ export function SettingsSkeleton() {
     </Frame>
   );
 }
+
+export function ReelsSkeleton() {
+  return (
+    <Frame label="Reels">
+      <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
+        <div className="space-y-2"><Skeleton className="h-8 w-28 sm:h-9" /><Skeleton className="h-4 w-80 max-w-full rounded-md" /></div>
+        <Skeleton className="h-11 w-32" />
+      </div>
+      <ul className="grid gap-3 md:grid-cols-2 2xl:grid-cols-3">
+        {range(6).map((i) => (
+          <li key={i} className="flex gap-3 rounded-2xl border border-line bg-surface p-3 shadow-soft">
+            <Skeleton className="aspect-[9/16] w-16 shrink-0 rounded-lg sm:w-[72px]" />
+            <div className="flex min-w-0 flex-1 flex-col">
+              <Skeleton className="h-5 w-4/5 rounded-md" />
+              <Skeleton className="mt-1.5 h-3 w-40 rounded-md" />
+              <div className="mt-auto flex items-center gap-2 pt-2"><Skeleton className="h-6 w-24 rounded-full" /><Skeleton className="h-1.5 flex-1 rounded-full" /></div>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </Frame>
+  );
+}
+
+export function NewReelSkeleton() {
+  return (
+    <Frame label="New reel">
+      <Skeleton className="mb-1 h-11 w-20" />
+      <HeaderSkeleton />
+      <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
+        <PanelSkeleton>
+          <div className="space-y-4">
+            <div className="space-y-2"><Skeleton className="h-4 w-32 rounded-md" /><Skeleton className="h-11" /><Skeleton className="h-3 w-72 max-w-full rounded-md" /></div>
+            <div className="flex flex-col gap-3 border-t border-line pt-4 sm:flex-row sm:items-center sm:justify-between">
+              <Skeleton className="h-3 w-64 max-w-full rounded-md" /><Skeleton className="h-12 w-full sm:w-40" />
+            </div>
+          </div>
+        </PanelSkeleton>
+        <PanelSkeleton>
+          <div className="space-y-3">{range(4).map((i) => <div key={i} className="flex gap-3"><Skeleton className="size-7 shrink-0 rounded-full" /><Skeleton className="h-10 flex-1" /></div>)}</div>
+        </PanelSkeleton>
+      </div>
+    </Frame>
+  );
+}
+
+export function ReelDetailSkeleton() {
+  return (
+    <Frame label="reel" className="space-y-4">
+      <Skeleton className="h-11 w-20" />
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="space-y-2"><Skeleton className="h-8 w-72 max-w-full sm:h-9" /><Skeleton className="h-4 w-48 rounded-md" /></div>
+        <Skeleton className="h-6 w-28 rounded-full" />
+      </div>
+      <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(320px,380px)]">
+        <PanelSkeleton className="lg:order-2">
+          <div className="grid grid-cols-4 gap-1.5">{range(4).map((i) => <div key={i} className="flex flex-col items-center gap-1.5"><Skeleton className="size-8 rounded-full" /><Skeleton className="h-3 w-12 rounded-md" /></div>)}</div>
+          <Skeleton className="mt-4 h-2.5 w-full rounded-full" />
+        </PanelSkeleton>
+        <PanelSkeleton className="lg:order-1">
+          <Skeleton className="mb-3 h-3 w-64 max-w-full rounded-md" />
+          <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 xl:grid-cols-5">{range(10).map((i) => <Skeleton key={i} className="aspect-[9/16]" />)}</div>
+        </PanelSkeleton>
+      </div>
+    </Frame>
+  );
+}

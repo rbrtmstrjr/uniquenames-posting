@@ -18,20 +18,26 @@ import { nameKey } from "@/lib/actions/helpers";
 import { Dialog } from "@/components/ui/dialog";
 import { NameForm } from "./name-form";
 import { BulkPaste } from "./bulk-paste";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/shadcn/select";
+import { AZ_LETTERS, letterOf } from "@/lib/series/az";
+
+import type { NamesFilter } from "@/lib/names/filter";
 
 const STATUS_TONE: Record<NameStatus, "ok" | "accent" | "muted" | "warn"> = { available: "ok", reserved: "accent", used: "muted", skip: "warn", pending: "accent" };
 const STATUS_TEXT: Record<NameStatus, string> = { available: "Available", reserved: "In a post", used: "Used", skip: "Skip", pending: "Pending" };
 
-export function NamesTable({ names: serverNames }: { names: NameRow[] }) {
+export function NamesTable({ names: serverNames, initial = {} }: { names: NameRow[]; initial?: NamesFilter }) {
   // Local copy for optimistic updates; re-seeded whenever the server sends fresh rows
   // (each action's revalidatePath re-renders this page in the same response).
   const [names, setNames] = useState(serverNames);
   const [seed, setSeed] = useState(serverNames);
   if (seed !== serverNames) { setSeed(serverNames); setNames(serverNames); }
   const [q, setQ] = useState("");
-  const [gender, setGender] = useState<"all" | Gender>("all");
-  const [style, setStyle] = useState<"all" | NameStyle>("all");
-  const [status, setStatus] = useState<"all" | NameStatus>("available");
+  const [gender, setGender] = useState<"all" | Gender>(initial.gender ?? "all");
+  const [style, setStyle] = useState<"all" | NameStyle>(initial.style ?? "all");
+  const [status, setStatus] = useState<"all" | NameStatus>(initial.status ?? "available");
+  // First letter: "all" or A..Z.
+  const [letter, setLetter] = useState<string>(initial.letter ?? "all");
   const [form, setForm] = useState<{ open: boolean; editing: NameRow | null }>({ open: false, editing: null });
   const [bulk, setBulk] = useState(false);
   const [busy, setBusy] = useState<Set<string>>(new Set());
@@ -51,8 +57,9 @@ export function NamesTable({ names: serverNames }: { names: NameRow[] }) {
 
   const shown = useMemo(() => names.filter((n) =>
     (gender === "all" || n.gender === gender) && (style === "all" || n.style === style) && (status === "all" || n.status === status) &&
+    (letter === "all" || letterOf(n.name) === letter) &&
     (!q || n.name.toLowerCase().includes(q.toLowerCase()) || n.meaning.toLowerCase().includes(q.toLowerCase())),
-  ).sort((a, b) => a.name.localeCompare(b.name)), [names, q, gender, style, status]);
+  ).sort((a, b) => a.name.localeCompare(b.name)), [names, q, gender, style, status, letter]);
 
   // Optimistic row change: `next` (or null = removed) shows at once; a failure puts the row back.
   const act = async (n: NameRow, next: NameRow | null, fn: () => Promise<ActionResult>, ok: string) => {
@@ -106,6 +113,15 @@ export function NamesTable({ names: serverNames }: { names: NameRow[] }) {
         <Segmented label="Gender" value={gender} onChange={setGender} options={[{ value: "all", label: "All" }, { value: "boy", label: "Boy" }, { value: "girl", label: "Girl" }]} />
         <Segmented label="Style" value={style} onChange={setStyle} options={[{ value: "all", label: "Any" }, { value: "two-word", label: "Two-word" }, { value: "single", label: "Single" }]} />
         <Segmented label="Status" value={status} onChange={setStatus} options={statusOptions} />
+        <Select value={letter} onValueChange={setLetter}>
+          <SelectTrigger aria-label="First letter" className="min-h-11 w-auto min-w-28 bg-surface font-semibold">
+            <SelectValue>{letter === "all" ? "Any letter" : `Starts with ${letter}`}</SelectValue>
+          </SelectTrigger>
+          <SelectContent position="popper" collisionPadding={{ top: 8, bottom: 80 }} className="max-h-[min(20rem,var(--radix-select-content-available-height))]">
+            <SelectItem value="all">Any letter</SelectItem>
+            {AZ_LETTERS.map((l) => <SelectItem key={l} value={l}>{l}</SelectItem>)}
+          </SelectContent>
+        </Select>
       </div>
       <p className="text-xs text-muted">{shown.length} of {names.length} names</p>
       {pendingShown.length > 0 && (

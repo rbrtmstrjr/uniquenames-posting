@@ -265,5 +265,82 @@ class Positions(unittest.TestCase):
         self.assertLess(out.crop((760, 300, 1000, 900)).convert("L").getextrema()[1], 100)  # nothing mid-right
 
 
+CTA = "Follow for more / baby name ideas."
+
+
+class ClosingCard(unittest.TestCase):
+    def padded(self, W, H):
+        L = w.LAYOUT
+        return (W * L["padX"], H * L["padTop"], W - W * L["padX"], H - H * L["padBottom"])
+
+    def check(self, W, H, style, message):
+        lay = w.layout_cta((W, H), message, "@unique_names", style)
+        for part in lay["lines"]:
+            self.assertTrue(inside(part["box"], self.padded(W, H)), (style.position, part["text"], part["box"]))
+            self.assertAlmostEqual((part["box"][0] + part["box"][2]) / 2, W / 2, delta=1)  # always centred across
+        self.assertFalse(overlaps(lay["block"], lay["mark"]["box"]), style.position)
+        self.assertLessEqual(len(lay["lines"]), w.CTA_MAX_LINES)
+        return lay
+
+    def test_lines_split_at_slash(self):
+        self.assertEqual(w.cta_lines(CTA), ["Follow for more", "baby name ideas."])
+        self.assertEqual(w.cta_lines("  one   line "), ["one line"])
+        self.assertEqual(w.cta_lines("a / / b"), ["a", "b"])
+        self.assertEqual(w.cta_lines("a/b/c/d"), ["a", "b", "c d"])
+        self.assertEqual(w.cta_lines(""), [])
+
+    def test_the_owners_lines_in_the_meaning_font_near_the_title_size_no_meaning(self):
+        style = w.text_style({"meaning_font": "lora", "title_font": "playfair"})
+        lay = self.check(1080, 1080, style, CTA)
+        self.assertEqual([p["text"] for p in lay["lines"]], ["Follow for more", "baby name ideas."])
+        font = lay["lines"][0]["font"]
+        self.assertEqual(font.size, lay["lines"][1]["font"].size)
+        self.assertGreaterEqual(font.size, 70)  # about the title size (95), not the meaning size (37)
+        self.assertLessEqual(font.size, 95)
+        self.assertEqual(font.path, w.fonts.load_safe("lora", w.LAYOUT["bodyWeight"], 20, lambda m: None).path)
+        self.assertNotIn("meaning", lay)
+        self.assertNotIn("title", lay)
+
+    def test_auto_sits_in_the_upper_middle(self):
+        lay = self.check(1080, 1080, w.text_style({}), CTA)
+        mid = (lay["block"][1] + lay["block"][3]) / 2
+        self.assertAlmostEqual(mid, 1080 * w.CTA_CENTER_Y, delta=2)
+        self.assertEqual(lay["band"], "cta")
+
+    def test_every_position_and_font_fits(self):
+        long_lines = "Still searching for the perfect name? / Follow us for more unique baby names / every single day of the week"
+        for pos in POSITIONS:
+            for (W, H) in ((1080, 1080), (1080, 1350), (2048, 512)):
+                self.check(W, H, MAX._replace(position=pos), CTA)
+                self.check(W, H, MAX._replace(position=pos), long_lines)
+        for fid in w.fonts.ids():
+            self.check(1080, 1080, MAX._replace(meaning_font=fid, position="auto"), long_lines)
+
+    def test_a_message_without_slash_wraps_onto_balanced_lines(self):
+        lay = self.check(1080, 1080, w.text_style({}), "Save this post and follow us for more unique baby name ideas every day")
+        self.assertGreater(len(lay["lines"]), 1)
+        short = self.check(1080, 1080, w.text_style({}), "Follow along!")
+        self.assertEqual([p["text"] for p in short["lines"]], ["Follow along!"])
+
+    def test_position_setting_picks_the_height(self):
+        top = w.layout_cta((1080, 1080), CTA, "@u", w.text_style({"text_position": "top-left"}))
+        bottom = w.layout_cta((1080, 1080), CTA, "@u", w.text_style({"text_position": "bottom-right"}))
+        self.assertAlmostEqual(top["block"][1], 1080 * w.LAYOUT["padTop"], delta=1)
+        self.assertGreater(bottom["block"][1], 540)
+        # the watermark stays bottom-right (the message is centred, never in its way)
+        self.assertGreater(bottom["mark"]["box"][0], 540)
+
+    def test_compose_draws_the_message_and_the_mark(self):
+        img = Image.new("RGB", (1080, 1080), (70, 110, 170))
+        out = w.compose_cta(img, CTA, "@unique_names", w.text_style({}))
+        self.assertEqual(out.size, (1080, 1080))
+        lay = w.layout_cta((1080, 1080), CTA, "@unique_names", w.text_style({}))
+        b = lay["lines"][0]["box"]
+        self.assertGreater(out.crop((int(b[0]), int(b[1]), int(b[2]), int(b[3]))).convert("L").getextrema()[1], 240)  # white ink
+        m = lay["mark"]["box"]
+        self.assertGreater(out.crop((int(m[0]), int(m[1]), int(m[2]), int(m[3]))).convert("L").getextrema()[1], 150)
+        self.assertLess(out.crop((100, 700, 900, 940)).convert("L").getextrema()[1], 140)  # nothing in the lower half
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -4,7 +4,8 @@ import socket
 import sys
 import time
 
-from jobs import VERSION, Runner, prune_cache, rotate_log, sweep_parts
+from jobs import VERSION, Runner, prune_cache, prune_render_temps, rotate_log, sweep_parts
+from reels import ReelRunner
 from render import HERE, ComfyRenderer, default_output_root, ensure_fonts_in_background, load_env
 from supa import Supa
 
@@ -31,10 +32,12 @@ def main():
     cache_dir = os.path.join(HERE, "cache")
     prune_cache(cache_dir)
     sweep_parts(output_root)
-    runner = Runner(Supa(cfg["SUPABASE_URL"], cfg["SUPABASE_SERVICE_ROLE_KEY"]), renderer,
-                    output_root, cache_dir,
+    prune_render_temps()
+    supa = Supa(cfg["SUPABASE_URL"], cfg["SUPABASE_SERVICE_ROLE_KEY"])
+    log = lambda m: print(time.strftime("%Y-%m-%d %H:%M:%S"), m, flush=True)  # noqa: E731
+    runner = Runner(supa, renderer, output_root, cache_dir,
                     float(cfg.get("POLL_SECONDS", "3")), float(cfg.get("HEARTBEAT_SECONDS", "15")),
-                    log=lambda m: print(time.strftime("%Y-%m-%d %H:%M:%S"), m, flush=True))
+                    log=log, reels=ReelRunner(supa, renderer, log=log, output_root=output_root))
     print("Unique Names worker %s -> %s (ComfyUI %s)" % (VERSION, cfg["SUPABASE_URL"], renderer.comfy), flush=True)
     # Fonts download in the background: the heartbeat must start at once, or a slow GitHub on
     # the first start after an update would make the PC look offline (and lock Generate).
