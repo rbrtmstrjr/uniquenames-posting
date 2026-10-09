@@ -2,6 +2,7 @@ import "server-only";
 import type { createClient } from "@/lib/supabase/server";
 import type { ReelSceneRow, SettingsRow } from "@/lib/db/types";
 import { writeReelCaption } from "@/lib/ai/reel-caption";
+import { keyPhrase } from "@/lib/reels/formats";
 import { pickReelTags, tagSettings } from "./hashtags";
 import { EMPTY_HISTORY, HISTORY_CAPTIONS, postHistory, recentTags, reelHistory, withoutId, type CaptionHistory } from "./history";
 
@@ -40,6 +41,8 @@ export async function loadReelHistory(sb: SB, exceptId?: string): Promise<Captio
 
 export interface ReelCaptionSource {
   id: string; title: string; topic?: string | null; stage?: string | null; hook_text?: string | null;
+  /** 014: the reel's format (absent / null before it). */
+  format?: string | null;
   lines: Pick<ReelSceneRow, "narration">[] | string[];
 }
 
@@ -56,6 +59,7 @@ export async function makeReelCaption(sb: SB, reel: ReelCaptionSource, timeoutMs
   const lines = reel.lines.map((l) => (typeof l === "string" ? l : l.narration));
   const ai = await writeReelCaption({
     title: reel.title, topic: reel.topic, stage: reel.stage, hook: reel.hook_text, lines,
+    format: reel.format ?? null, keyPhrase: keyPhrase(lines),
     recent: history.texts, recentTags: recentTags(history),
   }, timeoutMs);
   if (!ai) return null;

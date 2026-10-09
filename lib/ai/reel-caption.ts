@@ -1,5 +1,6 @@
 import "server-only";
 import { askCaption, firstWord, openers, sanitizeText, type AiCaption } from "./caption-core";
+import { FORMAT_SPECS, isReelFormat } from "@/lib/reels/formats";
 
 /** A reel caption: 1–3 short sentences (the hashtags go after it, from pickReelTags). */
 export const REEL_CAPTION_MAX = 300;
@@ -17,11 +18,15 @@ export interface ReelCaptionInput {
   recent?: string[];
   /** Hashtags used on recent reels: Gemini suggests others. */
   recentTags?: string[];
+  /** 014: the reel's format (lib/reels/formats) and its key phrase (the first exact words in quotes). */
+  format?: string | null;
+  keyPhrase?: string | null;
 }
 
 export const REEL_CAPTION_SYSTEM = [
   "You write the Facebook post caption for a narrated parenting reel on a page for moms of babies and toddlers (mostly Filipino moms).",
   `Write 1 to 3 short sentences (at most ${REEL_CAPTION_MAX - 20} characters in total): echo the reel's hook in fresh words, give one concrete, useful takeaway from the script, and end with one genuine open question moms would want to answer from their own life.`,
+  "When the prompt gives a key phrase, repeat it word for word (without quotation marks, e.g. after a colon) or name the method's name, so the post is worth saving; if the phrase uses I, me, my, we, us or our, name the method's name or the takeaway instead. The question is honest and about this topic, never bait.",
   "Plain, warm English with normal capitalization. Not salesy, no cliches, no lecturing.",
   "This is a brand page, not a person: speak to the mom in the second person (\"you\", \"your little one\"). Never claim personal experience or feelings (no \"I really felt that\", no \"it helped us\"): never use the words I, me, my, we, us or our.",
   "Exactly one question, at the very end. Never engagement bait: no \"comment YES\", \"tag a friend\" or \"tag a mom\", \"share if\", \"like if\", \"drop a heart\", \"in the comments\"; never \"follow us\", \"follow for more\" or any other call to follow, like or share.",
@@ -40,6 +45,8 @@ export function reelCaptionPrompt(input: ReelCaptionInput): string {
   if (input.topic?.trim()) lines.push(`Topic: ${t(input.topic)}`);
   if (input.stage?.trim()) lines.push(`Child's stage: ${t(input.stage)}`);
   if (input.hook?.trim()) lines.push(`Hook card on screen: ${t(input.hook)}`);
+  if (isReelFormat(input.format)) lines.push(`Format: ${FORMAT_SPECS[input.format].label}`);
+  if (input.keyPhrase?.trim()) lines.push(`Key phrase (the exact words the reel teaches): ${t(input.keyPhrase)}`);
   lines.push(`Script (the narration): ${script}`);
   const recent = (input.recent ?? []).filter(Boolean);
   if (recent.length) {

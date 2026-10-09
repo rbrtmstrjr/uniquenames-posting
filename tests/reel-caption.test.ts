@@ -22,6 +22,19 @@ describe("reel caption prompt", () => {
       expect(p).toContain(want);
     }
   });
+  it("the format and the key phrase (the first exact words in quotes) when the reel has them", () => {
+    const p = reelCaptionPrompt({ ...input, format: "say_this", keyPhrase: "Walking feet, please." });
+    expect(p).toContain("Format: Say this, not that");
+    expect(p).toContain("Key phrase (the exact words the reel teaches): Walking feet, please.");
+    const none = reelCaptionPrompt({ ...input, format: "junk" });
+    expect(none).not.toContain("Format:");
+    expect(none).not.toContain("Key phrase");
+  });
+  it("system rules: repeat the key phrase or the method's name so the post is worth saving", () => {
+    expect(REEL_CAPTION_SYSTEM).toMatch(/key phrase/);
+    expect(REEL_CAPTION_SYSTEM).toMatch(/method's name/);
+    expect(REEL_CAPTION_SYSTEM).toMatch(/worth saving/);
+  });
   it("a very long script is shortened at a word", () => {
     const p = reelCaptionPrompt({ ...input, lines: Array.from({ length: 400 }, (_, i) => `word${i}`) });
     expect(p.length).toBeLessThan(3200);

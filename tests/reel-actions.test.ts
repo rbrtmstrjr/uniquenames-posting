@@ -5,6 +5,7 @@ import { scenePrompt } from "@/lib/reels/prompt";
 import { imagePrompt } from "@/lib/reels/image-prompt";
 import { assignMotion } from "@/lib/reels/motion";
 import { STATIC_THEMES, STYLE_TAG } from "@/lib/reels/themes";
+import { REEL_TOPICS } from "@/lib/reels/topics";
 import { fakeSupabase, isUpdate, op, type Query, type Respond } from "./helpers/fake-supabase";
 
 let respond: Respond = () => undefined;
@@ -30,11 +31,12 @@ const CAST = { adult: "the mom doll: a crocheted mom", child: "the toddler doll:
 const SIZES = ["close", "wide", "detail", "medium"] as const;
 const SUBJECTS = ["both", "mom", "object", "baby"] as const;
 const script = (title = "The Quiet Hour", n = 3): ReelScript => ({
-  title, stage: "toddler", cast: CAST, hook_text: "And nobody warned you",
+  title, stage: "toddler", format: "say_this", cast: CAST, hook_text: "And nobody warned you",
   scenes: Array.from({ length: n }, (_, i) => ({
     beat: i === 0 ? "hook" : "build", narration: `Line ${i + 1} is spoken softly to you mama.`, idea: `The mom doll does thing ${i + 1} — the sala at dusk`,
     emotion: (["surprised", "teary", "relieved", "curious"] as const)[i % 4], action: `leans in, hands open ${i + 1}`,
     shot_size: SIZES[i % 4], subject: SUBJECTS[i % 4], punch: i === 2 ? "softly" : null, time_jump: i === 1,
+    on_screen: i === 1 ? "Instead: \u201cWalking feet\u201d" : null,
   })),
 });
 const ok = (s: ReelScript): ReelScriptResult => ({ ok: true, script: s });
@@ -52,7 +54,7 @@ const sceneRow = (id: string, position: number, o: Partial<ReelSceneRow> = {}): 
 
 type Health = "ready" | "comfy-off";
 interface World {
-  reel?: ReelRow | null; scenes?: ReelSceneRow[]; made?: { title: string; stage: string | null }[]; health?: Health;
+  reel?: ReelRow | null; scenes?: ReelSceneRow[]; made?: ({ title: string; stage: string | null } & Partial<Pick<ReelRow, "format" | "topic_id" | "topic">>)[]; health?: Health;
   maxImages?: number; speed?: number; reelUpdated?: boolean; sceneUpdated?: boolean; deleted?: boolean;
   listError?: { message: string; code?: string }; sceneInsertError?: { message: string };
   files?: Record<string, { name: string; id: string | null }[]>;
@@ -72,6 +74,10 @@ interface World {
   settings009?: boolean;
   /** 009: the latest reels with a caption (newest first). */
   captionHistory?: Record<string, unknown>[];
+  /** 014 has run: settings has reel_labels. */
+  labels?: boolean;
+  /** 014 not on the database yet (but settings says so): an insert naming format / on_screen fails with PGRST204. */
+  reels014Missing?: boolean;
 }
 let w: World = {};
 function world(o: World = {}) {
@@ -83,7 +89,7 @@ function world(o: World = {}) {
     const eqv = (col: string) => q.ops.find((x) => x[0] === "eq" && x[1] === col)?.[2];
     if (q.table === "worker_status") return { data: { id: 1, last_seen: new Date().toISOString(), comfyui_ok: w.health === "ready" } };
     if (q.table === "settings") return { data: { id: 1, reel_max_images: w.maxImages, ...(w.speed === undefined ? {} : { reel_speed: w.speed }),
-      ...(w.themeId === undefined ? {} : { reel_theme_id: w.themeId }),
+      ...(w.themeId === undefined ? {} : { reel_theme_id: w.themeId }), ...(w.labels === undefined ? {} : { reel_labels: w.labels }),
       ...(w.settings009 ? { hashtags_always: "#uniquenames", hashtag_pool: "#babynames #babyboynames #momlife #newmom" } : {}) } };
     if (q.table === "reel_themes") {
       if (w.themesError) return { error: w.themesError };
@@ -92,6 +98,7 @@ function world(o: World = {}) {
     }
     if (q.table === "reels") {
       if (has("insert")) {
+        if (w.reels014Missing && "format" in (op(q, "insert")![1] as Record<string, unknown>)) return { error: { code: "PGRST204", message: "Could not find the 'format' column of 'reels' in the schema cache" } };
         if (w.scene008Missing && "hook_text" in (op(q, "insert")![1] as Record<string, unknown>)) return { error: { code: "PGRST204", message: "Could not find the 'hook_text' column of 'reels' in the schema cache" } };
         return { data: { id: NEW } };
       }
@@ -104,6 +111,7 @@ function world(o: World = {}) {
     if (q.table === "reel_scenes") {
       if (has("insert")) {
         const rows = op(q, "insert")![1] as Record<string, unknown>[];
+        if (w.reels014Missing && rows.some((r) => "on_screen" in r)) return { error: { code: "42703", message: "column \"on_screen\" of relation \"reel_scenes\" does not exist" } };
         if (w.scene012Missing && rows.some((r) => "feeling" in r || "thread" in r)) return { error: { code: "PGRST204", message: "Could not find the 'feeling' column of 'reel_scenes' in the schema cache" } };
         if (w.scene008Missing && rows.some((r) => "shot_size" in r)) return { error: { code: "PGRST204", message: "Could not find the 'shot_size' column of 'reel_scenes' in the schema cache" } };
         if (w.scene007Missing && rows.some((r) => "emotion" in r)) return { error: { code: "PGRST204", message: "Could not find the 'action' column of 'reel_scenes' in the schema cache" } };
@@ -189,13 +197,14 @@ describe("writeReelScriptAction", () => {
     });
   });
 
-  it("blank topic: Gemini picks; topic stored as null; max images defaults to 40 before 005's column", async () => {
+  it("blank topic: a topic from the bank (stored as the reel's topic); max images defaults to 40 before 005's column", async () => {
     world({ maxImages: undefined });
     writeMock.mockResolvedValueOnce(ok(script()));
     expect((await A.writeReelScriptAction({ topic: "   " })).ok).toBe(true);
-    expect(writeMock.mock.calls[0][0].topic).toBeUndefined();
+    const bank = REEL_TOPICS.find((t) => t.topic === writeMock.mock.calls[0][0].topic);
+    expect(bank).toBeDefined();
     expect(writeMock.mock.calls[0][0].maxScenes).toBe(40);
-    expect(rowsOf(qs("reels", "insert")[0])).toMatchObject({ topic: null });
+    expect(rowsOf(qs("reels", "insert")[0])).toMatchObject({ topic: bank!.topic });
   });
 
   it("refuses a topic over 120 characters before calling Gemini", async () => {
@@ -590,6 +599,87 @@ describe("deleteReelAction", () => {
   });
 });
 
+describe("formats + topics + labels (014)", () => {
+  const ROW = { title: "Old Title", stage: "toddler" };
+
+  it("write: the format rotates away from the latest reels; a blank topic comes from the bank, preferring that format, never a recent one", async () => {
+    const say = REEL_TOPICS.filter((t) => t.format === "lola_science");
+    world({ themeId: "crayon", labels: true, made: [
+      { ...ROW, format: "named_method", topic_id: say[0].id }, { ...ROW, format: "say_this", topic_id: say[1].id },
+      { ...ROW, format: null, topic_id: null, topic: say[2].topic },
+    ] });
+    writeMock.mockResolvedValueOnce(ok(script()));
+    expect(await A.writeReelScriptAction({})).toEqual({ ok: true, reelId: NEW });
+    const arg = writeMock.mock.calls[0][0];
+    expect(arg.format).toBe("lola_science");
+    const t = REEL_TOPICS.find((x) => x.topic === arg.topic)!;
+    expect(t.format).toBe("lola_science");
+    expect([say[0].id, say[1].id, say[2].id]).not.toContain(t.id);
+    expect(arg.topicHealth).toBe(t.health);
+    // the format asked for is stored (Gemini's own answer never overrides it), with the topic id
+    expect(rowsOf(qs("reels", "insert")[0])).toMatchObject({ format: "lola_science", topic_id: t.id, topic: t.topic });
+  });
+
+  it("write: a typed topic has no topic id; health is found from its words", async () => {
+    world({ themeId: "crayon", labels: true });
+    writeMock.mockResolvedValue(ok(script()));
+    await A.writeReelScriptAction({ topic: "Baby has a fever at night" });
+    expect(writeMock.mock.calls[0][0]).toMatchObject({ topic: "Baby has a fever at night", topicHealth: true, format: "named_method" });
+    expect(rowsOf(qs("reels", "insert")[0])).toMatchObject({ topic: "Baby has a fever at night", topic_id: null, format: "named_method" });
+    world({ themeId: "crayon", labels: true });
+    await A.writeReelScriptAction({ topic: "Sharing toys with a cousin" });
+    expect(writeMock.mock.calls[1][0].topicHealth).toBe(false);
+  });
+
+  it("write: each line stores its on-screen label (null = none)", async () => {
+    world({ themeId: "crayon", labels: true });
+    writeMock.mockResolvedValueOnce(ok(script()));
+    await A.writeReelScriptAction({});
+    expect(rowsOf(qs("reel_scenes", "insert")[0]).map((r) => r.on_screen)).toEqual([null, "Instead: \u201cWalking feet\u201d", null]);
+  });
+
+  it("write before 014 (settings without reel_labels): no format, topic id or labels are written", async () => {
+    world({ themeId: "crayon" });
+    writeMock.mockResolvedValueOnce(ok(script()));
+    expect(await A.writeReelScriptAction({})).toEqual({ ok: true, reelId: NEW });
+    expect(rowsOf(qs("reels", "insert")[0])).not.toHaveProperty("format");
+    expect(rowsOf(qs("reels", "insert")[0])).not.toHaveProperty("topic_id");
+    for (const row of rowsOf(qs("reel_scenes", "insert")[0])) expect(row).not.toHaveProperty("on_screen");
+    expect(writeMock.mock.calls[0][0].format).toBe("named_method");   // the script still follows a format
+  });
+
+  it("write: a database still missing the 014 columns (PGRST204 / 42703) gets the rows again without them", async () => {
+    world({ themeId: "crayon", labels: true, reels014Missing: true });
+    writeMock.mockResolvedValueOnce(ok(script()));
+    expect(await A.writeReelScriptAction({})).toEqual({ ok: true, reelId: NEW });
+    const reels = qs("reels", "insert");
+    expect(reels).toHaveLength(2);
+    expect(rowsOf(reels[1])).not.toHaveProperty("format");
+    expect(rowsOf(reels[1])).toMatchObject({ theme_id: "crayon", hook_text: "And nobody warned you" });
+    const ins = qs("reel_scenes", "insert");
+    expect(ins).toHaveLength(2);
+    for (const row of rowsOf(ins[1])) { expect(row).not.toHaveProperty("on_screen"); expect(row).toHaveProperty("shot_size"); }
+    expect(qs("reels", "delete")).toHaveLength(0);
+  });
+
+  it("rewrite: the same format and the same bank topic; the labels are replaced", async () => {
+    const t = REEL_TOPICS.find((x) => x.id === "kulob-fever")!;
+    world({ themeId: "crayon", labels: true, reel: reelRow({ theme_id: "crayon", hook_text: "x", format: "lola_science", topic_id: t.id, topic: t.topic }) });
+    writeMock.mockResolvedValueOnce(ok(script("Another Title")));
+    expect(await A.rewriteReelScriptAction(REEL)).toEqual({ ok: true });
+    expect(writeMock.mock.calls[0][0]).toMatchObject({ topic: t.topic, format: "lola_science", topicHealth: true });
+    expect(patchOf(qs("reels", "update")[0])).toMatchObject({ format: "lola_science" });
+    expect(rowsOf(qs("reel_scenes", "insert")[0])[1]).toMatchObject({ on_screen: "Instead: \u201cWalking feet\u201d" });
+  });
+
+  it("rewrite: a reel without a format (older) gets the rotated one", async () => {
+    world({ themeId: "crayon", labels: true, made: [{ ...ROW, format: "named_method" }], reel: reelRow({ theme_id: "crayon", hook_text: "x", format: null, topic_id: null }) });
+    writeMock.mockResolvedValueOnce(ok(script("Another Title")));
+    await A.rewriteReelScriptAction(REEL);
+    expect(writeMock.mock.calls[0][0]).toMatchObject({ format: "say_this", topic: "tantrums" });
+  });
+});
+
 describe("voices + music (006)", () => {
   it("the script's word target follows the saved narration speed (1 before 006)", async () => {
     writeMock.mockResolvedValue(ok(script()));
@@ -939,6 +1029,19 @@ describe("reel captions (009)", () => {
     expect(patchOf(upd)).toEqual({ caption: CAPTION, hashtags: "#uniquenames #toddlertantrums #gentleparenting #bedtimeroutine" });
     expect(upd.ops).toContainEqual(["is", "caption", null]);
     expect(upd.ops).toContainEqual(["eq", "id", NEW]);
+  });
+
+  it("014: the caption prompt gets the reel's format and its key phrase (the words to say)", async () => {
+    world({ settings009: true, labels: true, themeId: "crayon" });
+    const s = script();
+    s.scenes[1] = { ...s.scenes[1], narration: `Instead of "Don't run," say "Walking feet, please."` };
+    writeMock.mockResolvedValueOnce(ok(s));
+    generateJson.mockResolvedValueOnce(answer());
+    await A.writeReelScriptAction({ topic: "bedtime" });
+    await runLater();
+    const prompt = generateJson.mock.calls[0][0].prompt as string;
+    expect(prompt).toContain("Format: Named method");
+    expect(prompt).toContain("Key phrase (the exact words the reel teaches): Walking feet, please.");
   });
 
   it("before 009 (no hashtag fields in settings): no Gemini call and no write", async () => {

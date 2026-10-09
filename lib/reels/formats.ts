@@ -61,11 +61,11 @@ export const FORMAT_SPECS: Record<ReelFormat, FormatSpec> = {
   problem_fix: {
     id: "problem_fix", label: "Problem, why, fix", minQuotes: 1,
     beats: [
-      "PROBLEM (line 1): the named, specific problem ('Bedtime takes an hour? It's usually not the sleep. It's the goodbye.').",
+      "PROBLEM (line 1): the named, specific problem ('Your toddler hits when he's mad? It's not meanness. He's out of words.').",
       "EMPATHY: mirror the mom's reality in one line (empathy, never fear or guilt).",
       "WHY: the child's-eye reason.",
-      "FIX: one named step with the EXACT WORDS in quotes ('Try \"Last 3 Things\": last hug, last song, last \"I love you.\"').",
-      "CLOSING SUGGESTION: a warm nudge to try it, never a call to action ('Tonight, try it once. Same three, same order.').",
+      "FIX: one named step with the EXACT WORDS in quotes ('Try \"Gentle Hands\": hold his hand softly and say \"Hands are for hugs. You can stomp.\"').",
+      "CLOSING SUGGESTION: a warm nudge to try it, never a call to action ('Next time, try it once. Same words, every time.').",
     ],
   },
 };
@@ -89,4 +89,22 @@ export function nextFormat(recent: (string | null | undefined)[]): ReelFormat {
   const choices = REEL_FORMATS.filter((f) => f !== known[0]);
   // the larger the index of its newest use, the longer ago it was used
   return choices.reduce((best, f) => (lastUse(f) > lastUse(best) ? f : best), choices[0]);
+}
+
+/** A quoted phrase (the exact words to say): straight or curly double quotes, opened and closed within one line. */
+export const QUOTE_RE = /["\u201c]([^"\u201c\u201d]{1,120})["\u201d]/g;
+/** How many quoted phrases the lines hold. */
+export const quoteCount = (lines: string[]) => lines.reduce((n, l) => n + (l.match(QUOTE_RE)?.length ?? 0), 0);
+/** The quoted phrases of the lines, in order. */
+export const quotedPhrases = (lines: string[]) => lines.flatMap((l) => [...l.matchAll(QUOTE_RE)].map((m) => m[1].trim()).filter(Boolean));
+/** The words a quote must not follow to be the reel's key phrase: those are the phrases to stop saying. */
+const NOT_THIS = /(?:instead of|stop saying|don't say|do not say|never say|not)[\s,:]*$/i;
+/**
+ * The reel's key phrase: the first quoted words to SAY (a phrase after "Instead of" / "Stop saying" is skipped), else the
+ * first quoted phrase; null when there is none.
+ */
+export function keyPhrase(lines: string[]): string | null {
+  const all = lines.flatMap((l) => [...l.matchAll(QUOTE_RE)].map((m) => ({ text: m[1].trim(), before: l.slice(0, m.index).replace(/[‘’]/g, "'") })))
+    .filter((q) => q.text);
+  return (all.find((q) => !NOT_THIS.test(q.before)) ?? all[0])?.text ?? null;
 }

@@ -7,6 +7,7 @@ import {
   type ReelShotSize, type ReelSubject,
 } from "@/lib/reels/shots";
 import { DEFAULT_THEME_ID, isDollTheme, type ReelTheme } from "@/lib/reels/themes";
+import { FORMAT_SPECS, isReelFormat, QUOTE_RE, quoteCount, REEL_FORMATS, type ReelFormat } from "@/lib/reels/formats";
 import { generateJson, type GeminiSchema } from "./gemini";
 
 /** Same model as the n8n Knitted Doll storyboard. */
@@ -29,9 +30,14 @@ export const ACTION_MAX = 200;
 export const SETTING_MAX = 120;
 /** Longest short character tag. */
 export const TAG_MAX = 100;
-/** Reel length (playbook default 45-75 s; never under 15 s) and the narrator's pace at 1×. */
-export const REEL_SECONDS = { lo: 45, hi: 75, floor: 15 } as const;
+/** Reel length (value-first formats: 30-45 s; never under 15 s) and the narrator's pace at 1×. */
+export const REEL_SECONDS = { lo: 30, hi: 45, floor: 15 } as const;
 export const WORDS_PER_SECOND = 3.8;
+/** The on-screen label of a line (drawn by the worker while it is spoken): at most this many words / characters. */
+export const ON_SCREEN_MAX_WORDS = 8;
+export const ON_SCREEN_MAX = 80;
+/** At most this many lines carry a label (more text on screen loses viewers); later ones are dropped. */
+export const ON_SCREEN_MAX_LINES = 5;
 
 export const REEL_STAGES = ["newborn", "baby", "toddler", "preschooler"] as const;
 export type ReelStage = (typeof REEL_STAGES)[number];
@@ -53,9 +59,13 @@ export interface ReelScriptScene {
   feeling?: string | null;
   /** Red Thread (012): the thread's state in this picture; null for every other theme. */
   thread?: ReelThread | null;
+  /** 014: the short label drawn at the top while the line is spoken (never on line 1); null = none. */
+  on_screen: string | null;
 }
 export interface ReelScript {
   title: string; stage: ReelStage; cast: ReelCast;
+  /** The format the script is written in (lib/reels/formats). */
+  format: ReelFormat;
   /** The hook card (≤ 10 words) that complements line 1. */
   hook_text: string;
   scenes: ReelScriptScene[];
@@ -64,6 +74,10 @@ export interface ReelScript {
 export interface MadeReel { title: string; stage?: string | null }
 export interface ReelScriptInput {
   topic?: string; maxScenes: number; alreadyMade: MadeReel[]; timeoutMs?: number;
+  /** The format to write in (rotated by the caller: lib/reels/formats nextFormat). */
+  format: ReelFormat;
+  /** A fever / illness / sleep / feeding / development topic: soft wording and one safety line. */
+  topicHealth?: boolean;
   /** Narration speed (settings.reel_speed, 1.00–1.25; default 1 = unchanged): a faster voice fits more words in the same time. */
   speed?: number;
   /** The reel's visual theme (default Crayon): the cast is written as dolls only for Knitted Doll; Crayon and Red
@@ -75,40 +89,72 @@ export type ReelScriptResult = { ok: true; script: ReelScript } | { ok: false; e
 const BEATS = ["hook", "build", "turn", "close"];
 
 export const REEL_SCRIPT_SYSTEM = [
-  "You are a masterful short-form storyteller for a Facebook page whose audience is mostly Filipino moms of babies and toddlers. You write narrated vertical reels that people watch to the very end: tender, specific, a little nostalgic, spoken straight to a mom ('you', 'mama') like a warm friend who has been there. Deeply felt, never a lecture. Plain English, no emojis, no hashtags.",
+  "You write short, useful narrated vertical reels for a Facebook page whose audience is mostly Filipino moms of babies and toddlers. Every reel teaches ONE thing a mom can use tonight, with the exact words to say, spoken straight to her ('you', 'your toddler') like a warm friend who read the research. Warm and practical, never a lecture, never a sad story. Plain English, no emojis, no hashtags.",
   "",
-  "HUMAN, NATURAL TONE (very important): Write the way a real, warm person actually TALKS. Use contractions (you're, don't, it's). Short spoken sentences, present tense, concrete nouns (tiny socks, the 3 a.m. bottle, the creak of the crib) over abstractions. Validate the parent, never shame her. STRICTLY AVOID AI-sounding tells and clichés: no 'in today's world', 'let's dive in', 'when it comes to', 'simply', 'furthermore', 'moreover', 'journey', 'it is important to note', stiff listy phrasing or formal transitions.",
+  "HUMAN, NATURAL TONE (very important): Write the way a real, warm person actually TALKS. Use contractions (you're, don't, it's). Short spoken sentences, concrete details (an age, a time, an object, an exact phrase) over abstractions. Validate the parent first, never shame her. STRICTLY AVOID AI-sounding tells and clichés: no 'in today's world', 'let's dive in', 'when it comes to', 'simply', 'furthermore', 'moreover', 'journey', 'it is important to note', stiff listy phrasing or formal transitions.",
   "",
-  "WHO YOU'RE TALKING TO: Filipino moms (clean, simple English that is great for global viewers too). Frame everything around what she deeply feels — her fierce love for her 'anak', close family, lola wisdom, faith and gratitude, doing her best on a budget, the quiet exhaustion of motherhood. Use local detail where it fits (the sala, a jeepney ride, lola's house, the palengke, merienda, rice on the stove). Make her feel SEEN.",
+  "WHO YOU'RE TALKING TO: Filipino moms (clean, simple English that is great for moms everywhere too). She is busy and tired and loves her 'anak' fiercely; give her something she can do, in words she can say, and leave her feeling capable. At most ONE light local detail (lola, the sala, merienda, the jeep, mano), understandable from context.",
   "",
   "AGE FOCUS (CRITICAL): ONLY the early years — newborns (0-3 months), babies (3-12 months), toddlers (1-3 years) and young children (3-5 years). Never a tween or teenager.",
 ].join("\n");
 
-const AUTO_TOPIC = [
-  "Topic: (none given) — CHOOSE one fresh, specific, high-emotion or high-search-intent topic from the real early-parenting life of a new mom. Deliberately VARY the stage and subject every time (newborn vs baby vs toddler vs preschooler). Examples of the KIND of angle (pick ONE, do not list many):",
-  "- NEWBORN (0-3 mo): the first night home, soothing a newborn who won't stop crying, the 3 a.m. feeds, the first bath, safe sleep, day-night confusion, the warning signs that need a doctor.",
-  "- BABY (3-12 mo): the first real laugh, teething nights, starting solids, separation anxiety, the first crawl, going back to work.",
-  "- TODDLER (1-3 yr): a tantrum in public, potty training, picky eating, the first 'I love you', 'I do it myself', bedtime battles.",
-  "- PRESCHOOLER (3-5 yr): big feelings, the first day of school, the endless 'why?', the last time they ask to be carried.",
-  "Never a vague topic. Make every reel feel DIFFERENT from the already-made ones.",
+/** An on-screen label pattern per format (each format labels its own key lines). */
+const LABEL_PATTERN: Record<ReelFormat, string> = {
+  named_method: "'1/3 · Get low' on each numbered step",
+  say_this: "'Instead: \"Walking feet\"' on each swap",
+  lola_science: "'Science says: lukewarm helps' on the fact, 'Verdict: let go, gently' on the verdict",
+  scene_lesson: "'Say: \"You carry the keys\"' on the script to say",
+  problem_fix: "'The fix: \"Gentle hands\"' on the fix",
+};
+
+/** What the hook card names, per format (research §8.1): never another format's series name. */
+const HOOK_CARD: Record<ReelFormat, string> = {
+  named_method: "the method's name (pattern: 'THE 5-WORD RULE')",
+  say_this: "the contrast (pattern: 'SAY THIS, NOT THAT')",
+  lola_science: "the myth check (pattern: 'LOLA SAID… SCIENCE SAYS')",
+  scene_lesson: "the lesson in a few words, never a series name (pattern: 'LATE, ONE SHOE, NO YELLING')",
+  problem_fix: "the problem or the fix's name (pattern: 'BEDTIME TAKES AN HOUR?')",
+};
+
+const AUTO_TOPIC = "Topic: (none given) — CHOOSE one specific, useful topic from early parenting (0-5 years) that suits the format: a concrete problem, method, myth or phrase, never a vague one, and clearly different from the already-made reels.";
+
+/** Health topics (fever, illness, sleep, feeding, development): research §6.2 / §10.4. */
+const HEALTH_RULES = [
+  "HEALTH TOPIC (CRITICAL): soft wording only ('can help', 'is linked to', 'many pediatricians suggest'); no diagnosis, no symptom checklists, no doses, no medicines, supplements or products; never 'proven', 'cures', 'forever' or 'doctors won't tell you'. Infant sleep advice goes no further than 'back to sleep, on a flat, clear surface'. Never explain body chemistry (hormones, cortisol, adrenaline) or other medical causes as fact: describe what parents notice ('many tired toddlers get a burst of energy').",
+  "- SAFETY LINE: exactly one generic line that says when to call the doctor or pediatrician, in your own words (pattern: 'If you're worried, or it lasts more than a day or two, call your pediatrician.').",
 ].join("\n");
+
+/** Claims the script may state as fact (research §10.4 S3); anything else is a tip many parents find helps. */
+const VETTED_CLAIMS = [
+  "naming a feeling helps it calm down (psychologists call it affect labeling)",
+  "serve-and-return play builds a baby's brain connections",
+  "a baby's brain makes over a million new connections a second in the first years (Harvard Center on the Developing Child)",
+  "picky eaters often need 8-15 low-pressure tries of a new food",
+  "watching screens together is linked to better language",
+  "the AAP (2026) looks at screen quality, context and watching together instead of fixed hour limits",
+  "labeled praise and special time come from PCIT (Parent-Child Interaction Therapy)",
+  "the parent decides what, when and where; the child decides how much (Satter's Division of Responsibility)",
+];
 
 const oneLine = (s: string) => s.replace(/\s+/g, " ").trim();
 
 /**
- * Spoken-word budget for a 45-75 s reel: seconds × 3.8 words/s × the narration speed (a sped-up voice fits more words),
+ * Spoken-word budget for a 30-45 s reel: seconds × 3.8 words/s × the narration speed (a sped-up voice fits more words),
  * shrunk when few images are allowed (7-10 words a line) but never under 18 s of speech. A script is accepted with at
- * least `minScenes` lines and `minWords` words (80 % of `lo`, never under 15 s).
+ * least `minScenes` lines and `minWords` (90 % of `lo`, never under 15 s) to `maxWords` (110 % of `hi`) words; the
+ * prompt asks for `minScenes`-`maxLines` lines.
  */
 export function reelWordBudget(maxScenes: number, speed = 1) {
   const x = Number.isFinite(speed) && speed > 0 ? speed : 1;
   const rate = WORDS_PER_SECOND * x;
   const lo = Math.max(Math.ceil(rate * 18), Math.min(Math.round(rate * REEL_SECONDS.lo), maxScenes * 7));
   const hi = Math.max(lo, Math.min(Math.round(rate * REEL_SECONDS.hi), maxScenes * 10));
+  const minScenes = Math.min(maxScenes, Math.max(2, Math.ceil(lo / 10)));
   return {
-    lo, hi,
-    minScenes: Math.min(maxScenes, Math.max(2, Math.ceil(lo / 10))),
-    minWords: Math.max(Math.ceil(0.8 * lo), Math.ceil(rate * REEL_SECONDS.floor)),
+    lo, hi, minScenes,
+    maxLines: Math.max(minScenes, Math.min(maxScenes, Math.ceil(hi / 7))),
+    minWords: Math.max(Math.ceil(0.9 * lo), Math.ceil(rate * REEL_SECONDS.floor)),
+    maxWords: Math.floor(1.1 * hi),
     secLo: Math.round(lo / rate), secHi: Math.round(hi / rate),
     /** Words per second the prompt quotes. */
     wps: Math.round(rate * 10) / 10,
@@ -155,8 +201,11 @@ function guidePictureRules(red: boolean): string[] {
   ];
 }
 
-/** The storyboard prompt (playbook v2: hook, re-hooks, arc, loop + a varied shot list); `alreadyMade` is newest first. */
-export function reelScriptPrompt({ topic, maxScenes, alreadyMade, speed, theme }: ReelScriptInput): { system: string; prompt: string } {
+/**
+ * The script prompt (value-first formats, spec 2026-10-09-reel-storylines: the format's beats, the research §10 rules,
+ * the on-screen labels + the playbook's varied shot list and the style's picture rules); `alreadyMade` is newest first.
+ */
+export function reelScriptPrompt({ topic, maxScenes, alreadyMade, speed, theme, format, topicHealth }: ReelScriptInput): { system: string; prompt: string } {
   const t = oneLine(topic ?? "");
   const made = alreadyMade
     .map((m) => ({ title: oneLine(m.title ?? ""), stage: oneLine(m.stage ?? "") }))
@@ -168,28 +217,36 @@ export function reelScriptPrompt({ topic, maxScenes, alreadyMade, speed, theme }
   const guide = isGuideThemeId(th.id);
   const red = th.id === "redthread";
   const name = dolls ? "'the mom doll', 'the baby doll'" : "'the mom', 'the baby'";
+  const f = FORMAT_SPECS[isReelFormat(format) ? format : "problem_fix"];
+  const q = f.minQuotes;
   const prompt = [
     t ? `Topic: ${t}` : AUTO_TOPIC,
     "",
-    "ALREADY MADE — DO NOT REPEAT: titles you have ALREADY produced. Do NOT repeat any of these titles, situations, or the same stage/angle; choose a CLEARLY DIFFERENT story and (when possible) a different stage from the recent ones:",
+    `FORMAT: ${f.label} (${f.id}). Write the reel in these beats, in this order (one or more spoken lines per beat):`,
+    ...f.beats.map((x, i) => `${i + 1}. ${x}`),
+    "",
+    "ALREADY MADE — DO NOT REPEAT: titles you have ALREADY produced. Do NOT repeat any of these titles or the same angle; choose a CLEARLY DIFFERENT title and (when possible) a different stage from the recent ones:",
     made.length ? made.map((m) => `- ${m.title}${m.stage ? ` (${m.stage})` : ""}`).join("\n") : "(none yet — this is the first one)",
     "",
-    "Write ONE short STORY told as a narrated vertical reel of still images (one image per spoken line) with the SAME parent and child throughout: a specific situation that moves forward — a beginning, a turn, an ending — never a list of tips, never the same moment repeated. ONE core idea per reel.",
+    "THE SCRIPT (CRITICAL — value first: the mom must be able to USE this tonight):",
+    `- LINE 1 is the hook, spoken in the first half-second: at most ${HOOK_LINE_MAX_WORDS} words (aim for 6-10). It names the SPECIFIC problem, method, myth or exact phrase of this reel, says 'you' or 'your' (child / toddler / baby), and promises something concrete. Never a vague feeling, never scene-setting about the weather or the time of day.`,
+    "- Talk to the mom in the second person ('you', 'your toddler'), like a friend who read the research. NEVER the first person: no I / me / my / we / us / our in the narration (only 'we all' in a hook like '3 things we all say…'), no personal stories, no 'as a mom' (write 'You might think…', never 'We often think…'). The words inside quotes are what the mom says, so they may use I / we.",
+    `- THE EXACT WORDS: the fix is always EXACT WORDS the mom can say tonight, in double quotes inside the line (e.g. Say "You're mad. Tower fell."): each quote at most 10 words (at most 5 for a toddler), opened and closed within ONE line. This reel needs at least ${q} quoted phrase${q === 1 ? "" : "s"}.`,
+    `- ONE soft credible anchor per reel ('pediatricians suggest…', 'psychologists call it…'); never invent studies, numbers, percentages, quotes or experts, and never 'proven', 'cures', 'forever', 'doctors won't tell you'. Facts you may state: ${VETTED_CLAIMS.join("; ")}. Anything else is a tip many parents find helps.`,
+    "- Sentences of 4-12 words (never more than 15), one idea per line. Link beats with 'but', 'so' or 'because', never 'and then'. A short 2-4-word punch line in most beats ('Five words. Big feelings.'). A step marker or re-hook every 8-12 seconds ('One…', 'Two…', 'Here's the thing…').",
+    "- Emotion: validate first ('You're not doing it wrong'), then teach, then end on relief or warmth — never on guilt, fear or sadness.",
+    "- The LAST line is the warm close of the format (a reframe or a gentle 'tonight, try it once'). No tagline, no sign-off, no page name.",
+    "- BANNED anywhere: greetings ('Hi/Hey mga mommies', 'Hello mama', 'Welcome back'), 'Today I want to talk about', 'In this video', 'Let me tell you', outros ('see you next time', 'thanks for watching', 'next video', 'until next time'), 'watch till the end', fear absolutes ('damages your child forever'). NEVER ask viewers to like, comment, share, tag, follow, save, subscribe or vote — no call to action of any kind.",
+    "- The examples in this brief (the beats included) are PATTERNS only: they belong to other topics. Write fresh words for THIS topic and never reuse an example sentence, an example's method name or an example's fix, unless the topic is exactly that example.",
+    ...(topicHealth ? ["", HEALTH_RULES] : []),
     "",
-    "THE SCRIPT (CRITICAL — this must play like an unskippable reel):",
-    `- LINE 1 is the hook, spoken in the first half-second: at most ${HOOK_LINE_MAX_WORDS} words (aim for 6-10). It carries TENSION, a TIME-JUMP, 'you', or a SPECIFIC SURPRISING DETAIL. Pick one: a last-time time-jump ('One day you'll put them down and never pick them up again.'), 'Nobody tells you…', a pain question ('Why does 3 a.m. feel this long?'), a myth-bust, a number + promise, in the middle of the action ('She was crying before I even opened my eyes.'), or a POV identity line ('POV: you haven't sat down since 6 a.m.'). These are PATTERNS only: write fresh words for THIS story and never reuse an example sentence from this brief.`,
-    "- BANNED openers: any greeting ('Hi/Hey mga mommies', 'Hello', 'Welcome back'), 'Today I want to talk about', 'In this video', 'Let me tell you', the page or brand name, and backstory first. Start in the middle of the feeling.",
-    "- STAKES within the first ~5 seconds (by line 2-3): why this moment matters or what she is about to lose / learn.",
-    "- A RE-HOOK every 10-15 seconds (about every 4-5 lines): a 'but…' / 'then…' / 'and that's when…' line that turns the story and pulls them forward.",
-    "- Sentences of 4-12 words (never more than 15), one clause per line, and a 2-3-word punch line at least every ~20 seconds ('Every. Single. Night.').",
-    "- At least ONE identity line that makes a mom say 'that's me' ('For the mom who eats her rice cold every night.').",
-    "- The EMOTIONAL TURN lands at 70-80% of the reel; the last ~20% lands on warmth, awe, gratitude or resolve — never pure sadness.",
-    "- The LAST line is the payoff in at most 10 words and loops back to line 1 (echo its words or answer it) so the reel replays seamlessly.",
-    "- NEVER ask viewers to follow, like, comment, tag, share or save; no outro, no call to action, no page name.",
+    `ON-SCREEN LABELS: "on_screen" is an optional short label shown big at the top of the picture while that line is spoken: at most ${ON_SCREEN_MAX_WORDS} words and 60 characters, only on the format's key lines (steps, swaps, the script to say, the verdict), 2-5 lines per reel (pattern for this format: ${LABEL_PATTERN[f.id]}). It complements the spoken line, never repeats it whole. "" on every other line, and ALWAYS "" on line 1 (the hook card owns the first seconds).`,
     "",
-    `LENGTH (CRITICAL): narration for a ${b.secLo}-${b.secHi} second reel at about ${b.wps} words per second = ${b.lo}-${b.hi} words in total, as ${b.minScenes}-${maxScenes} lines (never fewer than ${b.minScenes}, never more than ${maxScenes}). Every line is one image on screen for about 1.5-3.5 seconds. A script under ${b.lo} words is TOO SHORT and will be rejected. BEFORE ANSWERING, COUNT the lines and the words.`,
+    `LENGTH (CRITICAL): narration for a ${b.secLo}-${b.secHi} second reel at about ${b.wps} words per second = ${b.lo}-${b.hi} words in total, as ${b.minScenes}-${b.maxLines} lines (never fewer than ${b.minScenes}, never more than ${maxScenes}). Every line is one image on screen for about 1.5-3.5 seconds. Under ${b.lo} words is TOO SHORT and over ${b.hi} words is TOO LONG: both are rejected. BEFORE ANSWERING, COUNT the lines and the words.`,
     "",
-    `THE HOOK CARD: "hook_text" is the big title shown on screen over the first 3.5 seconds: at most ${HOOK_TEXT_MAX_WORDS} words, it COMPLEMENTS line 1 (adds the stakes or the twist) and never repeats it word for word (pattern: line 1 states the moment, the card names what is at stake or the twist). Fresh words for this story, never an example sentence from this brief. Keep it short and big on screen: ideally at most 8 words and 45 characters.`,
+    `THE HOOK CARD: "hook_text" is the big title shown on screen over the first 3.5 seconds: at most ${HOOK_TEXT_MAX_WORDS} words, it COMPLEMENTS line 1 and never repeats it word for word — ${HOOK_CARD[f.id]}. Fresh words for this reel, never an example sentence from this brief. Keep it short and big on screen: ideally at most 8 words and 45 characters.`,
+    "",
+    `SELF-CHECK BEFORE ANSWERING: line 1 has at most ${HOOK_LINE_MAX_WORDS} words, 'you'/'your' and a specific promise; at least ${q} quoted phrase${q === 1 ? "" : "s"} of exact words; no banned phrase and no I / we narration; ${b.lo}-${b.hi} words${topicHealth ? "; the safety line is there" : ""}; the last line ends warm.`,
     "",
     ...(guide ? [red ? RED_THREAD_STORY : CRAYON_STORY, ""] : []),
     "THE CAST:",
@@ -197,37 +254,41 @@ export function reelScriptPrompt({ topic, maxScenes, alreadyMade, speed, theme }
     castRules(dolls),
     ...(red ? [GREY_CAST_RULE] : []),
     "",
-    "THE SHOT LIST (CRITICAL — the owner's #1 complaint was nine pictures of 'mom holding baby'; every picture must be a DIFFERENT shot that moves the story):",
+    "PICTURES SHOW THE ADVICE: each line's picture acts out what that line says, as a concrete moment between the parent and the child ('get low' → the mother kneeling at eye level with her crying toddler; a 'say this' line → the parent saying it to the child; a step → the parent doing that step). Never a generic hug that ignores the line. Only the ONE parent and the ONE child ever appear (never lola, a sibling, a visitor or a crowd): when a line is about someone else, show the parent and the child reacting, or a plain object.",
+    "",
+    "THE SHOT LIST (CRITICAL — the owner's #1 complaint was nine pictures of 'mom holding baby'; every picture must be a DIFFERENT shot that follows the lines):",
     `- "shot_size": exactly one of ${REEL_SHOT_SIZES.join("|")}. Per 10 lines aim for about 2 wide, 3 medium, 2 close, 2 detail (an insert of hands, a small object, a texture) and 1 pov (through the mom's own eyes) or broll (a quiet cutaway of the place or an object, nobody in it).`,
     `- "subject": who is in the picture, exactly one of ${REEL_SUBJECTS.join("|")} — mom = the parent alone, baby = the child alone, both = the two together, object = a thing with nobody in it (tiny socks, a cold cup of coffee, the baby monitor glow), none = an empty place. Use 'both' on at most 4 lines in 10, and show no face (object, none, or a detail of hands) on at least 1 line in every 4.`,
     "- LINE 1 shows a FACE (mom, baby or both) in a close or medium shot — a striking, readable moment, never a calm establishing view. Line 2 or 3 is the establishing WIDE (the whole place).",
     "- Never the same shot_size with the same subject on two lines in a row; never more than 2 face shots in a row.",
-    "- The LAST line mirrors line 1: the same subject, the same setting and a similar framing, so the reel loops.",
+    "- The LAST line mirrors line 1: the same subject, the same setting and a similar framing.",
     ...(guide ? [red
       ? "- In this style the thread on the wrist must stay in view: face-free lines are very close detail views of the hands and wrists (subject mom, baby or both with shot_size detail); use subject object or none on at most 1 line."
       : "- In this style every picture of a person shows their face with a BIG, exaggerated expression (the guide's rule; a calm hands-only close-up comes out looking like a photo), so a detail line shows their hands doing something that matters AND their big expression. The face-free line is an object picture: subject object (a few named things on a simple background) on at most 1 line; the other face-free lines are those detail views."] : []),
     "",
     ...(guide ? guidePictureRules(red) : [
     "EACH LINE'S PICTURE (the art style and the cast details are added later by the image system, so keep it plain):",
-    `- "idea": what is in the picture — who (by their short names, e.g. ${name}) is doing what, or which object is shown — in one plain sentence that MATCHES the line and advances the story. Leave out the place (that goes in "setting"), art-style words, lighting, colours, lenses and framing jargon. Describe only what IS in the picture (never what is absent). Pictures carry no writing: never signs, labels, books with words, screens with text, letters or numbers.`,
+    `- "idea": what is in the picture — who (by their short names, e.g. ${name}) is doing what, or which object is shown — in one plain sentence that MATCHES the line. Leave out the place (that goes in "setting"), art-style words, lighting, colours, lenses and framing jargon. Describe only what IS in the picture (never what is absent). Pictures carry no writing: never signs, labels, books with words, screens with text, letters or numbers.`,
     ...(dolls ? [] : ["- PEOPLE, NOT DOLLS: this theme draws real people, so write every idea, action and cast line with people and real things — never doll, yarn, crochet, knitted, felt or wool wording for bodies or toys (say 'tiny feet', 'toy blocks')."]),
-    "- \"setting\": the place + time of day in at most 8 words ('the dim nursery at 3 a.m.', 'the sala on a rainy afternoon', 'a jeepney at dusk'). The story can move between a few places; the last line uses the SAME setting as line 1.",
+    "- \"setting\": the place + time of day in at most 8 words ('the dim nursery at 3 a.m.', 'the sala on a rainy afternoon', 'a jeepney at dusk'). The reel can move between a few places; the last line uses the SAME setting as line 1.",
     "- \"action\": the body language and what the hands do, in one short phrase ('kneels and cups the toddler's cheeks in both hands'); '' for object / none shots. Describe only what the body IS doing.",
     feelingRule(dolls, th.faces),
     ]),
-    `- "emotion": exactly one of ${REEL_EMOTIONS.join("|")}. Follow the story's wave; never the same emotion on more than 2 lines in a row.`,
-    `- "punch": the ONE stressed word or short phrase (at most ${PUNCH_MAX_WORDS} words, copied EXACTLY from that line's narration) that hits hardest, on at most ${PUNCH_MAX} lines in the whole reel (2-4 of the biggest beats, one of them at the emotional turn); "" on every other line.`,
+    `- "emotion": exactly one of ${REEL_EMOTIONS.join("|")}. Follow the reel's arc (validate, teach, relief); never the same emotion on more than 2 lines in a row.`,
+    `- "punch": the ONE stressed word or short phrase (at most ${PUNCH_MAX_WORDS} words, copied EXACTLY from that line's narration) that hits hardest, on at most ${PUNCH_MAX} lines in the whole reel (2-4 of the biggest beats, one of them on the key fix); "" on every other line.`,
     "- \"time_jump\": true only on a line that jumps forward or back in time ('Years later…', 'Tomorrow she'll be three.'); false otherwise and always false on line 1.",
+    "- \"beat\": hook on line 1, build on the body lines, turn on the 'why it works' / pivot line, close on the last line.",
     "",
     "Return ONLY JSON in EXACTLY this shape:",
     "{",
-    '  "title": "<short internal title, at most 60 characters, different from every already-made title>",',
+    '  "title": "<short internal title in plain words with spaces (never an id), at most 60 characters, different from every already-made title>",',
     '  "stage": "<exactly one of newborn|baby|toddler|preschooler>",',
+    `  "format": "${f.id}",`,
     `  "hook_text": "<the hook card, at most ${HOOK_TEXT_MAX_WORDS} words>",`,
     '  "cast": { "adult": "<exact fixed description>", "child": "<exact fixed description>", "adult_tag": "<at most 7 words>", "child_tag": "<at most 7 words>", "child_age": "<e.g. a 10-month-old baby boy>" },',
     guide
-      ? `  "scenes": [ { "beat": "<hook|build|turn|close>", "narration": "<the spoken line>", "scene": "<the picture, written to the style guide>", "feeling": "<completes 'The feeling is …'>", ${red ? `"thread": "<${REEL_THREADS.join("|")}>", ` : ""}"shot_size": "<${REEL_SHOT_SIZES.join("|")}>", "subject": "<${REEL_SUBJECTS.join("|")}>", "emotion": "<${REEL_EMOTIONS.join("|")}>", "punch": "<word(s) from the line, or empty>", "time_jump": <true|false> } ]`
-      : `  "scenes": [ { "beat": "<hook|build|turn|close>", "narration": "<the spoken line>", "idea": "<what is in the picture>", "setting": "<place + time of day>", "shot_size": "<${REEL_SHOT_SIZES.join("|")}>", "subject": "<${REEL_SUBJECTS.join("|")}>", "emotion": "<${REEL_EMOTIONS.join("|")}>", "action": "<body language + hands>", "punch": "<word(s) from the line, or empty>", "time_jump": <true|false> } ]`,
+      ? `  "scenes": [ { "beat": "<hook|build|turn|close>", "narration": "<the spoken line>", "scene": "<the picture, written to the style guide>", "feeling": "<completes 'The feeling is …'>", ${red ? `"thread": "<${REEL_THREADS.join("|")}>", ` : ""}"shot_size": "<${REEL_SHOT_SIZES.join("|")}>", "subject": "<${REEL_SUBJECTS.join("|")}>", "emotion": "<${REEL_EMOTIONS.join("|")}>", "punch": "<word(s) from the line, or empty>", "time_jump": <true|false>, "on_screen": "<a short label, or empty>" } ]`
+      : `  "scenes": [ { "beat": "<hook|build|turn|close>", "narration": "<the spoken line>", "idea": "<what is in the picture>", "setting": "<place + time of day>", "shot_size": "<${REEL_SHOT_SIZES.join("|")}>", "subject": "<${REEL_SUBJECTS.join("|")}>", "emotion": "<${REEL_EMOTIONS.join("|")}>", "action": "<body language + hands>", "punch": "<word(s) from the line, or empty>", "time_jump": <true|false>, "on_screen": "<a short label, or empty>" } ]`,
     "}",
   ].join("\n");
   return { system: REEL_SCRIPT_SYSTEM, prompt };
@@ -238,6 +299,7 @@ const SCHEMA: GeminiSchema = {
   properties: {
     title: { type: "STRING", description: "short internal title, at most 60 characters" },
     stage: { type: "STRING", enum: [...REEL_STAGES] },
+    format: { type: "STRING", enum: [...REEL_FORMATS] },
     hook_text: { type: "STRING", description: `the on-screen hook card, at most ${HOOK_TEXT_MAX_WORDS} words, complementing line 1` },
     cast: {
       type: "OBJECT",
@@ -259,12 +321,13 @@ const SCHEMA: GeminiSchema = {
           action: { type: "STRING", description: "body language + what the hands do, one short phrase" },
           punch: { type: "STRING", description: "a stressed word or short phrase copied from the narration, or empty" },
           time_jump: { type: "BOOLEAN" },
+          on_screen: { type: "STRING", nullable: true, description: `a short on-screen label (at most ${ON_SCREEN_MAX_WORDS} words) on step / swap / verdict lines, or empty; always empty on line 1` },
         },
-        required: ["beat", "narration", "idea", "setting", "shot_size", "subject", "emotion", "action", "punch", "time_jump"],
+        required: ["beat", "narration", "idea", "setting", "shot_size", "subject", "emotion", "action", "punch", "time_jump", "on_screen"],
       },
     },
   },
-  required: ["title", "stage", "hook_text", "cast", "scenes"],
+  required: ["title", "stage", "format", "hook_text", "cast", "scenes"],
 };
 
 /** Crayon / Red Thread: each line carries its [SCENE] + feeling (+ the thread) instead of idea / setting / action. */
@@ -291,8 +354,23 @@ const norm = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").tri
 export const lightClean = (s: string) => s.replace(/\b(?:at|into|towards?) (?:the |a )?camera\b/gi, "toward the viewer");
 /** Line 1 (and the hook card) must stop the scroll: no greeting, intro or page name. */
 export const GREETING_RE = /^(?:hi|hello|hey|hiya|welcome|greetings|good (?:morning|afternoon|evening|day)|kumusta|mabuhay|today (?:i|we)(?:'m| am| want| will|'ll)?|in (?:this|today's) (?:video|reel)|let me tell you|so,? today|unique names)\b/i;
-/** A spoken call to action (the playbook bans them: no follow / comment / tag / share / save / subscribe). */
-export const CTA_RE = /\b(?:follow (?:me|us|the page|this page|for more|along)|comment (?:below|down|if|your)|tag (?:a|your|someone|every|another)|share (?:this|it) (?:with|to)|save this|like and|hit (?:the )?(?:like|follow|share)|link in (?:the )?bio|subscribe)\b/i;
+/** A spoken call to action (the playbook bans them: no follow / comment / tag / share / save / subscribe / vote / like). */
+export const CTA_RE = /\b(?:follow (?:me|us|the page|this page|for more|along)|comment (?:below|down|if|your)|tag (?:a|your|someone|every|another)|share (?:this|it) (?:with|to)|save this|like and|like (?:this|if)|hit (?:the )?(?:like|follow|share)|link in (?:the )?bio|subscribe|vote (?:below|now|for|in the)|watch (?:till|until|to) the end|stay (?:till|until) the end)\b/i;
+/** A spoken sign-off (banned on every line). */
+export const OUTRO_RE = /\b(?:see you (?:next|in the next|tomorrow|soon)|thanks for watching|thank you for watching|next video|until next time|bye for now)\b/i;
+/** Narrator first person (the mom's own words in quotes and the "we all" of a hook are fine). Case-sensitive "I". */
+const FIRST_PERSON_I = /(?<![\p{L}'])I(?:'m|'ve|'ll|'d)?(?![\p{L}'])/u;
+const FIRST_PERSON = /(?<![\p{L}'])(?:me|my|mine|myself|we|we're|we've|we'll|us|our|ours)(?![\p{L}'])/iu;
+export { quoteCount, quotedPhrases } from "@/lib/reels/formats";
+/** A single-quoted phrase ('I'm here.') the mom says: never counted as the narrator's own words. */
+const SINGLE_QUOTE_RE = /(^|[\s:,(])'(.+?)'(?=$|[\s.,!?;:)])/g;
+/** The narrator's first-person word in the line (outside the quotes, without the hook's "we all"), or null. */
+export function narratorFirstPerson(line: string): string | null {
+  const out = line.replace(/[\u2018\u2019]/g, "'").replace(QUOTE_RE, " ").replace(SINGLE_QUOTE_RE, "$1 ").replace(/\bwe all\b/gi, " ");
+  return (out.match(FIRST_PERSON_I) ?? out.match(FIRST_PERSON))?.[0] ?? null;
+}
+/** A health topic's safety line names the doctor. */
+const SAFETY_RE = /\b(?:doctor|doctors|pediatrician|paediatrician|health center|health centre|clinic)\b/i;
 
 const PLACE = /\b(?:bed|beds|crib|cot|sala|living room|kitchen|room|bedroom|nursery|bathroom|bath|tub|garden|yard|park|street|sidewalk|road|jeepney|tricycle|car|bus|church|market|palengke|store|school|hospital|clinic|house|home|porch|doorway|door|stairs|window|sofa|couch|table|floor|mat|hammock|beach|lola's|veranda|balcony)\b/i;
 /** The idea already names a place of its own ("sets Leo down onto his bed"): its setting is not replaced. */
@@ -312,15 +390,33 @@ export function sentencesWithin(s: string, max: number): string {
   return out || `${s.slice(0, max).replace(/\s+\S*$/, "").replace(/[\s,;]+$/, "")}.`;
 }
 
+/** A line's on-screen label, or null: never on line 1, at most 8 words / 80 characters (a longer one is dropped). */
+export function cleanOnScreen(v: unknown, index: number): string | null {
+  if (index === 0) return null;
+  const s = str(v);
+  if (!s || words(s) > ON_SCREEN_MAX_WORDS || s.length > ON_SCREEN_MAX) return null;
+  return s;
+}
+
+export interface ValidateOptions {
+  /** The format the script was asked for (default: Gemini's own, else problem_fix). */
+  format?: ReelFormat;
+  /** A health topic: a safety line is required. */
+  health?: boolean;
+}
+
 /**
  * Check and normalise Gemini's JSON into a script (shot list repaired), or say what is wrong. `themeId` = the reel's
  * theme: Crayon and Red Thread lines carry a guide [SCENE] (stored as the idea), a feeling and (Red Thread) a thread.
+ * The value-first rules: no greeting / outro / call to action / narrator "I" on any line, enough quoted phrases for the
+ * format, a safety line on a health topic, 30-45 s of words; on-screen labels are cleaned, never rejected.
  */
-export function validateReelScript(raw: unknown, maxScenes: number, speed = 1, themeId?: string | null): ReelScriptResult {
+export function validateReelScript(raw: unknown, maxScenes: number, speed = 1, themeId?: string | null, opts: ValidateOptions = {}): ReelScriptResult {
   const guide = isGuideThemeId(themeId);
   const red = themeId === "redthread";
   const d = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
-  const title = str(d.title);
+  // a title written like an id ("lola_science_bath") is turned back into words
+  const title = str(d.title).replace(/_+/g, " ").trim();
   if (!title) return { ok: false, error: "The script has no title." };
   if (title.length > TITLE_MAX) return { ok: false, error: `The title is longer than ${TITLE_MAX} characters.` };
   const stage = REEL_STAGES.find((x) => x === str(d.stage).toLowerCase());
@@ -336,12 +432,13 @@ export function validateReelScript(raw: unknown, maxScenes: number, speed = 1, t
   // the child's age is pinned on every reel (from the description or the stage when Gemini gave none)
   const age = childAge(cast, stage);
   if (age) cast.child_age = age;
+  const format: ReelFormat = opts.format ?? (isReelFormat(str(d.format)) ? (str(d.format) as ReelFormat) : "problem_fix");
   const list = Array.isArray(d.scenes) ? d.scenes.slice(0, maxScenes) : [];
   if (list.length < 2) return { ok: false, error: "The script needs at least 2 scenes." };
   const budget = reelWordBudget(maxScenes, speed);
   const lines: {
     beat: string; narration: string; idea: string; setting: string; emotion: ReelEmotion; action: string;
-    feeling: string | null; thread: ReelThread | null;
+    feeling: string | null; thread: ReelThread | null; on_screen: string | null;
   }[] = [];
   const raws: Record<string, unknown>[] = [];
   for (const [i, s] of list.entries()) {
@@ -350,6 +447,10 @@ export function validateReelScript(raw: unknown, maxScenes: number, speed = 1, t
     if (!narration) return { ok: false, error: `Line ${i + 1} has no words.` };
     if (words(narration) > LINE_MAX_WORDS) return { ok: false, error: `Line ${i + 1} is longer than ${LINE_MAX_WORDS} words.` };
     if (CTA_RE.test(narration)) return { ok: false, error: `Line ${i + 1} asks viewers to follow, comment, tag or share.` };
+    if (i === 0 && GREETING_RE.test(narration)) return { ok: false, error: "Line 1 is a greeting, not a hook." };
+    if (GREETING_RE.test(narration) || OUTRO_RE.test(narration)) return { ok: false, error: `Line ${i + 1} is a greeting or an outro.` };
+    const me = narratorFirstPerson(narration);
+    if (me) return { ok: false, error: `Line ${i + 1} speaks as I / we ("${me}"): talk to the mom as you.` };
     // A feeling Gemini made up falls back to tender; the body-language note and the setting are optional.
     const emotion = emotionOf(o.emotion) ?? "tender";
     // Crayon / Red Thread: the guide [SCENE] is the idea (framing words, the feeling sentence, viewer looks, absent
@@ -360,24 +461,31 @@ export function validateReelScript(raw: unknown, maxScenes: number, speed = 1, t
     if (i === 0 && words(narration) > HOOK_LINE_MAX_WORDS) {
       return { ok: false, error: `Line 1 is too long for a hook (${words(narration)} words; at most ${HOOK_LINE_MAX_WORDS}).` };
     }
-    if (i === 0 && GREETING_RE.test(narration)) return { ok: false, error: "Line 1 is a greeting, not a hook." };
     const beat = BEATS.includes(str(o.beat)) ? str(o.beat) : "build";
     const action = guide ? "" : lightClean(str(o.action)).slice(0, ACTION_MAX).trim();
     const setting = guide ? "" : lightClean(str(o.setting)).replace(/\s+—\s+/g, ", ").slice(0, SETTING_MAX).trim();
     const feeling = guide ? (cleanFeeling(o.feeling) || scene!.feeling || FEELING_FOR_EMOTION[emotion]) : null;
     const thread = red ? threadFor(o.thread, emotion) : null;
-    lines.push({ beat, narration, idea, setting, emotion, action, feeling, thread });
+    lines.push({ beat, narration, idea, setting, emotion, action, feeling, thread, on_screen: cleanOnScreen(o.on_screen, i) });
     raws.push(o);
   }
+  // at most 5 labels per reel: the first ones stay
+  let labels = 0;
+  for (const x of lines) if (x.on_screen && ++labels > ON_SCREEN_MAX_LINES) x.on_screen = null;
   if (lines.length < budget.minScenes) return { ok: false, error: `Script too short: ${lines.length} scenes (needs at least ${budget.minScenes}).` };
   const total = lines.reduce((n, x) => n + words(x.narration), 0);
   if (total < budget.minWords) return { ok: false, error: `Script too short: ${total} words (needs at least ${budget.minWords}).` };
+  if (total > budget.maxWords) return { ok: false, error: `Script too long: ${total} words (at most ${budget.maxWords}).` };
 
   const hook_text = str(d.hook_text);
   if (!hook_text) return { ok: false, error: "The script has no hook card." };
   if (words(hook_text) > HOOK_TEXT_MAX_WORDS || hook_text.length > HOOK_TEXT_MAX) return { ok: false, error: `The hook card is longer than ${HOOK_TEXT_MAX_WORDS} words.` };
   if (GREETING_RE.test(hook_text) || CTA_RE.test(hook_text)) return { ok: false, error: "The hook card is a greeting or a call to action, not a hook." };
   if (norm(hook_text) === norm(lines[0].narration)) return { ok: false, error: "The hook card repeats line 1 instead of adding to it." };
+  const need = FORMAT_SPECS[format].minQuotes;
+  const quotes = quoteCount(lines.map((x) => x.narration));
+  if (quotes < need) return { ok: false, error: `The script needs the exact words to say in quotes (at least ${need}, found ${quotes}).` };
+  if (opts.health && !lines.some((x) => SAFETY_RE.test(x.narration))) return { ok: false, error: "A health topic needs a safety line (when to call the doctor)." };
 
   // the shot list follows the rules (lib/reels/shots) without overriding a size the idea implies; the repair only
   // changes the shot (the prompt's size + lens part), never the idea's words. The last line is set where line 1 is (the
@@ -391,9 +499,9 @@ export function validateReelScript(raw: unknown, maxScenes: number, speed = 1, t
   const scenes: ReelScriptScene[] = lines.map((x, i) => ({
     beat: x.beat, narration: x.narration, idea: joinIdea(x.idea, x.setting), emotion: x.emotion, action: x.action,
     shot_size: shots[i].shot_size, subject: shots[i].subject, punch: punches[i], time_jump: i > 0 && raws[i].time_jump === true,
-    ...(guide ? { feeling: x.feeling, thread: x.thread } : {}),
+    ...(guide ? { feeling: x.feeling, thread: x.thread } : {}), on_screen: x.on_screen,
   }));
-  return { ok: true, script: { title, stage, cast, hook_text, scenes } };
+  return { ok: true, script: { title, stage, format, cast, hook_text, scenes } };
 }
 
 /** Write a reel script with Gemini. Never throws. */
@@ -406,7 +514,7 @@ export async function writeReelScript(input: ReelScriptInput): Promise<ReelScrip
       parse: (x) => (x && typeof x === "object" && !Array.isArray(x) ? (x as Record<string, unknown>) : null),
     });
     if (!r.ok) return { ok: false, error: r.error };
-    return validateReelScript(r.data, input.maxScenes, input.speed, input.theme?.id ?? DEFAULT_THEME_ID);
+    return validateReelScript(r.data, input.maxScenes, input.speed, input.theme?.id ?? DEFAULT_THEME_ID, { format: input.format, health: input.topicHealth });
   } catch (e) {
     return { ok: false, error: `Could not write the script (${e instanceof Error ? e.message.slice(0, 120) : "unknown error"}).` };
   }

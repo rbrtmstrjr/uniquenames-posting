@@ -101,3 +101,7 @@ export function pickTopic(format: ReelFormat, recentIds: string[], rng: () => nu
 }
 
 export const topicById = (id: string | null | undefined) => REEL_TOPICS.find((t) => t.id === id) ?? null;
+
+/** A typed topic about fever, illness, sleep safety, choking, allergies or medicine: the script gets the health rules. */
+const HEALTH_WORDS = /\b(?:fever|feverish|cough\w*|vomit\w*|throw(?:s|ing)? up|rash\w*|diarrh\w*|sick|illness|sleep safety|safe sleep|sids|chok\w*|allerg\w*|medicine\w*|medication\w*|dose|teething pain|dehydrat\w*)\b/i;
+export const isHealthTopic = (topic: string | null | undefined) => HEALTH_WORDS.test(topic ?? "");

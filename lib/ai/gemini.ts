@@ -12,6 +12,7 @@ export interface GeminiSchema {
   required?: string[];
   items?: GeminiSchema;
   enum?: string[];
+  nullable?: boolean;
   maxItems?: number;
   minItems?: number;
 }

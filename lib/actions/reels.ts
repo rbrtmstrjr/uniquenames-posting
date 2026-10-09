@@ -11,6 +11,8 @@ import { imagePrompt } from "@/lib/reels/image-prompt";
 import { punchIn } from "@/lib/reels/shots";
 import { DEFAULT_THEME_ID, isThemeId, LEGACY_THEME_ID, staticTheme, THEME_PARTIAL, themeOf, type ReelTheme } from "@/lib/reels/themes";
 import { speedOf } from "@/lib/reels/voices";
+import { isReelFormat, nextFormat, type ReelFormat } from "@/lib/reels/formats";
+import { isHealthTopic, pickTopic, REEL_TOPICS, TOPIC_WINDOW, topicById } from "@/lib/reels/topics";
 import { generateLockReason } from "./generate-guard";
 import { UUID_RE } from "./helpers";
 import { fail, requireOwner, type ActionResult } from "./result";
@@ -53,6 +55,8 @@ const dbFail = (e: DbError) => fail(missing005(e) ? NEEDS_005 : e.message);
 const COLS_007 = ["emotion", "action", "shot", "key_moment", "motion", "theme_id"] as const;
 const COLS_008 = ["shot_size", "subject", "punch", "time_jump", "hook_text"] as const;
 const COLS_012 = ["feeling", "thread"] as const;
+/** 014: the reel's format + topic-bank id and each line's on-screen label. */
+const COLS_014 = ["format", "topic_id", "on_screen"] as const;
 const missingColumn = (e: DbError, cols: readonly string[]) =>
   (e.code === "PGRST204" || e.code === "42703" || /schema cache/i.test(e.message)) &&
   new RegExp(`\\b(${cols.join("|")})\\b`).test(e.message);
@@ -60,15 +64,18 @@ const missingColumn = (e: DbError, cols: readonly string[]) =>
 const missing007Column = (e: DbError) => missingColumn(e, COLS_007);
 const missing008Column = (e: DbError) => missingColumn(e, COLS_008);
 const missing012Column = (e: DbError) => missingColumn(e, COLS_012);
+const missing014Column = (e: DbError) => missingColumn(e, COLS_014);
 const drop = (row: Record<string, unknown>, cols: readonly string[]) => Object.fromEntries(Object.entries(row).filter(([k]) => !cols.includes(k)));
+/** Before 014: no format / topic id on the reel, no on-screen label per line. */
+const without014 = (row: Record<string, unknown>) => drop(row, COLS_014);
 /** Before 012: no feeling / thread per line (the image prompt was already built with them). */
-const without012 = (row: Record<string, unknown>) => drop(row, COLS_012);
+const without012 = (row: Record<string, unknown>) => drop(row, [...COLS_012, ...COLS_014]);
 /** Before 008: no shot list / punch / hook card, and 'hold' is not a valid move yet (it plays as a push-in). */
 const without008 = (row: Record<string, unknown>) => {
-  const r = drop(row, [...COLS_008, ...COLS_012]);
+  const r = drop(row, [...COLS_008, ...COLS_012, ...COLS_014]);
   return r.motion === "hold" ? { ...r, motion: "push_in" } : r;
 };
-const without007 = (row: Record<string, unknown>) => drop(row, [...COLS_007, ...COLS_008, ...COLS_012]);
+const without007 = (row: Record<string, unknown>) => drop(row, [...COLS_007, ...COLS_008, ...COLS_012, ...COLS_014]);
 
 const oneLine = (s: unknown) => (typeof s === "string" ? s.replace(/\s+/g, " ").trim() : "");
 /** Case- and space-insensitive title key ("Old  Title" = "old title" = "OldTitle"). */
@@ -99,6 +106,8 @@ interface ScriptSettings {
   themeId: string | null;
   /** Migration 007 has run (settings has reel_theme_id): the theme and per-line columns exist. */
   has007: boolean;
+  /** Migration 014 has run (settings has reel_labels): reels.format / topic_id and reel_scenes.on_screen exist. */
+  has014: boolean;
 }
 
 /** Images per reel, the narration speed (1 before 006: the old worker never speeds the voice up) and the default theme. */
@@ -111,6 +120,7 @@ async function scriptSettings(sb: SB): Promise<ScriptSettings> {
   return {
     maxScenes: Number.isInteger(n) ? Math.min(40, Math.max(10, n)) : 40, speed,
     themeId: has007 && isThemeId(row!.reel_theme_id) ? row!.reel_theme_id! : null, has007,
+    has014: has007 && "reel_labels" in row!,
   };
 }
 
@@ -128,15 +138,50 @@ async function loadTheme(sb: SB, id: string | null | undefined, has007: boolean)
   return themeOf(data, want);
 }
 
+/** The latest reels' formats and topic-bank ids, newest first (select *: before 014 the fields are simply absent). */
+async function recentReels(sb: SB): Promise<{ formats: (string | null)[]; topicIds: string[] }> {
+  const { data } = await sb.from("reels").select("*").order("created_at", { ascending: false }).limit(TOPIC_WINDOW);
+  const rows = (data ?? []) as Partial<ReelRow>[];
+  return {
+    formats: rows.map((r) => r.format ?? null),
+    // a reel from before 014 (or a typed topic equal to a bank one) is matched by its topic text
+    topicIds: rows.map((r) => r.topic_id ?? REEL_TOPICS.find((t) => t.topic === r.topic)?.id).filter((x): x is string => !!x),
+  };
+}
+
+/** What a script is written about: the topic, its format, its bank id (null = typed by the owner) and the health flag. */
+interface ScriptBrief { topic: string | undefined; format: ReelFormat; topicId: string | null; health: boolean }
+
 /**
- * Gemini writes a script for the reel's theme; a title already made (case/space-insensitive) or a script that fails
- * validation is rewritten, up to 2 times, all within one 270 s budget (each call gets at most 120 s).
+ * The brief of a new script. `keep` (New script): the reel's own format and topic when it has them. Otherwise the
+ * format rotates (never the latest reel's, else the least recently used of the last 5) and a blank topic is picked from
+ * the bank (not used by the last 15 reels, preferring the format).
  */
-async function draftScript(sb: SB, topic: string | undefined, reelThemeId?: string | null): Promise<ActionResult<{ script: ReelScript; theme: ReelTheme; has007: boolean }>> {
+async function scriptBrief(sb: SB, topic: string | undefined, keep?: { format?: string | null; topicId?: string | null }): Promise<ScriptBrief> {
+  // New script of a reel from before 014 whose topic is a bank idea: the same idea
+  const bank = topicById(keep?.topicId) ?? (keep && topic ? REEL_TOPICS.find((t) => t.topic === topic) ?? null : null);
+  const keptFormat = isReelFormat(keep?.format) ? keep!.format as ReelFormat : null;
+  if (keptFormat && bank) return { topic: bank.topic, format: keptFormat, topicId: bank.id, health: bank.health };
+  if (bank) topic = bank.topic;
+  const recent = keptFormat && topic ? null : await recentReels(sb);
+  const format = keptFormat ?? nextFormat(recent!.formats);
+  if (bank) return { topic: bank.topic, format, topicId: bank.id, health: bank.health };
+  if (topic) return { topic, format, topicId: null, health: isHealthTopic(topic) };
+  const pick = pickTopic(format, recent!.topicIds);
+  return { topic: pick.topic, format, topicId: pick.id, health: pick.health };
+}
+
+interface Draft { script: ReelScript; theme: ReelTheme; has007: boolean; has014: boolean; brief: ScriptBrief }
+
+/**
+ * Gemini writes a script for the reel's theme in its format; a title already made (case/space-insensitive) or a script
+ * that fails validation is rewritten, up to 2 times, all within one 270 s budget (each call gets at most 120 s).
+ */
+async function draftScript(sb: SB, topic: string | undefined, reelThemeId?: string | null, keep?: { format?: string | null; topicId?: string | null }): Promise<ActionResult<Draft>> {
   const [made, set] = await Promise.all([madeReels(sb), scriptSettings(sb)]);
   if (made.error) return dbFail(made.error);
-  const { maxScenes, speed, has007 } = set;
-  const theme = await loadTheme(sb, reelThemeId ?? set.themeId, has007);
+  const { maxScenes, speed, has007, has014 } = set;
+  const [theme, brief] = await Promise.all([loadTheme(sb, reelThemeId ?? set.themeId, has007), scriptBrief(sb, topic, keep)]);
   const taken = new Set(made.rows.map((m) => titleKey(m.title ?? "")));
   const alreadyMade = made.rows.map((m) => ({ title: m.title, stage: m.stage ?? null }));
   const deadline = Date.now() + SCRIPT_BUDGET_MS;
@@ -144,13 +189,17 @@ async function draftScript(sb: SB, topic: string | undefined, reelThemeId?: stri
   for (let i = 0; i < TRIES; i++) {
     const left = deadline - Date.now();
     if (left < CALL_MIN_MS) break;
-    const r = await writeReelScript({ topic, maxScenes, alreadyMade, speed, theme: { id: theme.id, faces: theme.faces }, timeoutMs: Math.min(CALL_MAX_MS, left) });
+    const r = await writeReelScript({
+      topic: brief.topic, format: brief.format, topicHealth: brief.health, maxScenes, alreadyMade, speed,
+      theme: { id: theme.id, faces: theme.faces }, timeoutMs: Math.min(CALL_MAX_MS, left),
+    });
     if (!r.ok) { last = r.error; continue; }
     if (taken.has(titleKey(r.script.title))) {
       last = `Gemini kept picking a title you already made ("${r.script.title}"). Try again, or type a topic.`;
       continue;
     }
-    return { ok: true, script: r.script, theme, has007 };
+    // the format asked for is the reel's format (Gemini's own answer never overrides it)
+    return { ok: true, script: { ...r.script, format: brief.format }, theme, has007, has014, brief };
   }
   return fail(last.startsWith("Gemini kept") ? last : `Could not write the script: ${last}`);
 }
@@ -160,7 +209,7 @@ async function draftScript(sb: SB, topic: string | undefined, reelThemeId?: stri
  * move, (008) its shot size, subject, punch word and time jump (key_moment = has a punch, for the 007 worker), and
  * (012, Crayon / Red Thread only) its "The feeling is ..." phrase and thread state.
  */
-const sceneRows = (reelId: string, s: ReelScript, theme: ReelTheme, has007: boolean) => {
+const sceneRows = (reelId: string, s: ReelScript, theme: ReelTheme, has007: boolean, has014 = false) => {
   const motions = assignMotion(s.scenes);
   return s.scenes.map((x, i) => ({
     reel_id: reelId, position: i + 1, beat: x.beat, idea: x.idea, narration: x.narration,
@@ -169,13 +218,15 @@ const sceneRows = (reelId: string, s: ReelScript, theme: ReelTheme, has007: bool
       emotion: x.emotion, action: x.action || null, key_moment: !!x.punch, motion: motions[i],
       shot_size: x.shot_size, subject: x.subject, punch: x.punch, time_jump: x.time_jump,
       ...(x.feeling ? { feeling: x.feeling } : {}), ...(x.thread ? { thread: x.thread } : {}),
+      ...(has014 ? { on_screen: x.on_screen ?? null } : {}),
     } : {}),
   }));
 };
 
 /**
- * Insert rows; a database still missing a 012 column gets them without the 012 fields, one missing a 008 column
- * without the 008 + 012 fields, one missing a 007 column without all three.
+ * Insert rows; a database still missing a 014 column gets them without the 014 fields, one missing a 012 column
+ * without the 012 + 014 fields, one missing a 008 column without the 008 + 012 + 014 fields, one missing a 007 column
+ * without all four.
  */
 async function insertCompat(sb: SB, table: "reels" | "reel_scenes", rows: Record<string, unknown> | Record<string, unknown>[], select?: string) {
   const run = (r: typeof rows) => {
@@ -184,6 +235,7 @@ async function insertCompat(sb: SB, table: "reels" | "reel_scenes", rows: Record
   };
   const map = (f: (r: Record<string, unknown>) => Record<string, unknown>) => (Array.isArray(rows) ? rows.map(f) : f(rows));
   let res = await run(rows);
+  if (res.error && missing014Column(res.error)) res = await run(map(without014));
   if (res.error && missing012Column(res.error)) res = await run(map(without012));
   if (res.error && missing008Column(res.error)) res = await run(map(without008));
   if (res.error && missing007Column(res.error)) res = await run(map(without007));
@@ -227,19 +279,21 @@ export async function writeReelScriptAction(input: { topic?: string }): Promise<
   const d = await draftScript(sb, topic);
   if (!d.ok) return d;
   const s = d.script;
-  // The theme is pinned on the reel: its image prompts are built with it (and the PC reads it, e.g. grayscale).
+  // The theme is pinned on the reel: its image prompts are built with it (and the PC reads it, e.g. grayscale). The
+  // reel's topic is the owner's, or the bank idea it was written about (014 also keeps the idea's id and the format).
   const { data, error } = await insertCompat(sb, "reels", {
-    title: s.title, topic: topic ?? null, stage: s.stage, doll_cast: s.cast, status: "script",
+    title: s.title, topic: d.brief.topic ?? null, stage: s.stage, doll_cast: s.cast, status: "script",
     ...(d.has007 ? { theme_id: d.theme.id, hook_text: s.hook_text } : {}),
+    ...(d.has014 ? { format: s.format, topic_id: d.brief.topicId } : {}),
   }, "id");
   if (error || !data) return error ? dbFail(error) : fail("Could not save the reel.");
   const reelId = (data as unknown as { id: string }).id;
-  const { error: se } = await insertCompat(sb, "reel_scenes", sceneRows(reelId, s, d.theme, d.has007));
+  const { error: se } = await insertCompat(sb, "reel_scenes", sceneRows(reelId, s, d.theme, d.has007, d.has014));
   if (se) {
     await sb.from("reels").delete().eq("id", reelId);
     return fail(missing005(se) ? NEEDS_005 : `Could not save the script: ${se.message}`);
   }
-  captionLater(sb, { id: reelId, title: s.title, topic: topic ?? null, stage: s.stage, hook_text: s.hook_text, lines: s.scenes.map((x) => x.narration) }, false);
+  captionLater(sb, { id: reelId, title: s.title, topic: d.brief.topic ?? null, stage: s.stage, hook_text: s.hook_text, format: s.format, lines: s.scenes.map((x) => x.narration) }, false);
   revalidatePath("/reels", "layout");
   return { ok: true, reelId };
 }
@@ -254,23 +308,26 @@ export async function rewriteReelScriptAction(reelId: string): Promise<ActionRes
   if (!reel) return fail(NOT_FOUND);
   if (reel.status !== "script") return fail("This reel was already approved, so its script can't change.");
   // The reel keeps its theme; null = a legacy reel or a deleted theme: Knitted Doll.
-  const d = await draftScript(sb, reel.topic ?? undefined, "theme_id" in reel ? (reel.theme_id ?? LEGACY_THEME_ID) : undefined);
+  // Same topic (the owner's, or the same bank idea) and, from 014, the same format.
+  const d = await draftScript(sb, reel.topic ?? undefined, "theme_id" in reel ? (reel.theme_id ?? LEGACY_THEME_ID) : undefined,
+    { format: reel.format, topicId: reel.topic_id });
   if (!d.ok) return d;
   const s = d.script;
   const { data, error: ue } = await sb.from("reels")
     .update({
       title: s.title, stage: s.stage, doll_cast: s.cast, ...(d.has007 && "theme_id" in reel ? { theme_id: d.theme.id } : {}),
-      ...("hook_text" in reel ? { hook_text: s.hook_text } : {}), version: reel.version + 1,
+      ...("hook_text" in reel ? { hook_text: s.hook_text } : {}),
+      ...("format" in reel ? { format: s.format, topic_id: d.brief.topicId } : {}), version: reel.version + 1,
     })
     .eq("id", reelId).eq("version", reel.version).eq("status", "script").select("id");
   if (ue) return dbFail(ue);
   if (!data?.length) return fail(STALE);
   const { error: de } = await sb.from("reel_scenes").delete().eq("reel_id", reelId);
   if (de) return fail(`Could not replace the script: ${de.message}`);
-  const { error: ie } = await insertCompat(sb, "reel_scenes", sceneRows(reelId, s, d.theme, d.has007));
+  const { error: ie } = await insertCompat(sb, "reel_scenes", sceneRows(reelId, s, d.theme, d.has007, d.has014 && "format" in reel));
   if (ie) return fail(`The new script's lines could not be saved (${ie.message}). Tap New script again.`);
   // A new script gets a new caption (the old one was about the old script).
-  if ("caption" in reel) captionLater(sb, { id: reelId, title: s.title, topic: reel.topic, stage: s.stage, hook_text: s.hook_text, lines: s.scenes.map((x) => x.narration) }, true);
+  if ("caption" in reel) captionLater(sb, { id: reelId, title: s.title, topic: reel.topic, stage: s.stage, hook_text: s.hook_text, format: s.format, lines: s.scenes.map((x) => x.narration) }, true);
   return done();
 }
 

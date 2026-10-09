@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { FORMAT_SPECS, nextFormat, REEL_FORMATS, isReelFormat } from "@/lib/reels/formats";
-import { pickTopic, REEL_TOPICS } from "@/lib/reels/topics";
+import { FORMAT_SPECS, keyPhrase, nextFormat, REEL_FORMATS, isReelFormat } from "@/lib/reels/formats";
+import { isHealthTopic, pickTopic, REEL_TOPICS, topicById } from "@/lib/reels/topics";
 
 describe("REEL_FORMATS / FORMAT_SPECS", () => {
   it("five formats, each with a label, its beats and the quotes it needs", () => {
@@ -94,5 +94,28 @@ describe("pickTopic", () => {
     expect(lola).not.toContain(t.id);
     const all = REEL_TOPICS.map((x) => x.id);
     expect(all).toContain(pickTopic("problem_fix", all, seq(0.42)).id);
+  });
+});
+
+describe("isHealthTopic / topicById", () => {
+  it("a typed topic about fever, coughs, vomiting, rashes, sleep safety, choking, allergies or medicine is a health topic", () => {
+    for (const t of ["Baby has a fever at night", "Toddler cough that won't stop", "When your baby vomits after milk", "Diaper rash", "Safe sleep for newborns",
+      "Choking on grapes", "Peanut allergy first taste", "Giving medicine to a toddler"]) expect(isHealthTopic(t), t).toBe(true);
+    for (const t of ["Sharing toys with a cousin", "Bedtime stalling", "", null]) expect(isHealthTopic(t), String(t)).toBe(false);
+  });
+  it("finds a bank topic by id", () => {
+    expect(topicById("kulob-fever")?.health).toBe(true);
+    expect(topicById("nope")).toBeNull();
+    expect(topicById(null)).toBeNull();
+  });
+});
+
+describe("keyPhrase", () => {
+  it("the first quoted words to say; a phrase to stop saying is skipped; null without quotes", () => {
+    expect(keyPhrase(['Stop saying "calm down." Try this.', `Get low: "You're mad. Tower fell."`])).toBe("You're mad. Tower fell.");
+    expect(keyPhrase([`Instead of "Don't run," say "Walking feet, please."`])).toBe("Walking feet, please.");
+    // only a phrase to stop saying: it is still the reel's phrase
+    expect(keyPhrase(["Instead of “Good job!”"])).toBe("Good job!");
+    expect(keyPhrase(["No quotes at all."])).toBeNull();
   });
 });
