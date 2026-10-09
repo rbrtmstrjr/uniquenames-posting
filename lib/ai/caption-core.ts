@@ -73,17 +73,20 @@ export const RETRY_MIN_MS = 3000;
 
 /**
  * Ask Gemini for {caption, tags}, clean the caption, and check it: bait is never accepted; any
- * other `problem` (a repeated opener, …) earns one corrective retry while time allows, after which
- * the last usable caption is kept. Null on any failure. Never throws.
+ * other `problem` (a repeated opener, …) earns a corrective retry (`attempts` in all, default 2)
+ * while time allows, after which the usable caption with the lowest `penalty` is kept (ties: the
+ * later one; no penalty = the last usable one). Null on any failure. Never throws.
  */
 export async function askCaption(o: {
   system: string; prompt: string; maxTags: number; max: number; min: number; timeoutMs: number; label: string;
   problem: (line: string) => string | null;
+  attempts?: number; penalty?: (line: string) => number;
 }): Promise<AiCaption | null> {
   const deadline = Date.now() + o.timeoutMs;
   let usable: AiCaption | null = null;
+  let usablePenalty = Infinity;
   let note = "";
-  for (let attempt = 0; attempt < 2; attempt++) {
+  for (let attempt = 0; attempt < (o.attempts ?? 2); attempt++) {
     const left = deadline - Date.now();
     if (left <= 0 || (attempt > 0 && left < RETRY_MIN_MS)) break;
     const r = await generateJson({
@@ -99,7 +102,8 @@ export async function askCaption(o: {
     const result = { line, tags: Array.isArray(r.data.tags) ? r.data.tags : [] };
     const problem = o.problem(line);
     if (!problem) return result;
-    usable = result;
+    const penalty = o.penalty?.(line) ?? 0;
+    if (penalty <= usablePenalty) { usable = result; usablePenalty = penalty; }
     note = `\n\nYour last caption ("${line}") ${problem}. Write a clearly different one.`;
   }
   return usable;

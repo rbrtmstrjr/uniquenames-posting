@@ -9,7 +9,7 @@ vi.mock("@/lib/supabase/server", () => ({ createClient: async () => fake.client,
 vi.mock("next/cache", () => ({ revalidatePath: () => {} }));
 const { generateJson } = vi.hoisted(() => ({ generateJson: vi.fn() }));
 vi.mock("@/lib/ai/gemini", () => ({ generateJson }));
-const { createPostAction, rewriteCaptionAction } = await import("@/lib/actions/posts");
+const { createPostAction, rewriteCaptionAction, updateCaptionAction } = await import("@/lib/actions/posts");
 const { saveSettingsAction } = await import("@/lib/actions/settings");
 
 const REQ = "11111111-1111-4111-8111-111111111111";
@@ -171,6 +171,33 @@ describe("createPostAction captions", () => {
       expect(generateJson).toHaveBeenCalledTimes(1);
       expect(createdCaption()).toBe("Lovely names for your baby boy.\n\n#uniquenames #babynames #babyboynames");
     } finally { spy.mockRestore(); }
+  });
+});
+
+describe("updateCaptionAction (hand edits and Undo)", () => {
+  it("new words: the hashtag set is read from the saved text (lower-cased) and the style is cleared", async () => {
+    expect(await updateCaptionAction(POST_ID, "My own seaside words.\n\n#UniqueNames #momlife")).toEqual({ ok: true });
+    expect(postUpdates()).toEqual([{ caption: "My own seaside words.\n\n#UniqueNames #momlife", hashtag_set: "#uniquenames #momlife", caption_style: null }]);
+  });
+  it("only the hashtags changed: the generated style is kept, the set follows the text", async () => {
+    expect(await updateCaptionAction(POST_ID, "Old seaside words.   Which one?\n\n#newmom #uniquenames")).toEqual({ ok: true });
+    expect(postUpdates()).toEqual([{ caption: "Old seaside words.   Which one?\n\n#newmom #uniquenames", hashtag_set: "#newmom #uniquenames", caption_style: "story" }]);
+  });
+  it("no hashtags left: the set is empty (null)", async () => {
+    await updateCaptionAction(POST_ID, "Old seaside words. Which one?");
+    expect(postUpdates()).toEqual([{ caption: "Old seaside words. Which one?", hashtag_set: null, caption_style: "story" }]);
+  });
+  it("before 009: saves the caption alone", async () => {
+    world(legacySettings, { pre009: true });
+    expect(await updateCaptionAction(POST_ID, "Mine now #babynames")).toEqual({ ok: true });
+    expect(postUpdates().at(-1)).toEqual({ caption: "Mine now #babynames" });
+  });
+  it("a missing post or an over-long caption writes nothing", async () => {
+    const inner = respond;
+    respond = (q) => (q.table === "posts" && !isUpdate(q) ? { data: null } : inner(q));
+    expect(await updateCaptionAction(POST_ID, "Hi")).toEqual({ ok: false, error: "Post not found." });
+    expect(await updateCaptionAction(POST_ID, "x".repeat(5001))).toMatchObject({ ok: false });
+    expect(postUpdates()).toHaveLength(0);
   });
 });
 

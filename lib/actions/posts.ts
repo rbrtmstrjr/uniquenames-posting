@@ -117,10 +117,30 @@ export async function setPostedAction(postId: string, posted: boolean): Promise<
   return { ok: true };
 }
 
+/** A caption's words (no hashtags), whitespace collapsed: "is this still the generated text?" */
+const captionWords = (caption: string | null | undefined) => splitCaption(caption ?? "").text.replace(/\s+/g, " ");
+
+/**
+ * Save a caption edited by hand (or put back by Undo). The stored hashtag set (009) becomes the tags
+ * actually in the text, so the "never the set of the last 10 posts" check stays honest; the caption
+ * style is kept only while the words still match the generated caption (a hashtag-only edit), else null.
+ */
 export async function updateCaptionAction(postId: string, caption: string): Promise<ActionResult> {
   await requireOwner();
   if (caption.length > 5000) return fail("The caption is too long.");
-  const { data, error } = await (await createClient()).from("posts").update({ caption }).eq("id", postId).select("id");
+  const sb = await createClient();
+  const { data: post, error: readError } = await sb.from("posts").select("*").eq("id", postId).maybeSingle();
+  if (readError) return fail(readError.message);
+  if (!post) return fail("Post not found.");
+  const p = post as Partial<PostRow>;
+  const tags = tagsInText(caption);
+  const meta = {
+    hashtag_set: tags.length ? tags.join(" ") : null,
+    caption_style: captionWords(caption) === captionWords(p.caption) ? (p.caption_style ?? null) : null,
+  };
+  let { data, error } = await sb.from("posts").update({ caption, ...meta }).eq("id", postId).select("id");
+  // Before 009 there is no style / hashtag set column: save the caption alone.
+  if (missing009(error)) ({ data, error } = await sb.from("posts").update({ caption }).eq("id", postId).select("id"));
   if (error) return fail(error.message);
   return data?.length ? { ok: true } : fail("Post not found.");
 }
