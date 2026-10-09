@@ -1,5 +1,5 @@
 -- Unique Names posting: database. Paste the whole file into the Supabase SQL editor and run it once.
--- A project created before v2 runs supabase/migrations/002_v2.sql, 003_post_fonts.sql, 004_subject_age.sql, 005_reels.sql, 006_reel_voices.sql, 007_reel_themes.sql, 008_reel_playbook.sql, 009_captions.sql, 010_cta_card.sql, 011_az_series.sql then 012_two_styles.sql instead (this file already includes them).
+-- A project created before v2 runs supabase/migrations/002_v2.sql, 003_post_fonts.sql, 004_subject_age.sql, 005_reels.sql, 006_reel_voices.sql, 007_reel_themes.sql, 008_reel_playbook.sql, 009_captions.sql, 010_cta_card.sql, 011_az_series.sql, 012_two_styles.sql then 013_letter_posts.sql instead (this file already includes them).
 -- Status 'pending' = an AI-suggested name/theme waiting for approval; nothing here ever plans it (only 'available').
 
 -- ---------------------------------------------------------------- tables
@@ -193,7 +193,10 @@ create table if not exists public.posts (
   series_part int,
   constraint posts_series_check check (
     (series is null and series_id is null and series_part is null)
-    or (series = 'az' and series_id is not null and series_part between 1 and 2))
+    or (series = 'az' and series_id is not null and series_part between 1 and 2)),
+  -- a post by letter (013): the capital letter every name starts with; null on any other post
+  letter text,
+  constraint posts_letter_check check (letter is null or letter ~ '^[A-Z]$')
 );
 create index if not exists posts_series on public.posts (series_id) where series_id is not null;
 

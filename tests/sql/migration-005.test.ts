@@ -20,6 +20,7 @@ const m009 = read("supabase", "migrations", "009_captions.sql");
 const m010 = read("supabase", "migrations", "010_cta_card.sql");
 const m011 = stripSupabase(read("supabase", "migrations", "011_az_series.sql"));
 const m012 = stripSupabase(read("supabase", "migrations", "012_two_styles.sql"));
+const m013 = stripSupabase(read("supabase", "migrations", "013_letter_posts.sql"));
 
 async function liveDb() {
   const db = new PGlite();
@@ -326,6 +327,7 @@ describe("fresh schema.sql matches v1 + 002..005 (+ 006, 007, 008)", () => {
     await migrated.exec(m010);
     await migrated.exec(m011);
     await migrated.exec(m012);
+    await migrated.exec(m013);
     const want = await shape(migrated);
     expect(want.functions).toHaveLength(5);
     expect(want.triggers.filter((t) => (t as { t: string }).t.startsWith("reel"))).toHaveLength(2);

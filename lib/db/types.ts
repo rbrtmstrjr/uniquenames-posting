@@ -37,6 +37,8 @@ export interface PostRow {
   caption_style?: string | null; hashtag_set?: string | null;
   /** Migration 011 (absent before it runs): an A–Z series part ('az', the shared series id, part 1 = A–M / 2 = N–Z); null on an ordinary post. */
   series?: string | null; series_id?: string | null; series_part?: number | null;
+  /** Migration 013 (absent before it runs): a post by letter's capital letter (every name starts with it); null otherwise. */
+  letter?: string | null;
 }
 export interface CardRow {
   id: string; post_id: string | null; theme_id: string; kind: CardKind; position: number; name_id: string | null;
