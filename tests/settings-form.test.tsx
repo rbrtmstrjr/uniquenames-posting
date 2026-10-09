@@ -164,3 +164,28 @@ describe("SettingsForm hashtags (009)", () => {
     expect(sent).not.toHaveProperty("hashtags_always");
   });
 });
+
+describe("SettingsForm: closing card", () => {
+  it("before 010: shown with the default messages, disabled, never sent", async () => {
+    render(<SettingsForm initial={initial} />);
+    const sw = screen.getByRole("switch", { name: /Add a closing card to every post/ });
+    expect(sw.hasAttribute("disabled")).toBe(true);
+    expect(screen.getByText(/010_cta_card\.sql/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+    const sent = await captured();
+    expect(sent).not.toHaveProperty("cta_enabled");
+    expect(sent).not.toHaveProperty("cta_messages");
+  });
+
+  it("after 010: the switch and the messages are sent; a bad message blocks Save", async () => {
+    render(<SettingsForm initial={{ ...initial, cta_enabled: true, cta_messages: "Follow for more / baby name ideas." }} />);
+    const sw = screen.getByRole("switch", { name: /Add a closing card to every post/ });
+    fireEvent.click(sw);
+    const box = screen.getByDisplayValue("Follow for more / baby name ideas.");
+    fireEvent.change(box, { target: { value: "Follow us / every day\nMore {gender} names" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+    expect(await captured()).toMatchObject({ cta_enabled: false, cta_messages: "Follow us / every day\nMore {gender} names" });
+    fireEvent.change(box, { target: { value: "a / b / c / d" } });
+    expect(screen.getByRole("alert").textContent).toMatch(/3 lines/);
+  });
+});

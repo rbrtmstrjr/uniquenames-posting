@@ -12,7 +12,8 @@ import type { CardRow } from "@/lib/db/types";
 import { canGenerate, type WorkerHealth } from "@/lib/status/worker-health";
 import { dialogStatus, newPictureAction, textChanged } from "@/lib/status/card-dialog";
 import { restampMode } from "@/lib/actions/helpers";
-import { regenerateCardAction, restampCardAction } from "@/lib/actions/cards";
+import { ctaTextAction, regenerateCardAction, restampCardAction } from "@/lib/actions/cards";
+import { CTA_MAX_LINES, ctaLines } from "@/lib/cta/messages";
 import { callAction, optimistic } from "@/lib/actions/call";
 import { useNow } from "@/lib/realtime/hooks";
 import { CardTile } from "./card-tile";
@@ -43,7 +44,9 @@ export function CardDialog({ card, url, health, queuePos = 0, onClose, onDelete,
 
   const status = dialogStatus(card, health, queuePos, now);
   const working = card.status === "generating";
-  const changed = textChanged(card, name, meaning);
+  // The closing card (010) has one Message field (kept in `name`) and no meaning.
+  const isCta = card.kind === "cta";
+  const changed = isCta ? ctaLines(name).join(" / ") !== ctaLines(card.name).join(" / ") : textChanged(card, name, meaning);
   const gen = canGenerate(health);
   // Editing text re-stamps the current photo (Pillow only); a card without a clean photo has to regenerate.
   const textNeedsPhoto = restampMode(card) === "regenerate";
@@ -57,25 +60,27 @@ export function CardDialog({ card, url, health, queuePos = 0, onClose, onDelete,
 
   const saveText = async () => {
     setBusy("text");
-    const r = await callAction(() => restampCardAction(card.id, name, meaning));
+    const r = await callAction(() => (isCta ? ctaTextAction(card.id, name) : restampCardAction(card.id, name, meaning)));
     setBusy(null);
     if (!r.ok) { toast.error(r.error); return; }
     toast.success(r.mode === "restamp" ? "Updating the text… (about a second once your PC picks it up)" : "This older card has no clean photo, so it is being remade with the new text.");
   };
   const regen = async () => {
-    const choice = newPictureAction(card, name, meaning);
+    const choice = isCta ? (changed ? { kind: "edit-regenerate" as const, name, meaning: "" } : { kind: "regenerate" as const }) : newPictureAction(card, name, meaning);
     setBusy("regen");
     const r = await optimistic(
       () => patch({ status: "queued", claimed_at: null, error: null, started_at: null, finished_at: null }),
       () => patch(before),
-      () => (choice.kind === "edit-regenerate" ? regenerateCardAction(card.id, { name: choice.name, meaning: choice.meaning }) : regenerateCardAction(card.id)));
+      () => (choice.kind === "regenerate" ? regenerateCardAction(card.id)
+        : isCta ? ctaTextAction(card.id, choice.name, true) : regenerateCardAction(card.id, { name: choice.name, meaning: choice.meaning })));
     setBusy(null);
     if (!r.ok) { toast.error(r.error); return; }
     toast.success(choice.kind === "edit-regenerate" ? "Saved the new text. Making a new picture with it…" : "Making a new picture for this card…");
   };
 
   return (
-    <Dialog open onOpenChange={(o) => !o && onClose()} title={`${card.position}. ${card.name}`} description={card.meaning} wide>
+    <Dialog open onOpenChange={(o) => !o && onClose()} title={isCta ? "Closing card" : `${card.position}. ${card.name}`}
+      description={isCta ? "The last picture of the post: a follow message instead of a name." : card.meaning} wide>
       <div className="mb-4 flex flex-wrap gap-2" aria-live="polite">
         <Badge tone={status.tone} pulse={status.pulse}>{status.label}</Badge>
         {took !== null && card.status === "done" && <Badge tone="muted">Made in {took}s</Badge>}
@@ -85,15 +90,25 @@ export function CardDialog({ card, url, health, queuePos = 0, onClose, onDelete,
         <CardTile card={card} url={url} health={health} queuePos={queuePos} className="rounded-2xl" />
         <div className="space-y-4">
           {card.error && <p className="rounded-xl bg-bad/10 p-3 text-sm text-bad">{card.error}</p>}
-          <label className="block">
-            <span className="text-xs font-semibold text-muted">Name</span>
-            <Input value={name} onChange={(e) => setName(e.target.value)} className="mt-1 font-semibold" />
-          </label>
-          <label className="block">
-            <span className="text-xs font-semibold text-muted">Meaning</span>
-            <Input value={meaning} onChange={(e) => setMeaning(e.target.value)} className="mt-1" />
-          </label>
-          {card.post_id && <NameIdeas cardId={card.id} current={name} onPick={(i) => { setName(i.name); setMeaning(i.meaning); }} />}
+          {isCta ? (
+            <label className="block">
+              <span className="text-xs font-semibold text-muted">Message</span>
+              <Input value={name} onChange={(e) => setName(e.target.value)} className="mt-1 font-semibold" />
+              <span className="mt-1 block text-xs text-muted">Use / for a line break (up to {CTA_MAX_LINES} lines). {"{gender}"} becomes boy or girl.</span>
+            </label>
+          ) : (
+            <>
+              <label className="block">
+                <span className="text-xs font-semibold text-muted">Name</span>
+                <Input value={name} onChange={(e) => setName(e.target.value)} className="mt-1 font-semibold" />
+              </label>
+              <label className="block">
+                <span className="text-xs font-semibold text-muted">Meaning</span>
+                <Input value={meaning} onChange={(e) => setMeaning(e.target.value)} className="mt-1" />
+              </label>
+              {card.post_id && <NameIdeas cardId={card.id} current={name} onPick={(i) => { setName(i.name); setMeaning(i.meaning); }} />}
+            </>
+          )}
           <div className="flex flex-wrap gap-2">
             <Button onClick={saveText} loading={busy === "text"} disabled={!changed || working || textLocked || busy !== null}><Save className="size-4" /> Save text</Button>
             <Button variant="subtle" onClick={regen} loading={busy === "regen"} disabled={working || !gen.ok || busy !== null}>

@@ -18,13 +18,16 @@ import { callAction } from "@/lib/actions/call";
 import { CardDialog } from "@/components/cards/card-dialog";
 import { useUndoableDelete } from "@/components/cards/use-undoable-delete";
 
+// Making order, with the closing card (010) always last.
+const byPosition = (a: CardRow, b: CardRow) => (a.kind === "cta" ? 1 : 0) - (b.kind === "cta" ? 1 : 0) || a.position - b.position;
+
 export function ActivePost({ post, initialCards }: { post: PostRow; initialCards: CardRow[] }) {
   const { health } = useWorkerContext();
   const refetch = useCallback(async () => {
     const { data, error } = await createClient().from("cards").select("*").eq("post_id", post.id).order("position");
     return error ? null : ((data ?? []) as CardRow[]);
   }, [post.id]);
-  const [allCards] = useRealtimeRows<CardRow>("cards", initialCards, { key: `today-${post.id}`, filter: `post_id=eq.${post.id}`, sort: (a, b) => a.position - b.position, refetch });
+  const [allCards] = useRealtimeRows<CardRow>("cards", initialCards, { key: `today-${post.id}`, filter: `post_id=eq.${post.id}`, sort: byPosition, refetch });
   const { hidden, remove } = useUndoableDelete();
   const cards = useMemo(() => allCards.filter((c) => !hidden.has(c.id)), [allCards, hidden]);
   // The card opens right here (no page load); its live row keeps the dialog current.

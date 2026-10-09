@@ -15,7 +15,8 @@ export const TEXT_SETTINGS_DEFAULTS = {
 } as const satisfies Pick<SettingsRow, "title_font" | "meaning_font" | "mark_font" | "title_size" | "meaning_size" | "mark_size" | "text_position" | "caption_ai">;
 export type PostStatus = "generating" | "ready" | "posted";
 export type CardStatus = "queued" | "generating" | "restamp" | "done" | "failed";
-export type CardKind = "post" | "preview";
+/** "cta" (migration 010) = the closing "follow" card of a post: name = the message ("/" = a line break), meaning = "". */
+export type CardKind = "post" | "preview" | "cta";
 
 export interface NameRow {
   id: string; name: string; meaning: string; gender: Gender; style: NameStyle; status: NameStatus;
@@ -64,6 +65,8 @@ export interface SettingsRow {
   reel_theme_id?: ReelThemeId;
   /** Captions (migration 009; absent before it runs): the tags on every post (≤ 2) and the pool one tag per post is rotated from. */
   hashtags_always?: string; hashtag_pool?: string;
+  /** Closing card (migration 010; absent before it runs): on/off and its messages, one per line ("/" = a line break, {gender}). */
+  cta_enabled?: boolean; cta_messages?: string;
   updated_at: string;
 }
 export type VoiceSampleStatus = "missing" | "queued" | "making" | "ready" | "failed";

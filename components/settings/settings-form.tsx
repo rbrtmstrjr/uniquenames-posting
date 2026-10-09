@@ -22,6 +22,7 @@ import { NarratorMusic, type NarratorValue } from "./narrator-music";
 import { ThemeGrid } from "./theme-grid";
 import { DEFAULT_THEME_ID, isThemeId } from "@/lib/reels/themes";
 import { MUSIC_DEFAULT, speedOf, VOICE_DEFAULT, VOLUME_DEFAULT } from "@/lib/reels/voices";
+import { CTA_MAX_LINES, CTA_MESSAGES_DEFAULT } from "@/lib/cta/messages";
 
 // Card counts are picked on sliders, so a value is always a whole number in range;
 // validateSettings still rejects "fewest" above "most" with a clear message.
@@ -53,6 +54,10 @@ function fallbackPreview(template: string, always: string, pool: string): string
 ${tags.join(" ")}` : line;
 }
 
+/** The closing card fields; absent until migration 010 runs (the form then shows the defaults, disabled, and never sends them). */
+const ctaOf = (row: Partial<SettingsRow>): { cta_enabled?: boolean; cta_messages?: string } =>
+  row.cta_enabled === undefined ? {} : { cta_enabled: row.cta_enabled, cta_messages: row.cta_messages ?? CTA_MESSAGES_DEFAULT };
+
 /** The default visual theme; absent until migration 007 runs (the form then never sends it). */
 const themeIdOf = (row: Partial<SettingsRow>): { reel_theme_id?: ReelThemeId } =>
   row.reel_theme_id === undefined ? {} : { reel_theme_id: isThemeId(row.reel_theme_id) ? row.reel_theme_id : DEFAULT_THEME_ID };
@@ -71,7 +76,10 @@ export function SettingsForm({ initial, sample = DEFAULT_SAMPLE, voices = null, 
     // undefined until migration 007 runs: not sent then.
     ...themeIdOf(initial),
     // undefined until migration 009 runs: not sent then.
-    ...hashtagsOf(initial) });
+    ...hashtagsOf(initial),
+    // undefined until migration 010 runs: not sent then.
+    ...ctaOf(initial) });
+  const has010 = s.cta_enabled !== undefined;
   const has009 = s.hashtag_pool !== undefined;
   // Before 009 posts use the default always-tag + the pool made from the old hashtags field.
   const always = s.hashtags_always ?? HASHTAGS_ALWAYS_DEFAULT;
@@ -137,6 +145,21 @@ export function SettingsForm({ initial, sample = DEFAULT_SAMPLE, voices = null, 
           <CountSlider label="Most cards (Auto)" value={s.max_images} onChange={(v) => setS({ ...s, max_images: v })} />
         </div>
         <p className="mt-2 text-xs text-muted">The handle change applies to cards made from now on.</p>
+      </Panel>
+      <Panel title="Closing card">
+        <div className="space-y-3">
+          <div>
+            <label htmlFor="cta-on" className="inline-flex min-h-11 cursor-pointer items-center gap-3 text-sm font-semibold text-ink">
+              <Switch id="cta-on" checked={s.cta_enabled ?? true} disabled={!has010} onCheckedChange={(v) => setS({ ...s, cta_enabled: v })} /> Add a closing card to every post
+            </label>
+            <p className="text-xs text-muted">The last picture of each new post: the same photoshoot with a gentle follow message instead of a name. It is not one of the name cards, and you can still unselect it before saving.</p>
+          </div>
+          <label className="block"><span className="text-xs font-semibold text-muted">Messages, one per line (/ = a line break, up to {CTA_MAX_LINES} lines; {"{gender}"} becomes boy or girl)</span>
+            <Textarea value={s.cta_messages ?? CTA_MESSAGES_DEFAULT} disabled={!has010} onChange={(e) => setS({ ...s, cta_messages: e.target.value })} rows={8} className="mt-1" /></label>
+          <p className="text-xs text-muted">{has010
+            ? "Each post gets a different message: the one used longest ago, never the same as the post before."
+            : "The closing card needs the database update first (run supabase/migrations/010_cta_card.sql)."}</p>
+        </div>
       </Panel>
       <Panel title="Reels">
         <div className="max-w-sm">

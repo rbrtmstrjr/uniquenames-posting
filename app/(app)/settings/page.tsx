@@ -14,7 +14,8 @@ export const maxDuration = 300;
 
 /** The latest finished card's clean photo + text for the text preview (the built-in sample if none). */
 async function previewSample(sb: Awaited<ReturnType<typeof createClient>>): Promise<PreviewSample | undefined> {
-  const { data } = await sb.from("cards").select("photo_path, name, meaning").eq("status", "done").not("photo_path", "is", null)
+  // Never the closing card (010): its message is not a name.
+  const { data } = await sb.from("cards").select("photo_path, name, meaning").eq("status", "done").neq("kind", "cta").not("photo_path", "is", null)
     .order("finished_at", { ascending: false }).limit(1).maybeSingle();
   const card = data as { photo_path: string; name: string; meaning: string } | null;
   if (!card) return undefined;

@@ -1,6 +1,6 @@
 import type { Gender, NameRow, NameStyle, SettingsRow, ThemeRow } from "@/lib/db/types";
 import { buildCaption } from "./caption";
-import { buildPrompt, pickSubject, randomSubject, type Subject } from "./prompt";
+import { buildCtaPrompt, buildPrompt, ctaShot, pickSubject, randomSubject, type Subject } from "./prompt";
 import { hashSeed, seededRandom, shuffle } from "./random";
 import { buildMixedShotSpecs, buildShots, dealAges, sessionShots, shotSpec, type ShotSpec } from "./shots";
 import { SUBJECT_AGES, type AgeChoice } from "./age";
@@ -127,5 +127,31 @@ export function planExtraCard(i: ExtraCardInput): ExtraCardResult {
     ok: true,
     card: { position: i.nextPosition, name_id: pick.id, name: pick.name.trim(), meaning: pick.meaning.trim(), shot,
       prompt: buildPrompt(i.theme, shot, i.gender, subject), seed: cardSeed(i.salt, pick.name, i.nextPosition) },
+  };
+}
+
+export interface CtaCardInput {
+  theme: ThemeRow; gender: Gender;
+  /** subjectKey(post_date, gender, style) of the post, so a fixed-age post shows its own child. */
+  subjectKey: string;
+  /** The post's subject_age: random = a child of a random age; a fixed age = the post's child; null = the original baby. */
+  age?: AgeChoice | null;
+  /** The post id: one stable seed per post. */
+  salt: string;
+  position: number;
+  /** The message stamped on the card (resolved, "/" = line break). */
+  text: string;
+}
+export interface PlannedCtaCard { kind: "cta"; position: number; name: string; meaning: ""; shot: string; prompt: string; seed: number }
+
+/** The closing "follow" card (migration 010): the post's set and child, the message as its text, no meaning. */
+export function planCtaCard(i: CtaCardInput): PlannedCtaCard {
+  const rng = seededRandom(hashSeed(`${i.salt}|cta`));
+  const subject = i.age === "random"
+    ? randomSubject(SUBJECT_AGES[Math.floor(rng() * SUBJECT_AGES.length)], rng)
+    : pickSubject(i.subjectKey, i.age ?? undefined);
+  return {
+    kind: "cta", position: i.position, name: i.text, meaning: "", shot: ctaShot(subject.session),
+    prompt: buildCtaPrompt(i.theme, i.gender, subject), seed: cardSeed(i.salt, "cta", 0) + 1,
   };
 }

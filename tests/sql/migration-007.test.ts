@@ -19,6 +19,7 @@ const m007raw = read("supabase", "migrations", "007_reel_themes.sql");
 const m007 = stripSupabase(m007raw);
 const m008 = read("supabase", "migrations", "008_reel_playbook.sql");
 const m009 = read("supabase", "migrations", "009_captions.sql");
+const m010 = read("supabase", "migrations", "010_cta_card.sql");
 
 // The final style blocks from the PC spike, verbatim.
 const spike = read("docs", "reference", "reel-themes-motion-spike.md").replace(/\r\n/g, "\n");
@@ -285,6 +286,7 @@ describe("fresh schema.sql matches v1 + 002..007 (+ 008)", () => {
     const migrated = await migratedDb();
     await migrated.exec(m008);
     await migrated.exec(m009);
+    await migrated.exec(m010);
     const want = await shape(migrated);
     expect(want.functions).toHaveLength(8);
     expect(want.themes).toHaveLength(8);

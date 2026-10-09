@@ -19,6 +19,7 @@ const earlier = [
   read("supabase", "migrations", "008_reel_playbook.sql"),
 ];
 const m009 = read("supabase", "migrations", "009_captions.sql");
+const m010 = read("supabase", "migrations", "010_cta_card.sql");
 
 async function liveDb(hashtags?: string) {
   const db = new PGlite();
@@ -87,7 +88,7 @@ describe("009_captions.sql on the live schema (v1 + 002..008)", () => {
   });
 });
 
-describe("fresh schema.sql matches v1 + 002..009", () => {
+describe("fresh schema.sql matches v1 + 002..009 (+ 010)", () => {
   const TABLES = "('settings','reels','reel_scenes','posts')";
   const shape = async (db: PGlite) => ({
     columns: (await db.query(`select table_name, column_name, data_type, is_nullable, column_default from information_schema.columns
@@ -96,8 +97,10 @@ describe("fresh schema.sql matches v1 + 002..009", () => {
       where conrelid::regclass::text in ${TABLES} order by 1, 2`)).rows,
   });
 
-  it("has the same columns (incl. the 009 defaults) and constraints", async () => {
-    const want = await shape(await migratedDb());
+  it("has the same columns (incl. the 009 defaults) and constraints (+ 010)", async () => {
+    const migrated = await migratedDb();
+    await migrated.exec(m010);
+    const want = await shape(migrated);
     const cols = (want.columns as { table_name: string; column_name: string }[]).map((c) => `${c.table_name}.${c.column_name}`);
     expect(cols).toEqual(expect.arrayContaining(["settings.hashtags_always", "settings.hashtag_pool", "posts.caption_style", "posts.hashtag_set", "reels.caption", "reels.hashtags"]));
     expect(await shape(await freshDb())).toEqual(want);

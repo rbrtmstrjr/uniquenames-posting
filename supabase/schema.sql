@@ -1,5 +1,5 @@
 -- Unique Names posting: database. Paste the whole file into the Supabase SQL editor and run it once.
--- A project created before v2 runs supabase/migrations/002_v2.sql, 003_post_fonts.sql, 004_subject_age.sql, 005_reels.sql, 006_reel_voices.sql, 007_reel_themes.sql, 008_reel_playbook.sql then 009_captions.sql instead (this file already includes them).
+-- A project created before v2 runs supabase/migrations/002_v2.sql, 003_post_fonts.sql, 004_subject_age.sql, 005_reels.sql, 006_reel_voices.sql, 007_reel_themes.sql, 008_reel_playbook.sql, 009_captions.sql then 010_cta_card.sql instead (this file already includes them).
 -- Status 'pending' = an AI-suggested name/theme waiting for approval; nothing here ever plans it (only 'available').
 
 -- ---------------------------------------------------------------- tables
@@ -109,6 +109,10 @@ create table if not exists public.settings (
   hashtags_always text not null default '#uniquenames',
   hashtag_pool text not null default
     '#babynames #babygirlnames #babyboynames #uniquebabynames #namemeaning #momlife #newmom #pregnancy #momtobe #babynameideas',
+  -- closing card (010): on/off and its messages, one per line ("/" = a line break, {gender} = boy / girl); rotated per post
+  cta_enabled boolean not null default true,
+  cta_messages text not null default
+    E'Follow for more / baby name ideas.\nFollow us for a new / name list every day.\nStill searching? Follow for / more unique names.\nSave this post and follow / for more name ideas.\nMore {gender} names tomorrow. / Follow so you don''t miss them.\nFound a favorite? / Follow for more like it.\nFollow for a fresh list / of unique {gender} names.\nNew names every day. / Follow along!',
   updated_at timestamptz not null default now(),
   check (min_images <= max_images)
 );
@@ -180,7 +184,8 @@ create table if not exists public.cards (
   id uuid primary key default gen_random_uuid(),
   post_id uuid references public.posts (id) on delete cascade,
   theme_id uuid not null references public.themes (id) on delete cascade,
-  kind text not null default 'post' check (kind in ('post', 'preview')),
+  -- 'cta' (010) = the closing "follow" card of a post: name = the message ("/" = a line break), meaning = ''
+  kind text not null default 'post' constraint cards_kind_check check (kind in ('post', 'preview', 'cta')),
   position int not null default 1,
   name_id uuid references public.names (id) on delete set null,
   name text not null, meaning text not null, shot text not null, prompt text not null,
@@ -200,6 +205,8 @@ create table if not exists public.cards (
 );
 create index if not exists cards_queue on public.cards (status, queued_at) where status in ('queued', 'restamp');
 create index if not exists cards_post on public.cards (post_id, position);
+-- 010: at most one closing card per post
+create unique index if not exists cards_one_cta on public.cards (post_id) where kind = 'cta';
 -- reels (005): a script the PC turns into a video: voice -> timing -> one image per scene -> render
 create table if not exists public.reels (
   id uuid primary key default gen_random_uuid(),

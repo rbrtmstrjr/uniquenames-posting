@@ -161,3 +161,41 @@ export function buildPrompt(theme: ThemePromptFields, shot: string, gender: Gend
     NO_TEXT,
   ].join("\n");
 }
+
+// ---------------------------------------------------------------- closing card (migration 010)
+/** Every closing card's stored shot starts with this (no shot library entry: shotSpec() is undefined for it). */
+export const CTA_SHOT_PREFIX = "closing card";
+export const isCtaShot = (shot: string) => shot.startsWith(`${CTA_SHOT_PREFIX}:`);
+
+// The child (or the sleeping newborn) and the props low in the frame, so the upper half stays
+// open backdrop for the follow message the worker stamps there. Same optics words as the wide
+// frames of the session.
+const CTA_MOMENT: Record<Session, string> = {
+  newborn: "the newborn sleeping peacefully, curled up in the main prop low in the frame, the small props arranged around",
+  sitter: "the baby crawling happily across the blanket toward the viewer beside the main prop, low in the frame",
+  toddler: "the toddler sitting on the blanket beside the main prop, low in the frame, smiling at the viewer",
+  kid: "the child sitting cross-legged on the blanket beside the main prop, low in the frame, smiling at the viewer",
+};
+const CTA_OPTICS = "eye level, wide shot, 35mm lens, f/2.0, soft background falloff";
+
+/** The stored shot of a closing card for a child of this session. */
+export const ctaShot = (session: Session = "sitter") => `${CTA_SHOT_PREFIX}: wide eye-level shot of ${CTA_MOMENT[session]}`;
+
+/**
+ * The closing card's photo: the post's set and child, people and props in the lower half, the
+ * upper half calm open backdrop. Positive-only like every card (cfg 1); NO_TEXT is the one
+ * exception, so the photo is text-free and the message is stamped by code.
+ */
+export function buildCtaPrompt(theme: ThemePromptFields, gender: Gender, subject?: Subject): string {
+  const babyWord = gender === "girl" ? "baby girl" : "baby boy";
+  const who = subject ? noun(subject) : "baby";
+  return [
+    header(subject),
+    subject ? subjectLine(gender, subject) : `Subject: a ${babyWord}.`,
+    `Shot: the closing frame of the session, ${ctaShot(subject?.session).slice(CTA_SHOT_PREFIX.length + 2)}.`,
+    ...SET(theme, "Outfit", false, subject?.age),
+    `Photography: ${CTA_OPTICS}, high detail, natural skin.`,
+    `Composition: square frame, the backdrop fills the whole frame; the ${who} and the props sit in the lower half of the frame, and the upper half of the frame is calm, open backdrop: smooth, softly lit and empty, with generous space above the ${who}'s head.`,
+    NO_TEXT,
+  ].join("\n");
+}

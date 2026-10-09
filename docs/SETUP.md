@@ -90,6 +90,14 @@ Any order is safe; this one is the smoothest:
 2. Push to GitHub so Vercel redeploys the website. Until step 1 runs, posts still get varied captions and rotating tags (from your old field), but nothing is remembered on the post, and reels get no caption.
 3. **Settings > Caption**: check the **Always** tags (on every post and reel, up to 2) and the **Pool** (one rotated into each post). Each post gets at most 4 hashtags and never the exact set of the last 10 posts; each reel gets a caption + topic tags on its page (Copy / Rewrite caption).
 
+## Closing card (existing install)
+Every new post ends with one extra picture from the same photoshoot that says "Follow for more / baby name ideas." (or another message from your list) instead of a name. It is not one of the 9–13 name cards and the caption never mentions it.
+1. Supabase **SQL Editor**: paste and run `supabase/migrations/010_cta_card.sql` (safe to run again). Until it runs, posts are made exactly as before, without a closing card.
+2. Restart the worker (Task Scheduler: **End** then **Run** "Unique Names card worker"). The new worker (2.3.0) stamps the message on its own lines; an older one would stamp it like a name with an empty meaning.
+3. Push to GitHub so Vercel redeploys the website.
+4. **Settings > Closing card**: switch it on or off and edit the messages, one per line (`/` = a line break, up to 3 lines; `{gender}` becomes boy or girl). Each post gets the message used longest ago, never the same as the post before.
+5. On a post the closing card has a **Closing card** badge and is always saved last (you can still unselect it). Open it to change its message (Save text re-stamps the photo) or make a new picture. Posts without one show **Add closing card**.
+
 ## When something is wrong
 - Header dot red, "PC offline": turn on the PC. The worker starts at login. **Generate** is disabled (the button says why) until the PC is back.
 - Amber dot, "ComfyUI closed": open ComfyUI Desktop. **Generate** stays disabled until then; text edits and Re-stamp still work.

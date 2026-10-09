@@ -6,6 +6,7 @@ import { fontsOf } from "@/lib/fonts/post-fonts";
 import { SPEED_MAX, SPEED_MIN, VOICE_ID_RE, VOLUME_MAX, VOLUME_MIN, roundSpeed } from "@/lib/reels/voices";
 import { isThemeId } from "@/lib/reels/themes";
 import { ALWAYS_MAX, POOL_MAX, POOL_MIN, validateTagList } from "@/lib/captions/hashtags";
+import { validateCtaMessages } from "@/lib/cta/messages";
 
 export interface ThemeInput { title: string; gender: Gender; backdrop: string; outfit: string; props: string; lighting: string; palette: string }
 /** The card text settings (columns added by migration 002). */
@@ -21,7 +22,9 @@ export interface SettingsInput extends TextSettings { caption_template: string;
   /** Reels visual theme (migration 007). Optional: only sent once the database has it. */
   reel_theme_id?: string;
   /** Captions (migration 009): the tags on every post and the rotated pool. Optional: only sent once the database has them. */
-  hashtags_always?: string; hashtag_pool?: string }
+  hashtags_always?: string; hashtag_pool?: string;
+  /** Closing card (migration 010): on/off and its messages, one per line. Optional: only sent once the database has them. */
+  cta_enabled?: boolean; cta_messages?: string }
 export const REEL_IMAGES_MIN = 10;
 export const REEL_IMAGES_MAX = 40;
 export const REEL_IMAGES_DEFAULT = 40;
@@ -83,6 +86,11 @@ export function validateSettings(s: SettingsInput): string | null {
   }
   if (s.hashtag_pool !== undefined) {
     const bad = typeof s.hashtag_pool === "string" ? validateTagList(s.hashtag_pool, "Pool", POOL_MIN, POOL_MAX) : "Bad hashtags.";
+    if (bad) return bad;
+  }
+  if (s.cta_enabled !== undefined && typeof s.cta_enabled !== "boolean") return "Turn the closing card on or off.";
+  if (s.cta_messages !== undefined) {
+    const bad = typeof s.cta_messages === "string" ? validateCtaMessages(s.cta_messages) : "Bad closing card messages.";
     if (bad) return bad;
   }
   // Fonts are not edited in Settings any more (picked per post on Today, never written by a

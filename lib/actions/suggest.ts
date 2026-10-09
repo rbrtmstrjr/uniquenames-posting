@@ -70,9 +70,9 @@ export async function cardNameIdeasAction(cardId: string): Promise<CardNameIdeas
   await requireOwner();
   if (!UUID_RE.test(cardId ?? "")) return fail("Card not found.");
   const sb = await createClient();
-  const { data: card } = await sb.from("cards").select("id, post_id, theme_id").eq("id", cardId).single();
+  const { data: card } = await sb.from("cards").select("id, post_id, theme_id, kind").eq("id", cardId).single();
   if (!card) return fail("Card not found.");
-  if (!card.post_id) return fail("Name ideas are for cards in a post.");
+  if (!card.post_id || card.kind === "cta") return fail("Name ideas are for the name cards in a post.");
   const [{ data: post }, { data: theme }, all] = await Promise.all([
     sb.from("posts").select("gender, style").eq("id", card.post_id).single(),
     sb.from("themes").select("title").eq("id", card.theme_id).single(),

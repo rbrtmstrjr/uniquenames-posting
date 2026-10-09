@@ -1,10 +1,16 @@
 import type { CardRow } from "@/lib/db/types";
 
-export function orderedSelection<T extends Pick<CardRow, "id" | "selected" | "order_index" | "position">>(cards: T[]): T[] {
-  return cards.filter((c) => c.selected).sort((a, b) => a.order_index - b.order_index || a.position - b.position);
+type Ordered = Pick<CardRow, "order_index" | "position"> & Partial<Pick<CardRow, "kind">>;
+const isCta = (c: Ordered) => (c.kind === "cta" ? 1 : 0);
+
+/** The post's upload order: the owner's order, and the closing card (migration 010) always last. */
+export const cardOrder = (a: Ordered, b: Ordered) => isCta(a) - isCta(b) || a.order_index - b.order_index || a.position - b.position;
+
+export function orderedSelection<T extends Pick<CardRow, "id" | "selected"> & Ordered>(cards: T[]): T[] {
+  return cards.filter((c) => c.selected).sort(cardOrder);
 }
 
-export function uploadNumbers(cards: Pick<CardRow, "id" | "selected" | "order_index" | "position">[]): Map<string, number> {
+export function uploadNumbers(cards: (Pick<CardRow, "id" | "selected"> & Ordered)[]): Map<string, number> {
   return new Map(orderedSelection(cards).map((c, i) => [c.id, i + 1]));
 }
 

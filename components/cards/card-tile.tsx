@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import { AlertTriangle, Clock3, Loader2, PenLine, PlugZap, RotateCw } from "lucide-react";
+import { AlertTriangle, Clock3, Flag, Loader2, PenLine, PlugZap, RotateCw } from "lucide-react";
 import type { CardRow } from "@/lib/db/types";
 import { cardVisual } from "@/lib/status/card-state";
 import { canGenerate, type WorkerHealth } from "@/lib/status/worker-health";
@@ -20,7 +20,9 @@ export function CardTile({ card, url, health, queuePos, onOpen, onRetry, selecti
   const elapsed = card.started_at ? Math.max(0, (now - Date.parse(card.started_at)) / 1000) : 0;
   // The card has a picture to show (its signed URL may still be on the way: FadeImage shimmers until then).
   const showImage = !!card.card_path && (v === "done" || v === "restamp" || v === "regenerating" || v === "waiting" || v === "failed");
-  const label = `${card.name}: ${({ queued: "in line", generating: "being made", regenerating: "being remade", restamp: "updating text", done: "ready", failed: "failed", waiting: "waiting for your PC" } as const)[v]}`;
+  const isCta = card.kind === "cta";
+  const title = isCta ? "Closing card" : card.name;
+  const label = `${title}: ${({ queued: "in line", generating: "being made", regenerating: "being remade", restamp: "updating text", done: "ready", failed: "failed", waiting: "waiting for your PC" } as const)[v]}`;
 
   const retry = async () => {
     if (retrying || !onRetry) return;
@@ -88,10 +90,15 @@ export function CardTile({ card, url, health, queuePos, onOpen, onRetry, selecti
           ))}
         </div>
       )}
+      {isCta && v !== "failed" && (
+        <span className="pointer-events-none absolute bottom-2 left-2 z-[2] inline-flex items-center gap-1 rounded-full bg-surface/95 px-2 py-1 text-[11px] font-bold text-ink shadow-soft">
+          <Flag className="size-3 text-accent" aria-hidden /> Closing card
+        </span>
+      )}
       {selection && (
         // 44 px hit area around a 28 px badge: tap the number to select/unselect, tap the picture to open it.
         <button type="button" onClick={selection.onToggle} aria-pressed={selection.selected}
-          aria-label={selection.selected ? `Unselect ${card.name} (upload number ${selection.order})` : `Select ${card.name}`}
+          aria-label={selection.selected ? `Unselect ${title} (upload number ${selection.order})` : `Select ${title}`}
           className="absolute left-0 top-0 z-[3] grid size-11 place-items-center">
           <span className={cn("grid size-7 place-items-center rounded-lg text-xs font-extrabold shadow-soft",
             selection.selected ? "bg-accent text-accent-ink" : showImage ? "border-2 border-white/90 bg-black/25" : "border-2 border-ink/50 bg-surface/70")}>
@@ -99,7 +106,7 @@ export function CardTile({ card, url, health, queuePos, onOpen, onRetry, selecti
           </span>
         </button>
       )}
-      {!selection && v !== "failed" && (
+      {!selection && !isCta && v !== "failed" && (
         <span className="absolute inset-x-0 bottom-0 z-[2] truncate bg-gradient-to-t from-black/55 to-transparent px-2 pb-1.5 pt-5 text-[11px] font-semibold text-white opacity-0 transition group-hover:opacity-100">
           {card.position}. {card.name}
         </span>

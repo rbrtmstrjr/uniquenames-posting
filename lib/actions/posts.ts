@@ -12,6 +12,7 @@ import { splitCaption, tagsInText } from "@/lib/captions/hashtags";
 import { NAME_STYLES, pickStyle, type CaptionName, type CaptionStyle } from "@/lib/captions/styles";
 import { fail, requireOwner, type ActionResult } from "./result";
 import { fontsOf, sameFonts, validateFonts, type PostFonts } from "@/lib/fonts/post-fonts";
+import { addClosingCard } from "@/lib/cta/card";
 
 const NEEDS_003 = "Changing a post's fonts needs a database update first: run supabase/migrations/003_post_fonts.sql in Supabase. Nothing was re-stamped.";
 const missingColumn = (e: { message: string; code?: string }) => e.code === "PGRST204" || /schema cache/i.test(e.message);
@@ -92,8 +93,15 @@ export async function createPostAction(input: {
     if (r.status === "ok" && r.post_id) {
       // The style and hashtag set (009) let the next post differ. create_post doesn't take them, so they
       // follow in a second write; best effort: before 009, or on an error, the post is simply without them.
-      const { error: metaErr } = await sb.from("posts").update({ caption_style, hashtag_set }).eq("id", r.post_id);
+      // The closing "follow" card (010) is queued after the name cards, also best effort: before 010, or on
+      // an error, the post simply has none (the owner can add it on the post page).
+      const [{ error: metaErr }, closing] = await Promise.all([
+        sb.from("posts").update({ caption_style, hashtag_set }).eq("id", r.post_id),
+        theme ? addClosingCard(sb, { post: { id: r.post_id, post_date: input.postDate, gender: input.gender, style: input.style, theme_id: plan.theme_id, subject_age: age }, theme, settings: s })
+          : Promise.resolve(null),
+      ]);
       if (metaErr && !missing009(metaErr)) console.error("createPostAction: could not save the caption style", metaErr.message);
+      if (closing?.status === "error") console.error("createPostAction: could not add the closing card", closing.message);
       revalidatePath("/", "layout");
       return { ok: true, postId: r.post_id };
     }
@@ -160,7 +168,8 @@ export async function rewriteCaptionAction(postId: string): Promise<ActionResult
     sb.from("posts").select("*").eq("id", postId).maybeSingle(),
     sb.from("settings").select("*").eq("id", 1).maybeSingle(),
     loadPostHistory(sb),
-    sb.from("cards").select("name, meaning, position").eq("post_id", postId).order("position"),
+    // Name cards only: the closing card's message is not a name (010).
+    sb.from("cards").select("name, meaning, position, kind").eq("post_id", postId).eq("kind", "post").order("position"),
   ]);
   if (!post) return fail("Post not found.");
   // Without the settings row the hashtags are unknown: writing would drop them, so stop here.
@@ -168,8 +177,8 @@ export async function rewriteCaptionAction(postId: string): Promise<ActionResult
   const p = post as PostRow;
   const { data: theme } = await sb.from("themes").select("*").eq("id", p.theme_id).maybeSingle();
   if (!theme) return fail("This post's theme was deleted, so there is nothing to write about.");
-  const names: CaptionName[] = (Array.isArray(cards) ? (cards as { name?: string; meaning?: string }[]) : [])
-    .filter((c) => c.name && c.meaning).map((c) => ({ name: c.name!, meaning: c.meaning! }));
+  const names: CaptionName[] = (Array.isArray(cards) ? (cards as { name?: string; meaning?: string; kind?: string }[]) : [])
+    .filter((c) => c.name && c.meaning && (c.kind ?? "post") === "post").map((c) => ({ name: c.name!, meaning: c.meaning! }));
   // The post's own caption first: the new style and hashtag set differ from it; the previous post's style is avoided too.
   const others = withoutId(latest, postId);
   const own = splitCaption(p.caption ?? "");
@@ -265,4 +274,28 @@ export async function addCardAction(postId: string): Promise<ActionResult<{ card
   const r = data as { status: string; card_id?: string };
   if (r.status !== "ok" || !r.card_id) return fail("That name was just taken. Try again.");
   return { ok: true, cardId: r.card_id };
+}
+
+const CLOSING_NEEDS_010 = "The closing card needs a database update first: run supabase/migrations/010_cta_card.sql in Supabase.";
+
+/** "Add closing card" on a post that has none (made before 010, or deleted): the post's set and child, a rotated message. */
+export async function addClosingCardAction(postId: string): Promise<ActionResult<{ cardId: string }>> {
+  await requireOwner();
+  if (!UUID_RE.test(postId ?? "")) return fail("Post not found.");
+  const sb = await createClient();
+  const [{ data: post }, { data: settings }, lock] = await Promise.all([
+    sb.from("posts").select("*").eq("id", postId).maybeSingle(),
+    sb.from("settings").select("*").eq("id", 1).maybeSingle(),
+    generateLockReason(sb),
+  ]);
+  if (lock) return fail(lock);
+  if (!post) return fail("Post not found.");
+  const p = post as PostRow;
+  const { data: theme } = await sb.from("themes").select("*").eq("id", p.theme_id).maybeSingle();
+  if (!theme) return fail("This post's theme was deleted, so its photoshoot can't be matched.");
+  const r = await addClosingCard(sb, { post: p, theme: theme as ThemeRow, settings: (settings ?? {}) as Partial<SettingsRow>, force: true });
+  if (r.status === "added") return { ok: true, cardId: r.cardId };
+  if (r.status === "exists") return fail("This post already has a closing card.");
+  if (r.status === "needs010") return fail(CLOSING_NEEDS_010);
+  return fail(r.status === "error" ? `Could not add the closing card: ${r.message}` : "Could not add the closing card.");
 }
