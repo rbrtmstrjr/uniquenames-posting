@@ -6,9 +6,10 @@ import {
   ACTION_MAX, HOOK_TEXT_MAX, HOOK_TEXT_MAX_WORDS, LINE_MAX_WORDS, lightClean, TITLE_MAX, writeReelScript, type MadeReel, type ReelScript,
 } from "@/lib/ai/reel-script";
 import { assignMotion, emotionOf, shotOf } from "@/lib/reels/motion";
-import { scenePrompt } from "@/lib/reels/prompt";
+import { isGuideThemeId } from "@/lib/reels/guide";
+import { imagePrompt } from "@/lib/reels/image-prompt";
 import { punchIn } from "@/lib/reels/shots";
-import { DEFAULT_THEME_ID, isThemeId, staticTheme, THEME_PARTIAL, themeOf, type ReelTheme } from "@/lib/reels/themes";
+import { DEFAULT_THEME_ID, isThemeId, LEGACY_THEME_ID, staticTheme, THEME_PARTIAL, themeOf, type ReelTheme } from "@/lib/reels/themes";
 import { speedOf } from "@/lib/reels/voices";
 import { generateLockReason } from "./generate-guard";
 import { UUID_RE } from "./helpers";
@@ -48,22 +49,26 @@ const missing005 = (e: DbError) =>
   e.code === "42P01" || e.code === "PGRST205" || e.code === "PGRST204" || e.code === "42703" ||
   /relation .* does not exist|schema cache/i.test(e.message);
 const dbFail = (e: DbError) => fail(missing005(e) ? NEEDS_005 : e.message);
-/** The columns migration 007 adds (reel_scenes + reels.theme_id) and the ones 008 adds (reel_scenes + reels.hook_text). */
+/** The columns migration 007 adds (reel_scenes + reels.theme_id), the ones 008 adds (reel_scenes + reels.hook_text) and 012's. */
 const COLS_007 = ["emotion", "action", "shot", "key_moment", "motion", "theme_id"] as const;
 const COLS_008 = ["shot_size", "subject", "punch", "time_jump", "hook_text"] as const;
+const COLS_012 = ["feeling", "thread"] as const;
 const missingColumn = (e: DbError, cols: readonly string[]) =>
   (e.code === "PGRST204" || e.code === "42703" || /schema cache/i.test(e.message)) &&
   new RegExp(`\\b(${cols.join("|")})\\b`).test(e.message);
 /** A write naming a 007 column that the database does not have yet (PGRST204 / 42703). */
 const missing007Column = (e: DbError) => missingColumn(e, COLS_007);
 const missing008Column = (e: DbError) => missingColumn(e, COLS_008);
+const missing012Column = (e: DbError) => missingColumn(e, COLS_012);
 const drop = (row: Record<string, unknown>, cols: readonly string[]) => Object.fromEntries(Object.entries(row).filter(([k]) => !cols.includes(k)));
+/** Before 012: no feeling / thread per line (the image prompt was already built with them). */
+const without012 = (row: Record<string, unknown>) => drop(row, COLS_012);
 /** Before 008: no shot list / punch / hook card, and 'hold' is not a valid move yet (it plays as a push-in). */
 const without008 = (row: Record<string, unknown>) => {
-  const r = drop(row, COLS_008);
+  const r = drop(row, [...COLS_008, ...COLS_012]);
   return r.motion === "hold" ? { ...r, motion: "push_in" } : r;
 };
-const without007 = (row: Record<string, unknown>) => drop(row, [...COLS_007, ...COLS_008]);
+const without007 = (row: Record<string, unknown>) => drop(row, [...COLS_007, ...COLS_008, ...COLS_012]);
 
 const oneLine = (s: unknown) => (typeof s === "string" ? s.replace(/\s+/g, " ").trim() : "");
 /** Case- and space-insensitive title key ("Old  Title" = "old title" = "OldTitle"). */
@@ -110,14 +115,17 @@ async function scriptSettings(sb: SB): Promise<ScriptSettings> {
 }
 
 /**
- * The theme to draw with: the reel's own, else the Settings default, else Knitted Doll. Read from reel_themes (the
- * live wording); the static copy of the seed when the row can't be read, and Knitted Doll before 007.
+ * The theme to draw with: the reel's own, else the Settings default, else Crayon. Read from reel_themes (the live
+ * wording); the static copy of the seed when the row can't be read, and Knitted Doll before 007. A guide style with
+ * no row (a database before 012) draws as Knitted Doll, like before, so no reel ever points at a missing theme.
  */
 async function loadTheme(sb: SB, id: string | null | undefined, has007: boolean): Promise<ReelTheme> {
-  if (!has007) return staticTheme(DEFAULT_THEME_ID);
+  if (!has007) return staticTheme(LEGACY_THEME_ID);
   const want = isThemeId(id) ? id : DEFAULT_THEME_ID;
   const { data, error } = await sb.from("reel_themes").select("id, style, faces").eq("id", want).maybeSingle();
-  return error ? staticTheme(want) : themeOf(data, want);
+  if (error) return staticTheme(want);
+  if (!data && isGuideThemeId(want)) return staticTheme(LEGACY_THEME_ID);
+  return themeOf(data, want);
 }
 
 /**
@@ -149,21 +157,26 @@ async function draftScript(sb: SB, topic: string | undefined, reelThemeId?: stri
 
 /**
  * The scenes of a new script: built image prompts, fresh seeds; after 007 also each line's feeling, body language and
- * move, and (008) its shot size, subject, punch word and time jump (key_moment = has a punch, for the 007 worker).
+ * move, (008) its shot size, subject, punch word and time jump (key_moment = has a punch, for the 007 worker), and
+ * (012, Crayon / Red Thread only) its "The feeling is ..." phrase and thread state.
  */
 const sceneRows = (reelId: string, s: ReelScript, theme: ReelTheme, has007: boolean) => {
   const motions = assignMotion(s.scenes);
   return s.scenes.map((x, i) => ({
     reel_id: reelId, position: i + 1, beat: x.beat, idea: x.idea, narration: x.narration,
-    image_prompt: scenePrompt(theme, s.cast, x, i), seed: randomSeed(), status: "pending" as const,
+    image_prompt: imagePrompt(theme, s.cast, x, i), seed: randomSeed(), status: "pending" as const,
     ...(has007 ? {
       emotion: x.emotion, action: x.action || null, key_moment: !!x.punch, motion: motions[i],
       shot_size: x.shot_size, subject: x.subject, punch: x.punch, time_jump: x.time_jump,
+      ...(x.feeling ? { feeling: x.feeling } : {}), ...(x.thread ? { thread: x.thread } : {}),
     } : {}),
   }));
 };
 
-/** Insert rows; a database still missing a 008 column gets them without the 008 fields, one missing a 007 column without both. */
+/**
+ * Insert rows; a database still missing a 012 column gets them without the 012 fields, one missing a 008 column
+ * without the 008 + 012 fields, one missing a 007 column without all three.
+ */
 async function insertCompat(sb: SB, table: "reels" | "reel_scenes", rows: Record<string, unknown> | Record<string, unknown>[], select?: string) {
   const run = (r: typeof rows) => {
     const q = sb.from(table).insert(r);
@@ -171,6 +184,7 @@ async function insertCompat(sb: SB, table: "reels" | "reel_scenes", rows: Record
   };
   const map = (f: (r: Record<string, unknown>) => Record<string, unknown>) => (Array.isArray(rows) ? rows.map(f) : f(rows));
   let res = await run(rows);
+  if (res.error && missing012Column(res.error)) res = await run(map(without012));
   if (res.error && missing008Column(res.error)) res = await run(map(without008));
   if (res.error && missing007Column(res.error)) res = await run(map(without007));
   return res;
@@ -240,7 +254,7 @@ export async function rewriteReelScriptAction(reelId: string): Promise<ActionRes
   if (!reel) return fail(NOT_FOUND);
   if (reel.status !== "script") return fail("This reel was already approved, so its script can't change.");
   // The reel keeps its theme; null = a legacy reel or a deleted theme: Knitted Doll.
-  const d = await draftScript(sb, reel.topic ?? undefined, "theme_id" in reel ? (reel.theme_id ?? DEFAULT_THEME_ID) : undefined);
+  const d = await draftScript(sb, reel.topic ?? undefined, "theme_id" in reel ? (reel.theme_id ?? LEGACY_THEME_ID) : undefined);
   if (!d.ok) return d;
   const s = d.script;
   const { data, error: ue } = await sb.from("reels")
@@ -375,7 +389,7 @@ export async function saveReelScriptAction(reelId: string, edit: ReelScriptEdit)
   if (next.some((n) => n.edited && needsPrompt(n))) {
     const set = await scriptSettings(sb);
     // null = a legacy reel or a deleted theme: Knitted Doll (new reels always pin their theme)
-    theme = await loadTheme(sb, reel.theme_id ?? DEFAULT_THEME_ID, set.has007);
+    theme = await loadTheme(sb, reel.theme_id ?? LEGACY_THEME_ID, set.has007);
   }
 
   const { data, error: ue } = await sb.from("reels").update({ title, ...(hookChanged ? { hook_text: hook } : {}), version: reel.version + 1 })
@@ -393,7 +407,9 @@ export async function saveReelScriptAction(reelId: string, edit: ReelScriptEdit)
       if (n.action !== (s.action ?? null)) patch.action = n.action;
       if (n.shot !== (s.shot ?? null)) patch.shot = n.shot;
       if (needsPrompt(n)) {
-        patch.image_prompt = scenePrompt(theme!, reel.doll_cast, { ...n, beat: s.beat, shot_size: s.shot_size, subject: s.subject }, s.position - 1);
+        patch.image_prompt = imagePrompt(theme!, reel.doll_cast, {
+          ...n, beat: s.beat, shot_size: s.shot_size, subject: s.subject, feeling: s.feeling, thread: s.thread,
+        }, s.position - 1);
       }
       if (s.punch && !punchIn(n.narration, s.punch)) { patch.punch = null; patch.key_moment = false; }
     }
@@ -423,16 +439,17 @@ export async function setReelThemeAction(reelId: string, themeId: string): Promi
   if (!reel) return fail(NOT_FOUND);
   if (reel.status !== "script") return fail("The theme can only be changed before you approve the script.");
   if (!("theme_id" in reel)) return fail(NEEDS_007);
-  const { data: row, error: te } = await sb.from("reel_themes").select("id, style, faces").eq("id", themeId).maybeSingle();
+  // select * (not a column list): `active` (012) is missing before 012, when every theme is still offered
+  const { data: row, error: te } = await sb.from("reel_themes").select("*").eq("id", themeId).maybeSingle();
   if (te) return fail(missing005(te) ? NEEDS_007 : te.message);
-  if (!row) return fail(PICK_THEME);
+  if (!row || (row as { active?: boolean }).active === false) return fail(PICK_THEME);
   const theme = themeOf(row, themeId);
   const { data, error: ue } = await sb.from("reels").update({ theme_id: theme.id, version: reel.version + 1 })
     .eq("id", reelId).eq("version", reel.version).eq("status", "script").select("id");
   if (ue) return ue.code === "23503" ? fail(PICK_THEME) : fail(missing007Column(ue) ? NEEDS_007 : ue.message);
   if (!data?.length) return fail(STALE);
   const results = await Promise.all(scenes.map((s) => sb.from("reel_scenes")
-    .update({ image_prompt: scenePrompt(theme, reel.doll_cast, s, s.position - 1), version: s.version + 1 })
+    .update({ image_prompt: imagePrompt(theme, reel.doll_cast, s, s.position - 1), version: s.version + 1 })
     .eq("id", s.id).eq("version", s.version).eq("status", "pending").select("id")));
   const failed = results.find((r) => r.error)?.error;
   if (failed) return fail(`${THEME_PARTIAL} some pictures were not updated (${failed.message}). Tap Retry.`);

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReelRow, ReelSceneRow } from "@/lib/db/types";
 import type { ReelScript, ReelScriptInput, ReelScriptResult } from "@/lib/ai/reel-script";
 import { scenePrompt } from "@/lib/reels/prompt";
+import { imagePrompt } from "@/lib/reels/image-prompt";
 import { assignMotion } from "@/lib/reels/motion";
 import { STATIC_THEMES, STYLE_TAG } from "@/lib/reels/themes";
 import { fakeSupabase, isUpdate, op, type Query, type Respond } from "./helpers/fake-supabase";
@@ -65,6 +66,8 @@ interface World {
   scene007Missing?: boolean;
   /** 008 not on the database yet: an insert naming a 008 column fails with PGRST204. */
   scene008Missing?: boolean;
+  /** 012 not on the database yet: an insert naming feeling / thread fails with PGRST204. */
+  scene012Missing?: boolean;
   /** 009 has run: settings has the hashtag fields. */
   settings009?: boolean;
   /** 009: the latest reels with a caption (newest first). */
@@ -101,6 +104,7 @@ function world(o: World = {}) {
     if (q.table === "reel_scenes") {
       if (has("insert")) {
         const rows = op(q, "insert")![1] as Record<string, unknown>[];
+        if (w.scene012Missing && rows.some((r) => "feeling" in r || "thread" in r)) return { error: { code: "PGRST204", message: "Could not find the 'feeling' column of 'reel_scenes' in the schema cache" } };
         if (w.scene008Missing && rows.some((r) => "shot_size" in r)) return { error: { code: "PGRST204", message: "Could not find the 'shot_size' column of 'reel_scenes' in the schema cache" } };
         if (w.scene007Missing && rows.some((r) => "emotion" in r)) return { error: { code: "PGRST204", message: "Could not find the 'action' column of 'reel_scenes' in the schema cache" } };
         return w.sceneInsertError ? { error: w.sceneInsertError } : { data: null };
@@ -653,11 +657,17 @@ describe("themes + emotion + motion (007)", () => {
     expect(rows[1]).toMatchObject({ time_jump: true });
   });
 
-  it("write: no Settings theme (null / unknown) → Knitted Doll; a theme read error → the static copy", async () => {
+  it("write: no Settings theme (null / unknown) → Crayon, or Knitted Doll on a database before 012; a theme read error → the static copy", async () => {
     world({ themeId: null });
     writeMock.mockResolvedValueOnce(ok(script()));
     await A.writeReelScriptAction({});
-    expect(writeMock.mock.calls[0][0].theme).toEqual({ id: "knitted", faces: false });
+    expect(writeMock.mock.calls[0][0].theme).toEqual({ id: "crayon", faces: true });
+    expect(rowsOf(qs("reels", "insert")[0])).toMatchObject({ theme_id: "crayon" });
+    // before 012 there is no crayon row: the reel is drawn (and pinned) as Knitted Doll, never a missing theme
+    world({ themeId: null, themes: { knitted: STATIC_THEMES.knitted, anime: STATIC_THEMES.anime } });
+    writeMock.mockResolvedValueOnce(ok(script()));
+    await A.writeReelScriptAction({});
+    expect(writeMock.mock.calls[1][0].theme).toEqual({ id: "knitted", faces: false });
     expect(rowsOf(qs("reels", "insert")[0])).toMatchObject({ theme_id: "knitted" });
     world({ themeId: "anime", themesError: { message: "boom" } });
     writeMock.mockResolvedValueOnce(ok(script()));
@@ -802,6 +812,63 @@ describe("themes + emotion + motion (007)", () => {
     expect(qs("reel_scenes", "update")).toHaveLength(0);
     world({ themeId: "knitted", reel: reel007(), scenes: [scene007(S1, 1), scene007(S2, 2)], sceneMisses: S2 });
     expect(await A.setReelThemeAction(REEL, "clay")).toEqual({ ok: false, error: expect.stringMatching(/some lines just changed/) });
+  });
+});
+
+describe("the two guide styles (012)", () => {
+  const guideScript = (): ReelScript => ({
+    ...script("Waiting For Papa", 3),
+    cast: { adult: "the mom: a young Filipino mother in a plain blouse", child: "the girl: a 4-year-old girl in a striped dress", child_age: "a 4-year-old girl" },
+    scenes: script("x", 3).scenes.map((x, i) => ({
+      ...x, idea: `The mother and the girl wait by the window, moment ${i + 1}`, action: "", feeling: "missing someone you love",
+      thread: (["stretched", "tight", "loose"] as const)[i],
+    })),
+  });
+
+  it("write (Red Thread): every line's prompt follows the guide; feeling + thread are saved per line", async () => {
+    world({ themeId: "redthread" });
+    const s = guideScript();
+    writeMock.mockResolvedValueOnce(ok(s));
+    expect(await A.writeReelScriptAction({})).toEqual({ ok: true, reelId: NEW });
+    expect(writeMock.mock.calls[0][0].theme).toEqual({ id: "redthread", faces: true });
+    const rows = rowsOf(qs("reel_scenes", "insert")[0]);
+    rows.forEach((r, i) => {
+      expect(r).toMatchObject({ feeling: "missing someone you love", thread: s.scenes[i].thread, action: null });
+      expect(r.image_prompt).toBe(imagePrompt(STATIC_THEMES.redthread, s.cast, s.scenes[i], i));
+      expect(r.image_prompt).toMatch(/^The red thread is the only color in the image\. A clean black and white ink line illustration/);
+    });
+  });
+
+  it("write before 012: the lines are saved again without feeling / thread (the prompts already carry them)", async () => {
+    world({ themeId: "crayon", scene012Missing: true });
+    writeMock.mockResolvedValueOnce(ok(guideScript()));
+    expect(await A.writeReelScriptAction({})).toEqual({ ok: true, reelId: NEW });
+    const ins = qs("reel_scenes", "insert");
+    expect(ins).toHaveLength(2);
+    for (const row of rowsOf(ins[1])) {
+      expect(row).not.toHaveProperty("feeling");
+      expect(row).not.toHaveProperty("thread");
+      expect(row).toHaveProperty("shot_size");
+      expect(row.image_prompt).toMatch(/^A rough wax crayon drawing on white paper/);
+    }
+  });
+
+  it("save: an edited scene rebuilds its prompt with the line's own feeling and thread", async () => {
+    world({ themeId: "crayon", reel: reelRow({ theme_id: "redthread" }),
+      scenes: [sceneRow(S1, 1, { emotion: "teary", shot_size: "medium", subject: "mom", feeling: "love across distance", thread: "stretched" })] });
+    expect(await A.saveReelScriptAction(REEL, { title: "Old Title", lines: [{ id: S1, narration: "Line 1 is spoken softly to you mama.", idea: "The mother holds a phone to her chest" }] })).toEqual({ ok: true });
+    const p = String(patchOf(qs("reel_scenes", "update")[0]).image_prompt);
+    expect(p).toContain("The mother holds a phone to her chest.");
+    expect(p).toContain("The feeling is love across distance.");
+    expect(p).toMatch(/stretching far away, long and taut, across the floor to the right/);
+  });
+
+  it("setReelThemeAction: only an offered theme (an old, hidden one is refused); switching rebuilds every prompt in the new style", async () => {
+    world({ themeId: "crayon", reel: reelRow({ theme_id: "crayon" }), themes: { clay: { ...STATIC_THEMES.clay, active: false }, redthread: STATIC_THEMES.redthread } });
+    expect(await A.setReelThemeAction(REEL, "clay")).toEqual({ ok: false, error: "Pick a theme from the list." });
+    expect(fake.queries.filter(isUpdate)).toHaveLength(0);
+    expect(await A.setReelThemeAction(REEL, "redthread")).toEqual({ ok: true });
+    for (const u of qs("reel_scenes", "update")) expect(String(patchOf(u).image_prompt)).toMatch(/A clearly visible thin bright red thread, thick enough/);
   });
 });
 

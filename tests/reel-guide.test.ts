@@ -129,6 +129,8 @@ describe("the [SCENE] text", () => {
       .toEqual({ scene: "The mother hugging her son, looking at each other.", feeling: "pure joy" });
     expect(cleanScene("Wide shot: a quiet kitchen at night, no people around, seen through a 50mm lens").scene).toBe("A quiet kitchen at night.");
     expect(cleanScene("   ").scene).toBe("");
+    // one person: a look at the viewer is dropped, not turned into "each other"
+    expect(cleanScene("The mother waves, looking into the camera. A cup of tea beside her.").scene).toBe("The mother waves. A cup of tea beside her.");
   });
 
   it("Red Thread: thread sentences and red-family colours go (the thread line is the only red)", () => {

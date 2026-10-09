@@ -30,8 +30,10 @@ const scene = (n: number, narration = n === 0 ? HOOK : `Line number ${n} is a sh
 });
 const script = (count: number, over: Record<string, unknown> = {}) =>
   ({ title: "The Last Time You Carry Them", stage: "baby", hook_text: HOOK_TEXT, cast, scenes: Array.from({ length: count }, (_, i) => scene(i)), ...over });
-const input10 = { maxScenes: 10, alreadyMade: [] };
-const input30 = { maxScenes: 30, alreadyMade: [] };
+// the playbook tests below run on an old theme (Knitted Doll); the guide styles have their own block at the end
+const KNITTED = { id: "knitted", faces: false } as const;
+const input10 = { maxScenes: 10, alreadyMade: [], theme: KNITTED };
+const input30 = { maxScenes: 30, alreadyMade: [], theme: KNITTED };
 
 describe("reelScriptPrompt", () => {
   it("carries the topic and the max scenes", () => {
@@ -106,7 +108,7 @@ describe("reelScriptPrompt", () => {
     expect(prompt).toMatch(/"setting": the place \+ time of day/);
   });
 
-  it("knitted (default): doll cast, emotion through pose only, never a lift; other themes a people cast", () => {
+  it("knitted: doll cast, emotion through pose only, never a lift; other themes a people cast", () => {
     const k = reelScriptPrompt(input10).prompt;
     expect(k).toMatch(/describe the recurring cast AS TEXTILE DOLLS/);
     expect(k).toMatch(/EVERY emotion must show through POSE and HANDS/);
@@ -344,5 +346,82 @@ describe("the shot list, punches, time jumps and the loop (playbook v2)", () => 
     expect(p.slice(7).some(Boolean)).toBe(true);
     for (const [i, x] of r.script.scenes.entries()) if (x.punch) expect(x.narration, `${i}`).toContain(x.punch);
     expect(r.script.scenes.map((x) => x.time_jump).slice(0, 3)).toEqual([false, true, false]);
+  });
+});
+
+describe("Crayon / Red Thread scripts (012): the picture is written to the owner's guide", () => {
+  const CRAYON = { id: "crayon", faces: true } as const;
+  const RED = { id: "redthread", faces: true } as const;
+  const people = {
+    adult: "the mom: a young Filipino mother with dark hair in a low bun, a plain cardigan", child: "the baby: a chubby 10-month-old baby boy in a striped romper",
+    adult_tag: "Filipino mom, low bun, plain cardigan", child_tag: "chubby baby, striped romper", child_age: "a 10-month-old baby boy",
+  };
+  const gscene = (n: number, extra: Record<string, unknown> = {}) => {
+    const { idea: _i, setting: _s, action: _a, ...rest } = scene(n);
+    void _i; void _s; void _a;
+    return { ...rest, scene: `The mother hugs the baby tightly by the window, both laughing, moment ${n}. Toys in the foreground, an evening sky behind.`, feeling: "comfort after a long day", thread: "tight", ...extra };
+  };
+  const gscript = (count: number, over: (n: number) => Record<string, unknown> = () => ({})) =>
+    ({ title: "The Last Time You Carry Them", stage: "baby", hook_text: HOOK_TEXT, cast: people, scenes: Array.from({ length: count }, (_, i) => gscene(i, over(i))) });
+
+  it("the prompt: the style's story hints, the guide's [SCENE] rules, feeling (+ thread for Red Thread); no idea / setting / action", () => {
+    const c = reelScriptPrompt({ ...input10, theme: CRAYON }).prompt;
+    expect(c).toMatch(/THIS STYLE \(the owner's Crayon guide\)/);
+    expect(c).toMatch(/"scene": the picture in 2-3 plain sentences/);
+    expect(c).toMatch(/look at EACH OTHER/);
+    expect(c).toMatch(/exactly ONE gesture between the characters/);
+    expect(c).toMatch(/foreground objects .* simple background/);
+    expect(c).toMatch(/"feeling": the picture's feeling .*complete 'The feeling is …'/);
+    expect(c).not.toMatch(/"idea":|"setting":|"action":|"thread":/);
+    expect(c).toMatch(/LINE 1 is the hook/);
+    expect(c).toMatch(/NEVER ask viewers to follow/);
+    expect(c).toMatch(/The LAST line is the payoff/);
+    const r = reelScriptPrompt({ ...input10, theme: RED }).prompt;
+    expect(r).toMatch(/THIS STYLE \(the owner's Red Thread guide\)/);
+    expect(r).toMatch(/OFW parent/);
+    expect(r).toMatch(/NO colour words at all/);
+    expect(r).toMatch(/"thread": .*plain\|tight\|stretched\|tangled\|loose/);
+    expect(r).toMatch(/describe hair and clothes by shape and pattern ONLY/);
+    expect(r).toMatch(/face-free lines are very close detail views of the hands and wrists/);
+    expect(reelScriptPrompt({ ...input10, theme: undefined }).prompt).toMatch(/owner's Crayon guide/);   // the default style
+  });
+
+  it("the schema asks for scene + feeling (+ thread) instead of idea / setting / action", async () => {
+    generateJson.mockResolvedValueOnce({ ok: true, data: gscript(10) });
+    await writeReelScript({ ...input10, theme: RED });
+    const items = generateJson.mock.calls[0][0].schema.properties.scenes.items;
+    expect(items.required).toEqual(["beat", "narration", "shot_size", "subject", "emotion", "punch", "time_jump", "scene", "feeling", "thread"]);
+    expect(items.properties.thread.enum).toEqual(["plain", "tight", "stretched", "tangled", "loose"]);
+    expect(items.properties.idea).toBeUndefined();
+    generateJson.mockResolvedValueOnce({ ok: true, data: gscript(10) });
+    await writeReelScript({ ...input10, theme: CRAYON });
+    expect(generateJson.mock.calls[1][0].schema.properties.scenes.items.required).not.toContain("thread");
+  });
+
+  it("validates: the cleaned scene becomes the idea, the feeling is kept, Red Thread's thread (or one from the emotion)", async () => {
+    generateJson.mockResolvedValueOnce({ ok: true, data: gscript(10, (n) => (n === 2 ? { thread: "frayed", emotion: "worried" } : n === 3 ? { scene: "Close view of the mother in a red dress waving, looking at the camera. A red thread trails away. The feeling is missing you.", feeling: "" } : {})) });
+    const r = await writeReelScript({ ...input10, theme: RED });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const s = r.script.scenes;
+    // stored like every idea: the closing full stop is trimmed (the builder puts it back)
+    expect(s[0]).toMatchObject({ idea: "The mother hugs the baby tightly by the window, both laughing, moment 0. Toys in the foreground, an evening sky behind", feeling: "comfort after a long day", thread: "tight", action: "" });
+    expect(s[2].thread).toBe("loose");
+    expect(s[3].idea).toBe("The mother in a dress waving");   // line 3 is the mother alone: her look at the viewer goes
+    expect(s[3].feeling).toBe("missing you");
+    expect(s.every((x) => !/—/.test(x.idea))).toBe(true);
+  });
+
+  it("Crayon lines carry a feeling but no thread; a line without a scene is rejected; a long scene keeps whole sentences", async () => {
+    generateJson.mockResolvedValueOnce({ ok: true, data: gscript(10, (n) => (n === 4 ? { feeling: "  " } : n === 5 ? { scene: `${"The mother smiles at the baby with crinkled eyes. ".repeat(14)}` } : {})) });
+    const r = await writeReelScript({ ...input10, theme: CRAYON });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.script.scenes[0]).toMatchObject({ feeling: "comfort after a long day", thread: null });
+    expect(r.script.scenes[4].feeling).toBe("pure love and warmth");   // tender
+    expect(r.script.scenes[5].idea.length).toBeLessThanOrEqual(560);
+    expect(r.script.scenes[5].idea.endsWith("with crinkled eyes")).toBe(true);
+    generateJson.mockResolvedValueOnce({ ok: true, data: gscript(10, (n) => (n === 2 ? { scene: "" } : {})) });
+    expect(await writeReelScript({ ...input10, theme: CRAYON })).toEqual({ ok: false, error: "Line 3 has no picture scene." });
   });
 });

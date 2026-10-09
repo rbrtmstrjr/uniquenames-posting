@@ -169,14 +169,20 @@ export function cleanScene(raw: unknown, opts: { red?: boolean; both?: boolean }
   const feeling = f ? cleanFeeling(f[1]) : "";
   s = s.replace(new RegExp(FEELING_SENTENCE.source, "gi"), " ").trim();
   s = s.replace(FRAMING_LEAD, "");
-  s = s.replace(LOOK_AT_VIEWER, (_m, verb: string) => (opts.both ? `${verb} at each other` : verb));
-  if (opts.red) s = s.split(/(?<=[.!?])\s+/).filter((x) => !THREAD_WORDS.test(x)).join(" ");
-  s = scrubOptics(positiveOnly(s));
-  if (opts.red) s = greyText(s);
-  s = s.replace(/^[,;.\s]+/, "").trim();
-  if (!s) return { scene: "", feeling };
-  s = s[0].toUpperCase() + s.slice(1);
-  return { scene: /[.!?]$/.test(s) ? s : `${s}.`, feeling };
+  // two people look at each other (guide rule); one person's look at the viewer is dropped (the clause is negated so
+  // positiveOnly removes it)
+  s = s.replace(LOOK_AT_VIEWER, (_m, verb: string) => (opts.both ? `${verb} at each other` : "not"));
+  // sentence by sentence, so a dropped clause never glues two sentences together
+  const out = s.split(/(?<=[.!?])\s+/)
+    .filter((x) => !(opts.red && THREAD_WORDS.test(x)))
+    .map((x) => {
+      let t = scrubOptics(positiveOnly(x));
+      if (opts.red) t = greyText(t);
+      t = t.replace(/^[,;.\s]+/, "").replace(/[\s,;]+$/, "").trim();
+      return t ? `${t[0].toUpperCase()}${t.slice(1)}${/[.!?]$/.test(t) ? "" : "."}` : "";
+    })
+    .filter(Boolean).join(" ");
+  return { scene: out, feeling };
 }
 
 // ---------------------------------------------------------------- one picture

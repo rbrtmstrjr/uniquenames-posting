@@ -1,6 +1,7 @@
 import "server-only";
 import { emotionOf, REEL_EMOTIONS, type ReelEmotion } from "@/lib/reels/motion";
 import { childAge, joinIdea, type ReelCast } from "@/lib/reels/prompt";
+import { cleanFeeling, cleanScene, FEELING_FOR_EMOTION, isGuideThemeId, REEL_THREADS, threadFor, type ReelThread } from "@/lib/reels/guide";
 import {
   capPunches, PUNCH_MAX, PUNCH_MAX_WORDS, punchIn, REEL_SHOT_SIZES, REEL_SUBJECTS, repairShotList,
   type ReelShotSize, type ReelSubject,
@@ -48,6 +49,10 @@ export interface ReelScriptScene {
   punch: string | null;
   /** A time jump before this line (never line 1). */
   time_jump: boolean;
+  /** Crayon / Red Thread (012): the picture's "The feeling is …" phrase; null for the older themes. */
+  feeling?: string | null;
+  /** Red Thread (012): the thread's state in this picture; null for every other theme. */
+  thread?: ReelThread | null;
 }
 export interface ReelScript {
   title: string; stage: ReelStage; cast: ReelCast;
@@ -61,7 +66,8 @@ export interface ReelScriptInput {
   topic?: string; maxScenes: number; alreadyMade: MadeReel[]; timeoutMs?: number;
   /** Narration speed (settings.reel_speed, 1.00–1.25; default 1 = unchanged): a faster voice fits more words in the same time. */
   speed?: number;
-  /** The reel's visual theme (default knitted): the cast is written as dolls only for Knitted Doll. */
+  /** The reel's visual theme (default Crayon): the cast is written as dolls only for Knitted Doll; Crayon and Red
+   *  Thread get each line's picture written to the owner's style guide. */
   theme?: Pick<ReelTheme, "id" | "faces">;
 }
 export type ReelScriptResult = { ok: true; script: ReelScript } | { ok: false; error: string };
@@ -109,6 +115,9 @@ export function reelWordBudget(maxScenes: number, speed = 1) {
   };
 }
 
+/** Red Thread is black-and-white line art: the cast is described without colours so it stays the same in grey. */
+const GREY_CAST_RULE = "- RED THREAD STYLE: the pictures are black-and-white line art where only the red thread has colour, so describe hair and clothes by shape and pattern ONLY, with NO colour words at all (e.g. 'a plain long-sleeved blouse and a long skirt', 'a striped romper') and never anything red.";
+
 /** The cast block: crocheted dolls for Knitted Doll, people for every other theme (the style turns them into clay, paper, …). */
 function castRules(dolls: boolean): string {
   return dolls
@@ -123,6 +132,29 @@ function feelingRule(dolls: boolean, faces: boolean): string {
   return "- Faces are expressive in this style: the emotion should be readable on the faces, and the body language should match it.";
 }
 
+/** Crayon: what the style wants from the story (owner guide: big emotions, a gesture between the characters). */
+const CRAYON_STORY = "THIS STYLE (the owner's Crayon guide): every picture is a rough wax crayon drawing with BIG, warm, exaggerated feelings on the faces. Choose moments where the feeling shows clearly (laughing together, happy tears, comfort after a long day, first steps, a hug that fixes everything).";
+/** Red Thread: the page's trademark, and the stories it suits (connection and distance; OFW parents are close to home). */
+const RED_THREAD_STORY = "THIS STYLE (the owner's Red Thread guide): every picture is black-and-white storybook line art where ONE bright red thread ties the parent's wrist to the child's wrist — the page's trademark, in every picture. Stories where connection and distance matter are especially welcome: an OFW parent working abroad and the child waiting at home, the first day apart, a reunion at the airport, a small fight that cannot break the bond, a hard season the bond survives. The bond holds in every picture; the thread itself is drawn automatically.";
+
+/**
+ * Crayon / Red Thread: each line's [SCENE] is written to the owner's guide (the art style, the shot, the cast sentence,
+ * the thread line and "The feeling is …" are added by lib/reels/guide).
+ */
+function guidePictureRules(red: boolean): string[] {
+  const who = "who is in it, by their short names ('the mother' or 'the father', 'the baby', 'the boy' or 'the girl')";
+  return [
+    `EACH LINE'S PICTURE — written to the owner's ${red ? "Red Thread" : "Crayon"} style guide (the art style, the shot framing, the cast's looks${red ? ", the red thread" : ""} and the closing 'The feeling is …' sentence are added later by the image system):`,
+    red
+      ? `- "scene": the picture in 1-2 plain sentences (20-45 words) that MATCH the line and move the story: ${who}, the action, their facial expressions and gestures, plus simple furniture or plain everyday objects (a small table, a bed, a suitcase, a cup of tea, a phone held to the chest). Keep the background simple. NO colour words at all (the picture is black-and-white), and never mention the thread (it is drawn from "thread"). A one-person picture: that person alone with what they hold or look at. An object / none picture: one plain object or an empty place.`
+      : `- "scene": the picture in 2-3 plain sentences (25-60 words) that MATCH the line and move the story: ${who} and what they are doing together, with BIG, exaggerated facial expressions (eyes crinkled shut from smiling, an open-mouth laugh, tears streaming, bright rosy scribbled cheeks, big glossy eyes) and exactly ONE gesture between the characters (a hug, a hand reaching, a head on a shoulder, holding hands). When two characters are in the picture they look at EACH OTHER. Then name a few foreground objects (toys, flowers, cups, a blanket) and a simple background (a window, the sky, a room): that is where the place and the time of day go. A one-person picture: that person, their big expression and what they hold or reach for. An object / none picture: only the objects and the simple background.`,
+    "- In \"scene\" leave out framing words (close-up, wide shot, view), art-style words, lighting and lenses. Describe only what IS in the picture (never what is absent). Pictures carry no writing: never signs, labels, books with words, screens with text, letters or numbers. The last line's scene happens in the SAME place as line 1's.",
+    "- \"feeling\": the picture's feeling in 2-8 words that complete 'The feeling is …' (e.g. 'pure love and warmth', 'comfort after a long day', 'missing someone you love', 'letting go while still holding on'). Fresh words per line; never the narration.",
+    ...(red ? [`- "thread": the red thread between the parent's and the child's wrists in this picture, exactly one of ${REEL_THREADS.join("|")}: tight = closeness, a hug; stretched = distance (an OFW parent abroad, leaving for work, the first day apart); tangled = a conflict or a misunderstanding; loose = hard times, the bond still holds; plain = an ordinary tender moment.`] : []),
+    "- PEOPLE, NOT DOLLS: write every scene and cast line with real people and real things.",
+  ];
+}
+
 /** The storyboard prompt (playbook v2: hook, re-hooks, arc, loop + a varied shot list); `alreadyMade` is newest first. */
 export function reelScriptPrompt({ topic, maxScenes, alreadyMade, speed, theme }: ReelScriptInput): { system: string; prompt: string } {
   const t = oneLine(topic ?? "");
@@ -131,8 +163,10 @@ export function reelScriptPrompt({ topic, maxScenes, alreadyMade, speed, theme }
     .filter((m) => m.title)
     .slice(0, ALREADY_MADE_CAP);
   const b = reelWordBudget(maxScenes, speed);
-  const th = theme ?? { id: DEFAULT_THEME_ID, faces: false };
+  const th = theme ?? { id: DEFAULT_THEME_ID, faces: true };
   const dolls = isDollTheme(th);
+  const guide = isGuideThemeId(th.id);
+  const red = th.id === "redthread";
   const name = dolls ? "'the mom doll', 'the baby doll'" : "'the mom', 'the baby'";
   const prompt = [
     t ? `Topic: ${t}` : AUTO_TOPIC,
@@ -157,9 +191,11 @@ export function reelScriptPrompt({ topic, maxScenes, alreadyMade, speed, theme }
     "",
     `THE HOOK CARD: "hook_text" is the big title shown on screen over the first 3.5 seconds: at most ${HOOK_TEXT_MAX_WORDS} words, it COMPLEMENTS line 1 (adds the stakes or the twist) and never repeats it word for word (pattern: line 1 states the moment, the card names what is at stake or the twist). Fresh words for this story, never an example sentence from this brief. Keep it short and big on screen: ideally at most 8 words and 45 characters.`,
     "",
+    ...(guide ? [red ? RED_THREAD_STORY : CRAYON_STORY, ""] : []),
     "THE CAST:",
     "- ONE recurring parent (mom or dad) and ONE young child of the stage that fits the topic (age 0-5 only).",
     castRules(dolls),
+    ...(red ? [GREY_CAST_RULE] : []),
     "",
     "THE SHOT LIST (CRITICAL — the owner's #1 complaint was nine pictures of 'mom holding baby'; every picture must be a DIFFERENT shot that moves the story):",
     `- "shot_size": exactly one of ${REEL_SHOT_SIZES.join("|")}. Per 10 lines aim for about 2 wide, 3 medium, 2 close, 2 detail (an insert of hands, a small object, a texture) and 1 pov (through the mom's own eyes) or broll (a quiet cutaway of the place or an object, nobody in it).`,
@@ -167,14 +203,17 @@ export function reelScriptPrompt({ topic, maxScenes, alreadyMade, speed, theme }
     "- LINE 1 shows a FACE (mom, baby or both) in a close or medium shot — a striking, readable moment, never a calm establishing view. Line 2 or 3 is the establishing WIDE (the whole place).",
     "- Never the same shot_size with the same subject on two lines in a row; never more than 2 face shots in a row.",
     "- The LAST line mirrors line 1: the same subject, the same setting and a similar framing, so the reel loops.",
+    ...(red ? ["- In this style the thread on the wrist must stay in view: face-free lines are very close detail views of the hands and wrists (subject mom, baby or both with shot_size detail); use subject object or none on at most 1 line."] : []),
     "",
+    ...(guide ? guidePictureRules(red) : [
     "EACH LINE'S PICTURE (the art style and the cast details are added later by the image system, so keep it plain):",
     `- "idea": what is in the picture — who (by their short names, e.g. ${name}) is doing what, or which object is shown — in one plain sentence that MATCHES the line and advances the story. Leave out the place (that goes in "setting"), art-style words, lighting, colours, lenses and framing jargon. Describe only what IS in the picture (never what is absent). Pictures carry no writing: never signs, labels, books with words, screens with text, letters or numbers.`,
     ...(dolls ? [] : ["- PEOPLE, NOT DOLLS: this theme draws real people, so write every idea, action and cast line with people and real things — never doll, yarn, crochet, knitted, felt or wool wording for bodies or toys (say 'tiny feet', 'toy blocks')."]),
     "- \"setting\": the place + time of day in at most 8 words ('the dim nursery at 3 a.m.', 'the sala on a rainy afternoon', 'a jeepney at dusk'). The story can move between a few places; the last line uses the SAME setting as line 1.",
-    `- "emotion": exactly one of ${REEL_EMOTIONS.join("|")}. Follow the story's wave; never the same emotion on more than 2 lines in a row.`,
     "- \"action\": the body language and what the hands do, in one short phrase ('kneels and cups the toddler's cheeks in both hands'); '' for object / none shots. Describe only what the body IS doing.",
     feelingRule(dolls, th.faces),
+    ]),
+    `- "emotion": exactly one of ${REEL_EMOTIONS.join("|")}. Follow the story's wave; never the same emotion on more than 2 lines in a row.`,
     `- "punch": the ONE stressed word or short phrase (at most ${PUNCH_MAX_WORDS} words, copied EXACTLY from that line's narration) that hits hardest, on at most ${PUNCH_MAX} lines in the whole reel (2-4 of the biggest beats, one of them at the emotional turn); "" on every other line.`,
     "- \"time_jump\": true only on a line that jumps forward or back in time ('Years later…', 'Tomorrow she'll be three.'); false otherwise and always false on line 1.",
     "",
@@ -184,7 +223,9 @@ export function reelScriptPrompt({ topic, maxScenes, alreadyMade, speed, theme }
     '  "stage": "<exactly one of newborn|baby|toddler|preschooler>",',
     `  "hook_text": "<the hook card, at most ${HOOK_TEXT_MAX_WORDS} words>",`,
     '  "cast": { "adult": "<exact fixed description>", "child": "<exact fixed description>", "adult_tag": "<at most 7 words>", "child_tag": "<at most 7 words>", "child_age": "<e.g. a 10-month-old baby boy>" },',
-    `  "scenes": [ { "beat": "<hook|build|turn|close>", "narration": "<the spoken line>", "idea": "<what is in the picture>", "setting": "<place + time of day>", "shot_size": "<${REEL_SHOT_SIZES.join("|")}>", "subject": "<${REEL_SUBJECTS.join("|")}>", "emotion": "<${REEL_EMOTIONS.join("|")}>", "action": "<body language + hands>", "punch": "<word(s) from the line, or empty>", "time_jump": <true|false> } ]`,
+    guide
+      ? `  "scenes": [ { "beat": "<hook|build|turn|close>", "narration": "<the spoken line>", "scene": "<the picture, written to the style guide>", "feeling": "<completes 'The feeling is …'>", ${red ? `"thread": "<${REEL_THREADS.join("|")}>", ` : ""}"shot_size": "<${REEL_SHOT_SIZES.join("|")}>", "subject": "<${REEL_SUBJECTS.join("|")}>", "emotion": "<${REEL_EMOTIONS.join("|")}>", "punch": "<word(s) from the line, or empty>", "time_jump": <true|false> } ]`
+      : `  "scenes": [ { "beat": "<hook|build|turn|close>", "narration": "<the spoken line>", "idea": "<what is in the picture>", "setting": "<place + time of day>", "shot_size": "<${REEL_SHOT_SIZES.join("|")}>", "subject": "<${REEL_SUBJECTS.join("|")}>", "emotion": "<${REEL_EMOTIONS.join("|")}>", "action": "<body language + hands>", "punch": "<word(s) from the line, or empty>", "time_jump": <true|false> } ]`,
     "}",
   ].join("\n");
   return { system: REEL_SCRIPT_SYSTEM, prompt };
@@ -224,6 +265,23 @@ const SCHEMA: GeminiSchema = {
   required: ["title", "stage", "hook_text", "cast", "scenes"],
 };
 
+/** Crayon / Red Thread: each line carries its [SCENE] + feeling (+ the thread) instead of idea / setting / action. */
+export function schemaFor(themeId?: string | null): GeminiSchema {
+  if (!isGuideThemeId(themeId)) return SCHEMA;
+  const red = themeId === "redthread";
+  const base = SCHEMA.properties!.scenes.items!;
+  const drop = ["idea", "setting", "action"];
+  const keep = Object.fromEntries(Object.entries(base.properties!).filter(([k]) => !drop.includes(k)));
+  const properties: Record<string, GeminiSchema> = {
+    ...keep,
+    scene: { type: "STRING", description: "the picture, written to the owner's style guide" },
+    feeling: { type: "STRING", description: "2-8 words completing 'The feeling is …'" },
+    ...(red ? { thread: { type: "STRING", enum: [...REEL_THREADS] } } : {}),
+  };
+  const required = [...base.required!.filter((k) => !drop.includes(k)), "scene", "feeling", ...(red ? ["thread"] : [])];
+  return { ...SCHEMA, properties: { ...SCHEMA.properties!, scenes: { type: "ARRAY", items: { type: "OBJECT", properties, required } } } };
+}
+
 const str = (v: unknown) => (typeof v === "string" ? oneLine(v) : "");
 const words = (s: string) => s.split(" ").filter(Boolean).length;
 const norm = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
@@ -238,8 +296,27 @@ const PLACE = /\b(?:bed|beds|crib|cot|sala|living room|kitchen|room|bedroom|nurs
 /** The idea already names a place of its own ("sets Leo down onto his bed"): its setting is not replaced. */
 export const namesPlace = (idea: string) => PLACE.test(idea);
 
-/** Check and normalise Gemini's JSON into a script (shot list repaired), or say what is wrong. */
-export function validateReelScript(raw: unknown, maxScenes: number, speed = 1): ReelScriptResult {
+/** A guide scene is the stored picture idea: whole sentences, at most this many characters (the review page's limit is 600). */
+export const SCENE_MAX = 560;
+/** Whole sentences of `s` within `max` characters (the first sentence cut at a word when it alone is longer). */
+export function sentencesWithin(s: string, max: number): string {
+  if (s.length <= max) return s;
+  const parts = s.split(/(?<=[.!?])\s+/);
+  let out = "";
+  for (const p of parts) {
+    if ((out ? out.length + 1 : 0) + p.length > max) break;
+    out = out ? `${out} ${p}` : p;
+  }
+  return out || `${s.slice(0, max).replace(/\s+\S*$/, "").replace(/[\s,;]+$/, "")}.`;
+}
+
+/**
+ * Check and normalise Gemini's JSON into a script (shot list repaired), or say what is wrong. `themeId` = the reel's
+ * theme: Crayon and Red Thread lines carry a guide [SCENE] (stored as the idea), a feeling and (Red Thread) a thread.
+ */
+export function validateReelScript(raw: unknown, maxScenes: number, speed = 1, themeId?: string | null): ReelScriptResult {
+  const guide = isGuideThemeId(themeId);
+  const red = themeId === "redthread";
   const d = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
   const title = str(d.title);
   if (!title) return { ok: false, error: "The script has no title." };
@@ -260,7 +337,10 @@ export function validateReelScript(raw: unknown, maxScenes: number, speed = 1): 
   const list = Array.isArray(d.scenes) ? d.scenes.slice(0, maxScenes) : [];
   if (list.length < 2) return { ok: false, error: "The script needs at least 2 scenes." };
   const budget = reelWordBudget(maxScenes, speed);
-  const lines: { beat: string; narration: string; idea: string; setting: string; emotion: ReelEmotion; action: string }[] = [];
+  const lines: {
+    beat: string; narration: string; idea: string; setting: string; emotion: ReelEmotion; action: string;
+    feeling: string | null; thread: ReelThread | null;
+  }[] = [];
   const raws: Record<string, unknown>[] = [];
   for (const [i, s] of list.entries()) {
     const o = (s && typeof s === "object" ? s : {}) as Record<string, unknown>;
@@ -268,18 +348,23 @@ export function validateReelScript(raw: unknown, maxScenes: number, speed = 1): 
     if (!narration) return { ok: false, error: `Line ${i + 1} has no words.` };
     if (words(narration) > LINE_MAX_WORDS) return { ok: false, error: `Line ${i + 1} is longer than ${LINE_MAX_WORDS} words.` };
     if (CTA_RE.test(narration)) return { ok: false, error: `Line ${i + 1} asks viewers to follow, comment, tag or share.` };
-    const idea = lightClean(str(o.idea)).replace(/\s+—\s+/g, ", ");
-    if (!idea) return { ok: false, error: `Line ${i + 1} has no image idea.` };
+    // A feeling Gemini made up falls back to tender; the body-language note and the setting are optional.
+    const emotion = emotionOf(o.emotion) ?? "tender";
+    // Crayon / Red Thread: the guide [SCENE] is the idea (framing words, the feeling sentence, viewer looks, absent
+    // things, camera / lens words and, for Red Thread, the thread and every red colour cleaned out).
+    const scene = guide ? cleanScene(o.scene, { red, both: str(o.subject).toLowerCase() === "both" }) : null;
+    const idea = scene ? sentencesWithin(scene.scene, SCENE_MAX) : lightClean(str(o.idea)).replace(/\s+—\s+/g, ", ");
+    if (!idea) return { ok: false, error: `Line ${i + 1} has no ${guide ? "picture scene" : "image idea"}.` };
     if (i === 0 && words(narration) > HOOK_LINE_MAX_WORDS) {
       return { ok: false, error: `Line 1 is too long for a hook (${words(narration)} words; at most ${HOOK_LINE_MAX_WORDS}).` };
     }
     if (i === 0 && GREETING_RE.test(narration)) return { ok: false, error: "Line 1 is a greeting, not a hook." };
     const beat = BEATS.includes(str(o.beat)) ? str(o.beat) : "build";
-    // A feeling Gemini made up falls back to tender; the body-language note and the setting are optional.
-    const emotion = emotionOf(o.emotion) ?? "tender";
-    const action = lightClean(str(o.action)).slice(0, ACTION_MAX).trim();
-    const setting = lightClean(str(o.setting)).replace(/\s+—\s+/g, ", ").slice(0, SETTING_MAX).trim();
-    lines.push({ beat, narration, idea, setting, emotion, action });
+    const action = guide ? "" : lightClean(str(o.action)).slice(0, ACTION_MAX).trim();
+    const setting = guide ? "" : lightClean(str(o.setting)).replace(/\s+—\s+/g, ", ").slice(0, SETTING_MAX).trim();
+    const feeling = guide ? (cleanFeeling(o.feeling) || scene!.feeling || FEELING_FOR_EMOTION[emotion]) : null;
+    const thread = red ? threadFor(o.thread, emotion) : null;
+    lines.push({ beat, narration, idea, setting, emotion, action, feeling, thread });
     raws.push(o);
   }
   if (lines.length < budget.minScenes) return { ok: false, error: `Script too short: ${lines.length} scenes (needs at least ${budget.minScenes}).` };
@@ -302,6 +387,7 @@ export function validateReelScript(raw: unknown, maxScenes: number, speed = 1): 
   const scenes: ReelScriptScene[] = lines.map((x, i) => ({
     beat: x.beat, narration: x.narration, idea: joinIdea(x.idea, x.setting), emotion: x.emotion, action: x.action,
     shot_size: shots[i].shot_size, subject: shots[i].subject, punch: punches[i], time_jump: i > 0 && raws[i].time_jump === true,
+    ...(guide ? { feeling: x.feeling, thread: x.thread } : {}),
   }));
   return { ok: true, script: { title, stage, cast, hook_text, scenes } };
 }
@@ -311,12 +397,12 @@ export async function writeReelScript(input: ReelScriptInput): Promise<ReelScrip
   try {
     const { system, prompt } = reelScriptPrompt(input);
     const r = await generateJson<Record<string, unknown>>({
-      system, prompt, schema: SCHEMA, model: REEL_SCRIPT_MODEL, thinkingLevel: "low", temperature: 1,
+      system, prompt, schema: schemaFor(input.theme?.id ?? DEFAULT_THEME_ID), model: REEL_SCRIPT_MODEL, thinkingLevel: "low", temperature: 1,
       timeoutMs: input.timeoutMs ?? REEL_SCRIPT_TIMEOUT_MS,
       parse: (x) => (x && typeof x === "object" && !Array.isArray(x) ? (x as Record<string, unknown>) : null),
     });
     if (!r.ok) return { ok: false, error: r.error };
-    return validateReelScript(r.data, input.maxScenes, input.speed);
+    return validateReelScript(r.data, input.maxScenes, input.speed, input.theme?.id ?? DEFAULT_THEME_ID);
   } catch (e) {
     return { ok: false, error: `Could not write the script (${e instanceof Error ? e.message.slice(0, 120) : "unknown error"}).` };
   }
