@@ -12,11 +12,11 @@ import { queueAllThemePreviewsAction, queueThemePreviewAction } from "@/lib/acti
 import { createClient } from "@/lib/supabase/client";
 import { useRealtimeRows } from "@/lib/realtime/use-table";
 import { useSignedUrls } from "@/lib/realtime/signed-urls";
-import { byThemeOrder, needsPreview, PREVIEW_LABEL, previewBusy, previewPath, previewShown } from "@/lib/reels/themes";
+import { byThemeOrder, isActiveTheme, needsPreview, PREVIEW_LABEL, previewBusy, previewPath, previewShown } from "@/lib/reels/themes";
 import { cn } from "@/lib/utils/cn";
 
 /**
- * Settings → Theme: the 8 visual themes as cards with their preview picture (made by the PC). Tap a card to make
+ * Settings → Theme: the offered visual themes (012: Crayon and Red Thread) as cards with their preview picture (made by the PC). Tap a card to make
  * it the default for new reels (saved with Save settings); tap a ready picture to see it large. Before migration
  * 007 (`themes` or `value` missing) it only explains the database update. The rows stay live (realtime), so a
  * preview appears the moment the PC saves it.
@@ -40,7 +40,9 @@ function ThemeGridReady({ initial, value, onChange }: { initial: ReelThemeRow[];
     const { data, error } = await createClient().from("reel_themes").select("*");
     return error ? null : ((data ?? []) as ReelThemeRow[]);
   }, []);
-  const [themes, setThemes] = useRealtimeRows<ReelThemeRow>("reel_themes", initial, { key: "settings-themes", sort: byThemeOrder, refetch });
+  const [rows, setThemes] = useRealtimeRows<ReelThemeRow>("reel_themes", initial, { key: "settings-themes", sort: byThemeOrder, refetch });
+  // live changes to the old themes (kept for old reels only) never add them back
+  const themes = rows.filter(isActiveTheme);
   const signed = useSignedUrls(themes.map(previewShown), "reels");
   const [busy, setBusy] = useState<string | null>(null);
   const [openId, setOpenId] = useState<ReelThemeId | null>(null);
@@ -151,7 +153,7 @@ function ThemeGridReady({ initial, value, onChange }: { initial: ReelThemeRow[];
           );
         })}
       </div>
-      <p className="mt-2 text-xs text-muted">Every preview shows the same mom-and-baby moment, so the looks compare fairly. Your PC makes them when it has nothing else to do.</p>
+      <p className="mt-2 text-xs text-muted">Each preview shows the example scene from that style&apos;s guide. Your PC makes them when it has nothing else to do.</p>
 
       <Dialog open={!!open} onOpenChange={(o) => !o && setOpenId(null)} title={open ? `${open.emoji} ${open.label}` : "Preview"} description={open?.blurb}>
         {open && (

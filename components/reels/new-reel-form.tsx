@@ -98,7 +98,7 @@ export function NewReelForm() {
           {[
             ["Write", "Gemini writes about 30–40 short lines, one picture each."],
             ["Check", "Read the lines, fix any words, then approve."],
-            ["Make", "Your PC records the voice, makes the knitted-doll pictures and the captioned video."],
+            ["Make", "Your PC records the voice, makes the pictures in your style (Crayon or Red Thread) and the captioned video."],
             ["Save", "The full video lands in Pictures › Unique Names › Reels; a preview plays here."],
           ].map(([t, d], i) => (
             <li key={t} className="flex gap-3">

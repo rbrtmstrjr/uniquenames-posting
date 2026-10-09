@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { REEL_THEME_IDS, TEXT_SETTINGS_DEFAULTS, type ReelRow, type ReelSceneRow, type ReelThemeId, type ReelThemeRow, type SettingsRow } from "@/lib/db/types";
+import { LEGACY_THEME_IDS, REEL_THEME_IDS, TEXT_SETTINGS_DEFAULTS, type ReelRow, type ReelSceneRow, type ReelThemeId, type ReelThemeRow, type SettingsRow } from "@/lib/db/types";
 import { STATIC_THEMES, THEME_LABEL } from "@/lib/reels/themes";
 import { polyfillRadix } from "./helpers/radix-jsdom";
 
@@ -42,7 +42,8 @@ const theme = (id: ReelThemeId, o: Partial<ReelThemeRow> = {}): ReelThemeRow => 
   version: 1, claimed_at: null, created_at: "", updated_at: "", ...o,
 });
 const ready = (id: ReelThemeId, o: Partial<ReelThemeRow> = {}) => theme(id, { preview_status: "ready", preview_path: `themes/${id}/preview-v2.jpg`, version: 2, ...o });
-const all = (o: Partial<Record<ReelThemeId, Partial<ReelThemeRow>>> = {}) => REEL_THEME_IDS.map((id) => theme(id, o[id]));
+/** The 8 themes as a database before 012 has them (no `active` column: all offered). */
+const all = (o: Partial<Record<ReelThemeId, Partial<ReelThemeRow>>> = {}) => LEGACY_THEME_IDS.map((id) => theme(id, o[id]));
 
 describe("ThemeGrid (Settings)", () => {
   it("before migration 007: the setup note, no cards", () => {
@@ -51,7 +52,17 @@ describe("ThemeGrid (Settings)", () => {
     expect(screen.queryByRole("radiogroup")).toBeNull();
   });
 
-  it("8 cards: emoji + label + blurb, faces badge, status badges, the default checked", () => {
+  it("012: only the 2 guide styles are offered (the 8 old themes stay in the database, hidden)", () => {
+    const rows = REEL_THEME_IDS.map((id) => theme(id, { active: id === "crayon" || id === "redthread" }));
+    render(<ThemeGrid themes={rows} value="crayon" onChange={() => {}} />);
+    const group = screen.getByRole("radiogroup", { name: "Default theme" });
+    expect(within(group).getAllByRole("radio").map((r) => r.textContent)).toEqual([expect.stringContaining("Crayon"), expect.stringContaining("Red Thread")]);
+    expect(within(group).getByRole("radio", { name: /Crayon/ }).getAttribute("aria-checked")).toBe("true");
+    expect(screen.getByTestId("theme-summary").textContent).toMatch(/0 of 2 previews ready/);
+    expect(screen.getByText(/example scene from that style's guide/)).toBeTruthy();
+  });
+
+  it("before 012 (no active column): 8 cards: emoji + label + blurb, faces badge, status badges, the default checked", () => {
     const themes = all({ animated3d: ready("animated3d"), watercolor: { preview_status: "queued" }, clay: { preview_status: "making" },
       papercraft: { preview_status: "failed", error: "ComfyUI is down" } }).map((t) => (t.id === "animated3d" ? ready("animated3d") : t));
     render(<ThemeGrid themes={themes} value="clay" onChange={() => {}} />);

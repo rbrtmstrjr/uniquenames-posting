@@ -2,7 +2,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import type { ReelThemeRow } from "@/lib/db/types";
-import { isThemeId, needsPreview, previewBusy } from "@/lib/reels/themes";
+import { isActiveTheme, isThemeId, needsPreview, previewBusy } from "@/lib/reels/themes";
 import { fail, requireOwner, type ActionResult } from "./result";
 
 type SB = Awaited<ReturnType<typeof createClient>>;
@@ -29,10 +29,11 @@ export async function queueThemePreviewAction(themeId: string): Promise<ActionRe
   await requireOwner();
   if (!isThemeId(themeId)) return fail(PICK_THEME);
   const sb = await createClient();
-  const { data, error } = await sb.from("reel_themes").select("id, version, preview_status").eq("id", themeId).maybeSingle();
+  // select * (not a column list): `active` (012) is missing before 012, when every theme is still offered
+  const { data, error } = await sb.from("reel_themes").select("*").eq("id", themeId).maybeSingle();
   if (error) return dbFail(error);
-  const t = data as Pick<ReelThemeRow, "id" | "version" | "preview_status"> | null;
-  if (!t) return fail(PICK_THEME);
+  const t = data as Pick<ReelThemeRow, "id" | "version" | "preview_status" | "active"> | null;
+  if (!t || !isActiveTheme(t)) return fail(PICK_THEME);
   if (previewBusy(t)) return fail("This preview is already in line for your PC.");
   const { data: u, error: ue } = await queuePreview(sb, t);
   if (ue) return dbFail(ue);
@@ -41,13 +42,13 @@ export async function queueThemePreviewAction(themeId: string): Promise<ActionRe
   return { ok: true };
 }
 
-/** "Make all previews": every theme with no preview yet or a failed one goes in line. */
+/** "Make all previews": every offered theme with no preview yet or a failed one goes in line (012: the 2 styles only). */
 export async function queueAllThemePreviewsAction(): Promise<ActionResult<{ queued: number }>> {
   await requireOwner();
   const sb = await createClient();
-  const { data, error } = await sb.from("reel_themes").select("id, version, preview_status");
+  const { data, error } = await sb.from("reel_themes").select("*");
   if (error) return dbFail(error);
-  const todo = ((data ?? []) as Pick<ReelThemeRow, "id" | "version" | "preview_status">[]).filter(needsPreview);
+  const todo = ((data ?? []) as Pick<ReelThemeRow, "id" | "version" | "preview_status" | "active">[]).filter((t) => isActiveTheme(t) && needsPreview(t));
   const results = await Promise.all(todo.map((t) => queuePreview(sb, t)));
   const bad = results.find((r) => r.error)?.error;
   if (bad) return dbFail(bad);

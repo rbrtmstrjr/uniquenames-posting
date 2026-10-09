@@ -21,7 +21,7 @@ import type { Narrator } from "@/lib/data/voices";
 import type { ThemeChoice } from "@/lib/data/reel-themes";
 import { lineMood } from "@/lib/reels/labels";
 import { undoll } from "@/lib/reels/prompt";
-import { isThemeId, THEME_LABEL } from "@/lib/reels/themes";
+import { isThemeId, LEGACY_THEME_ID, THEME_LABEL } from "@/lib/reels/themes";
 import { VoicePicker } from "./voice-picker";
 import { ThemePicker } from "./theme-picker";
 import { cn } from "@/lib/utils/cn";
@@ -189,8 +189,12 @@ export function ScriptReview({ reel, scenes, onApproved, narrator = null, themes
   const [seenTheme, setSeenTheme] = useState(reel.theme_id);
   if (seenTheme !== reel.theme_id) { setSeenTheme(reel.theme_id); setThemeSaved(null); }
   const [themeBusy, setThemeBusy] = useState(false);
-  const themeId: ReelThemeId = themeSaved ?? (isThemeId(reel.theme_id) ? reel.theme_id : "knitted");
+  const themeId: ReelThemeId = themeSaved ?? (isThemeId(reel.theme_id) ? reel.theme_id : LEGACY_THEME_ID);
   const dolls = themeId === "knitted";
+  const ideaHelp = dolls ? "The two dolls and the knitted style are added for you."
+    : themeId === "redthread" ? "The shot, the two characters, the red thread and the Red Thread style are added for you."
+    : themeId === "crayon" ? "The shot, the two characters, the feeling and the Crayon style are added for you."
+    : `The two characters and the ${THEME_LABEL[themeId].label} style are added for you.`;
   const cast = dolls ? reel.doll_cast : { adult: undoll(reel.doll_cast.adult), child: undoll(reel.doll_cast.child) };
 
   return (
@@ -312,7 +316,7 @@ export function ScriptReview({ reel, scenes, onApproved, narrator = null, themes
                         summary={<span className="flex min-w-0 gap-1.5"><span className="shrink-0 font-semibold text-ink">Picture idea</span><span className="line-clamp-1 break-all">{l.idea}</span></span>}>
                         <Textarea aria-label={`Line ${l.position} picture idea`} value={l.idea} disabled={locked}
                           onChange={(e) => edit(l.id, { idea: e.target.value })} className="mb-1 min-h-16 text-sm" />
-                        <p className="text-xs text-muted">Changing the idea changes this line&apos;s picture. {dolls ? "The two dolls and the knitted style are added for you." : `The two characters and the ${THEME_LABEL[themeId].label} style are added for you.`}</p>
+                        <p className="text-xs text-muted">Changing the idea changes this line&apos;s picture. {ideaHelp}</p>
                       </Disclosure>
                     </div>
                   </div>

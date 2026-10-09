@@ -15,7 +15,7 @@ vi.mock("next/cache", () => ({ revalidatePath: () => {} }));
 const A = await import("@/lib/actions/reel-themes");
 const { saveSettingsAction } = await import("@/lib/actions/settings");
 
-type Row = Pick<ReelThemeRow, "id" | "version" | "preview_status">;
+type Row = Pick<ReelThemeRow, "id" | "version" | "preview_status" | "active">;
 const eqv = (q: Query, col: string) => q.ops.find((x) => x[0] === "eq" && x[1] === col)?.[2];
 const updates = () => fake.queries.filter((q) => q.table === "reel_themes" && isUpdate(q));
 
@@ -39,6 +39,19 @@ function world(list: Row[]) {
   };
 }
 beforeEach(() => { owner = { id: "owner" }; missesUpdate = false; readError = null; world([]); });
+
+describe("012: only the offered styles get previews", () => {
+  it("an old theme (inactive) is refused; Make all previews only queues the 2 guide styles", async () => {
+    world([{ id: "crayon", version: 1, preview_status: "missing", active: true }, { id: "redthread", version: 2, preview_status: "failed", active: true },
+      { id: "clay", version: 1, preview_status: "missing", active: false }, { id: "anime", version: 1, preview_status: "failed", active: false }]);
+    expect(await A.queueThemePreviewAction("clay")).toEqual({ ok: false, error: "Pick a theme from the list." });
+    expect(updates()).toHaveLength(0);
+    expect(await A.queueAllThemePreviewsAction()).toEqual({ ok: true, queued: 2 });
+    expect(updates().map((q) => eqv(q, "id")).sort()).toEqual(["crayon", "redthread"]);
+    // reads select every column: `active` is missing before 012 (every theme is offered then)
+    expect(fake.queries.filter((q) => q.table === "reel_themes" && !isUpdate(q)).every((q) => q.ops.some((o) => o[0] === "select" && o[1] === "*"))).toBe(true);
+  });
+});
 
 describe("queueThemePreviewAction", () => {
   it("queues one theme: status queued, error + claim cleared, version bumped, guarded on the version read", async () => {
