@@ -88,14 +88,20 @@ def apply_colour(img, mode):
 
 
 # Red Thread's colour guarantee, in PIL HSV units (hue 0-255 around the circle, 0 = red; saturation and value 0-255).
-# Full red within RED_HUE_FULL of pure red, fading out by RED_HUE_EDGE (about 11 and 18 degrees: orange and skin
-# tones stay grey); full from SAT_FULL saturation, none below SAT_EDGE (pale pinks and tan skin turn grey); dark
-# ink-like reds below VAL_EDGE turn grey.
-RED_HUE_FULL, RED_HUE_EDGE = 8, 13
-# on the crimson / magenta side a red stays red a little further (a crimson thread); pinks are pale (low saturation)
-CRIMSON_FULL, CRIMSON_EDGE = 16, 22
-SAT_FULL, SAT_EDGE = 130, 95
-VAL_FULL, VAL_EDGE = 70, 40
+# Tuned on a real Red Thread reel (2026-10-09): the thread's core is hue within ±4 of pure red with saturation >= 200,
+# while the leaks were mouths / lips / blush (pinker, less saturated) and brown hair (orange side, low saturation).
+# Full red within RED_HUE_FULL of pure red, fading out by RED_HUE_EDGE (about 8 and 14 degrees) on either side; full
+# from SAT_FULL saturation, none below SAT_EDGE; dark ink-like reds below VAL_EDGE turn grey.
+RED_HUE_FULL, RED_HUE_EDGE = 6, 10
+CRIMSON_FULL, CRIMSON_EDGE = 6, 10
+SAT_FULL, SAT_EDGE = 185, 150
+VAL_FULL, VAL_EDGE = 100, 60
+# Shape rule: the thread is long, a crying mouth or a lip is a small separate spot. A red patch survives only if it
+# spans at least MIN_SPAN of the picture's width (its bounding-box diagonal) after nearby pieces are joined (a thread
+# hidden behind an arm is still one thread); smaller separate spots turn grey.
+MIN_SPAN = 0.12
+_CELL = 4      # the shape rule runs on a 4×4-pixel grid (fast in pure Python)
+_JOIN = 2      # grid cells: pieces this close (≈ 8 px) count as one
 
 
 def _ramp(lo, hi):
@@ -119,10 +125,45 @@ def red_mask(img):
     return ImageChops.multiply(m, v.point(_ramp(VAL_EDGE, VAL_FULL)))
 
 
+def thread_only(mask):
+    """Keep only the long red patches of an L mask (the thread); small separate spots (a mouth, lips) become 0."""
+    w, h = mask.size
+    gw, gh = -(-w // _CELL), -(-h // _CELL)
+    # any red in a cell marks it; nearby pieces are joined by growing the marks _JOIN cells
+    small = mask.point(lambda x: 255 if x >= 64 else 0).resize((gw, gh), Image.Resampling.BOX).point(lambda x: 255 if x else 0)
+    grown = small.filter(ImageFilter.MaxFilter(2 * _JOIN + 1)) if _JOIN else small
+    on = grown.load()
+    seen = bytearray(gw * gh)
+    keep = Image.new("L", (gw, gh), 0)
+    kp = keep.load()
+    need = MIN_SPAN * w
+    for y0 in range(gh):
+        for x0 in range(gw):
+            if not on[x0, y0] or seen[y0 * gw + x0]:
+                continue
+            seen[y0 * gw + x0] = 1
+            stack, cells = [(x0, y0)], []
+            x1 = x2 = x0
+            y1 = y2 = y0
+            while stack:
+                x, y = stack.pop()
+                cells.append((x, y))
+                x1, x2, y1, y2 = min(x1, x), max(x2, x), min(y1, y), max(y2, y)
+                for nx, ny in ((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)):
+                    if 0 <= nx < gw and 0 <= ny < gh and on[nx, ny] and not seen[ny * gw + nx]:
+                        seen[ny * gw + nx] = 1
+                        stack.append((nx, ny))
+            if ((x2 - x1 + 1) ** 2 + (y2 - y1 + 1) ** 2) ** 0.5 * _CELL >= need:
+                for c in cells:
+                    kp[c] = 255
+    keep = keep.resize((gw * _CELL, gh * _CELL), Image.Resampling.NEAREST).crop((0, 0, w, h))
+    return ImageChops.multiply(mask, keep)
+
+
 def to_red_only(img):
-    """Selective desaturation (Red Thread): strongly saturated reds keep their colour, everything else becomes its
-    grayscale value. The mask is grown by a pixel and softened so the thread's anti-aliased edge blends into the grey
-    instead of leaving a coloured fringe. Always RGB."""
+    """Selective desaturation (Red Thread): the thread's strong, pure red keeps its colour, everything else becomes its
+    grayscale value, including small separate red spots (a crying mouth, lips). The mask is grown by a pixel and
+    softened so the thread's anti-aliased edge blends into the grey instead of leaving a coloured fringe. Always RGB."""
     rgb = img.convert("RGB")
-    mask = red_mask(rgb).filter(ImageFilter.MaxFilter(3)).filter(ImageFilter.GaussianBlur(0.8))
+    mask = thread_only(red_mask(rgb)).filter(ImageFilter.MaxFilter(3)).filter(ImageFilter.GaussianBlur(0.8))
     return Image.composite(rgb, to_gray(rgb), mask)

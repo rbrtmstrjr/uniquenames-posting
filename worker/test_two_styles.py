@@ -25,12 +25,40 @@ def is_red_px(p):
 
 class RedOnlyTest(unittest.TestCase):
     def swatch(self, rgb):
-        return themes.to_red_only(Image.new("RGB", (8, 8), rgb)).getpixel((4, 4))
+        # a colour as a long thread across a grey picture (a small patch is not a thread)
+        img = Image.new("RGB", (300, 100), GREY_BG)
+        ImageDraw.Draw(img).line((0, 50, 299, 50), fill=rgb, width=9)
+        return themes.to_red_only(img).getpixel((150, 50))
 
     def test_strong_reds_stay_red(self):
-        for rgb in [(220, 30, 30), (200, 20, 40), (235, 45, 25), (150, 20, 25), (190, 15, 70)]:
+        # the thread's real colours: pure red, hue within a few degrees, highly saturated
+        for rgb in [(220, 30, 30), (200, 20, 40), (235, 45, 25), (150, 20, 25), (210, 10, 10)]:
             with self.subTest(rgb=rgb):
                 self.assertEqual(self.swatch(rgb), rgb)
+
+    def test_leaks_from_a_real_reel_turn_grey(self):
+        # 2026-10-09 Red Thread reel: lips / tongue, cheek blush, brown hair and a magenta-ish red were kept before
+        for rgb in [(200, 90, 100),    # lips / tongue
+                    (225, 170, 165),   # blush
+                    (120, 70, 45),     # brown hair
+                    (160, 95, 80),     # warm brown
+                    (190, 15, 70)]:    # crimson-magenta, not the thread's red
+            with self.subTest(rgb=rgb):
+                self.assertTrue(is_grey_px(self.swatch(rgb)), self.swatch(rgb))
+
+    def test_a_small_red_spot_turns_grey_but_the_thread_stays(self):
+        # a crying mouth is the thread's red, but a small separate spot
+        img = Image.new("RGB", (1080, 600), GREY_BG)
+        d = ImageDraw.Draw(img)
+        d.ellipse((500, 100, 560, 150), fill=(215, 30, 35))          # the mouth
+        d.line((0, 400, 400, 420), fill=(215, 30, 35), width=8)      # the thread ...
+        d.line((412, 421, 1079, 450), fill=(215, 30, 35), width=8)   # ... hidden behind an arm for a few pixels
+        d.line((900, 60, 960, 70), fill=(215, 30, 35), width=8)      # a short separate red stroke
+        out = themes.to_red_only(img)
+        self.assertTrue(is_grey_px(out.getpixel((530, 125))))        # the mouth turned grey
+        self.assertTrue(is_grey_px(out.getpixel((930, 65))))         # the short stroke turned grey
+        self.assertTrue(is_red_px(out.getpixel((200, 410))))         # the thread keeps its colour
+        self.assertTrue(is_red_px(out.getpixel((700, 434))))         # on both sides of the gap
 
     def test_everything_else_turns_grey(self):
         for rgb in [(230, 140, 40),    # orange
@@ -65,6 +93,7 @@ class RedOnlyTest(unittest.TestCase):
 
     def test_rgba_and_l_inputs(self):
         self.assertEqual(themes.to_red_only(Image.new("RGBA", (4, 4), (220, 30, 30, 255))).mode, "RGB")
+        self.assertEqual(themes.to_red_only(Image.new("RGB", (1, 1), (220, 30, 30))).size, (1, 1))
         self.assertEqual(themes.to_red_only(Image.new("L", (4, 4), 128)).getpixel((1, 1)), (128, 128, 128))
 
 
