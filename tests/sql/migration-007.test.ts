@@ -18,6 +18,7 @@ const m006 = stripSupabase(read("supabase", "migrations", "006_reel_voices.sql")
 const m007raw = read("supabase", "migrations", "007_reel_themes.sql");
 const m007 = stripSupabase(m007raw);
 const m008 = read("supabase", "migrations", "008_reel_playbook.sql");
+const m009 = read("supabase", "migrations", "009_captions.sql");
 
 // The final style blocks from the PC spike, verbatim.
 const spike = read("docs", "reference", "reel-themes-motion-spike.md").replace(/\r\n/g, "\n");
@@ -262,7 +263,7 @@ describe("claim_next_theme_preview", () => {
   });
 });
 
-// schema.sql also holds 008 (columns only): compare with it applied too.
+// schema.sql also holds 008 and 009 (columns only): compare with them applied too.
 describe("fresh schema.sql matches v1 + 002..007 (+ 008)", () => {
   const TABLES = "('settings','reels','reel_scenes','reel_voices','reel_themes','cards','posts')";
   const FUNCS = "('create_post','claim_next_card','requeue_stuck_cards','claim_next_reel_step','requeue_stuck_reels','reel_next_step','claim_next_voice_sample','claim_next_theme_preview')";
@@ -283,6 +284,7 @@ describe("fresh schema.sql matches v1 + 002..007 (+ 008)", () => {
   it("has the same columns, constraints, indexes, triggers, function bodies and theme rows", async () => {
     const migrated = await migratedDb();
     await migrated.exec(m008);
+    await migrated.exec(m009);
     const want = await shape(migrated);
     expect(want.functions).toHaveLength(8);
     expect(want.themes).toHaveLength(8);

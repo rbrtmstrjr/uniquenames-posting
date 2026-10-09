@@ -14,7 +14,7 @@ import { ThemeToggle } from "@/components/shell/theme-toggle";
 import { saveSettingsAction } from "@/lib/actions/settings";
 import { callAction } from "@/lib/actions/call";
 import { validateSettings } from "@/lib/actions/validate";
-import { buildCaption } from "@/lib/planner";
+import { ALWAYS_MAX, HASHTAGS_ALWAYS_DEFAULT, legacyPool, MAX_TAGS, parseTags, pickPostTags } from "@/lib/captions/hashtags";
 import { createClient } from "@/lib/supabase/client";
 import { REEL_IMAGES_DEFAULT, REEL_IMAGES_MAX, REEL_IMAGES_MIN, TEXT_SETTING_KEYS, type TextSettings } from "@/lib/actions/validate";
 import { CardTextSettings, type PreviewSample } from "./card-text";
@@ -40,6 +40,19 @@ const narratorOf = (row: Partial<SettingsRow>): NarratorValue | null => row.reel
   reel_music: row.reel_music ?? MUSIC_DEFAULT, reel_music_volume: row.reel_music_volume ?? VOLUME_DEFAULT,
 };
 
+/** The hashtag fields; absent until migration 009 runs (the form then shows what posts use and never sends them). */
+const hashtagsOf = (row: Partial<SettingsRow>): { hashtags_always?: string; hashtag_pool?: string } =>
+  row.hashtag_pool === undefined ? {} : { hashtags_always: row.hashtags_always ?? HASHTAGS_ALWAYS_DEFAULT, hashtag_pool: row.hashtag_pool };
+
+/** The fallback caption as a girl post would get it: the template + the always-tags and 2 pool tags. */
+function fallbackPreview(template: string, always: string, pool: string): string {
+  const tags = pickPostTags({ always: parseTags(always), themeTags: [], pool: parseTags(pool), gender: "girl", history: [], poolCount: 2 });
+  const line = template.replace(/\{gender\}/g, "girl").trim();
+  return tags.length ? `${line}
+
+${tags.join(" ")}` : line;
+}
+
 /** The default visual theme; absent until migration 007 runs (the form then never sends it). */
 const themeIdOf = (row: Partial<SettingsRow>): { reel_theme_id?: ReelThemeId } =>
   row.reel_theme_id === undefined ? {} : { reel_theme_id: isThemeId(row.reel_theme_id) ? row.reel_theme_id : DEFAULT_THEME_ID };
@@ -48,7 +61,7 @@ export function SettingsForm({ initial, sample = DEFAULT_SAMPLE, voices = null, 
   initial: SettingsRow; sample?: PreviewSample; voices?: ReelVoiceRow[] | null; themes?: ReelThemeRow[] | null;
 }) {
   const router = useRouter();
-  const [s, setS] = useState({ caption_template: initial.caption_template, hashtags: initial.hashtags, handle: initial.handle, min_images: initial.min_images, max_images: initial.max_images, sound_on: initial.sound_on,
+  const [s, setS] = useState({ caption_template: initial.caption_template, handle: initial.handle, min_images: initial.min_images, max_images: initial.max_images, sound_on: initial.sound_on,
     // undefined until migration 002 runs: the column default (on) is what the app uses then.
     caption_ai: initial.caption_ai ?? TEXT_SETTINGS_DEFAULTS.caption_ai, ...textOf(initial),
     // undefined until migration 005 runs: the column default (40) is what the app uses then.
@@ -56,7 +69,13 @@ export function SettingsForm({ initial, sample = DEFAULT_SAMPLE, voices = null, 
     // undefined until migration 006 runs: not sent then.
     ...narratorOf(initial),
     // undefined until migration 007 runs: not sent then.
-    ...themeIdOf(initial) });
+    ...themeIdOf(initial),
+    // undefined until migration 009 runs: not sent then.
+    ...hashtagsOf(initial) });
+  const has009 = s.hashtag_pool !== undefined;
+  // Before 009 posts use the default always-tag + the pool made from the old hashtags field.
+  const always = s.hashtags_always ?? HASHTAGS_ALWAYS_DEFAULT;
+  const pool = s.hashtag_pool ?? legacyPool(initial.hashtags);
   // The speed the saved samples are compared with (Make samples uses the saved one).
   const [savedSpeed, setSavedSpeed] = useState(speedOf(initial.reel_speed));
   const [busy, setBusy] = useState(false);
@@ -90,14 +109,24 @@ export function SettingsForm({ initial, sample = DEFAULT_SAMPLE, voices = null, 
               <Switch id="caption-ai" checked={s.caption_ai} onCheckedChange={(v) => setS({ ...s, caption_ai: v })} /> Write captions with AI
             </label>
             <p className="text-xs text-muted">{s.caption_ai
-              ? "Each new post gets its own 1–2 sentences about its theme, then your hashtags. The fallback caption below is used if AI is unavailable."
+              ? "Each new post gets its own 1–2 sentences in a rotating style (a story moment, a name spotlight, a question, A or B, a name fact or a kind word to moms), written to read differently from your recent captions, then its hashtags. The fallback caption below is used if AI is unavailable."
               : "New posts use the fallback caption below. You can still tap Rewrite caption on a post."}</p>
           </div>
           <label className="block"><span className="text-xs font-semibold text-muted">Fallback caption ({"{gender}"} becomes boy or girl)</span>
             <Textarea value={s.caption_template} onChange={(e) => setS({ ...s, caption_template: e.target.value })} rows={2} className="mt-1" /></label>
-          <label className="block"><span className="text-xs font-semibold text-muted">Hashtags</span>
-            <Input value={s.hashtags} onChange={(e) => setS({ ...s, hashtags: e.target.value })} className="mt-1" /></label>
-          <div className="rounded-xl bg-surface-2 p-3 text-sm whitespace-pre-wrap text-ink"><span className="mb-1 block text-xs font-semibold text-muted">Fallback preview</span>{buildCaption("girl", s)}</div>
+          <fieldset className="space-y-3">
+            <legend className="text-sm font-semibold text-ink">Hashtags</legend>
+            <label className="block"><span className="text-xs font-semibold text-muted">Always (on every post and reel, up to {ALWAYS_MAX})</span>
+              <Input value={always} disabled={!has009} onChange={(e) => setS({ ...s, hashtags_always: e.target.value })} className="mt-1"
+                autoCapitalize="none" autoCorrect="off" spellCheck={false} /></label>
+            <label className="block"><span className="text-xs font-semibold text-muted">Pool (1 rotated into each post)</span>
+              <Textarea value={pool} disabled={!has009} onChange={(e) => setS({ ...s, hashtag_pool: e.target.value })} rows={3} className="mt-1"
+                autoCapitalize="none" autoCorrect="off" spellCheck={false} /></label>
+            <p className="text-xs text-muted">{has009
+              ? `At most ${MAX_TAGS} hashtags per post: your Always tags, 1–2 picked for the post's theme and 1 from the pool (the one used longest ago, never a boy tag on a girl post), and never the same set as the last 10 posts. Reels get topic tags instead of the pool.`
+              : "Rotating hashtags need the database update first (run supabase/migrations/009_captions.sql). Until then posts use the tags shown here."}</p>
+          </fieldset>
+          <div className="rounded-xl bg-surface-2 p-3 text-sm whitespace-pre-wrap text-ink"><span className="mb-1 block text-xs font-semibold text-muted">Fallback preview</span>{fallbackPreview(s.caption_template, always, pool)}</div>
         </div>
       </Panel>
       <Panel title="Cards">

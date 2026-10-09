@@ -85,6 +85,11 @@ Any order is safe; this one is the smoothest:
 5. **Settings > Narrator & music > Make samples**: re-records the voice samples with the tighter delivery (the old ones show as out of date).
 6. Pick a default theme. Each reel can use another theme on its review page (before you approve it).
 
+## Unique captions and rotating hashtags (existing install)
+1. Supabase **SQL Editor**: paste and run `supabase/migrations/009_captions.sql` (safe to run again; no worker restart needed). It moves your old Hashtags field into the new pool, minus #fyp / #follower / #highlights.
+2. Push to GitHub so Vercel redeploys the website. Until step 1 runs, posts still get varied captions and rotating tags (from your old field), but nothing is remembered on the post, and reels get no caption.
+3. **Settings > Caption**: check the **Always** tags (on every post and reel, up to 2) and the **Pool** (one rotated into each post). Each post gets at most 4 hashtags and never the exact set of the last 10 posts; each reel gets a caption + topic tags on its page (Copy / Rewrite caption).
+
 ## When something is wrong
 - Header dot red, "PC offline": turn on the PC. The worker starts at login. **Generate** is disabled (the button says why) until the PC is back.
 - Amber dot, "ComfyUI closed": open ComfyUI Desktop. **Generate** stays disabled until then; text edits and Re-stamp still work.

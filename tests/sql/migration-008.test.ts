@@ -18,6 +18,7 @@ const earlier = [
   stripSupabase(read("supabase", "migrations", "007_reel_themes.sql")),
 ];
 const m008 = read("supabase", "migrations", "008_reel_playbook.sql");
+const m009 = read("supabase", "migrations", "009_captions.sql");
 
 async function liveDb() {
   const db = new PGlite();
@@ -88,7 +89,7 @@ describe("008_reel_playbook.sql on the live schema (v1 + 002..007)", () => {
   });
 });
 
-describe("fresh schema.sql matches v1 + 002..008", () => {
+describe("fresh schema.sql matches v1 + 002..008 (+ 009)", () => {
   const TABLES = "('settings','reels','reel_scenes','reel_voices','reel_themes','cards','posts')";
   const shape = async (db: PGlite) => ({
     columns: (await db.query(`select table_name, column_name, data_type, is_nullable, column_default from information_schema.columns
@@ -98,7 +99,9 @@ describe("fresh schema.sql matches v1 + 002..008", () => {
   });
 
   it("has the same columns and constraints (incl. the new checks)", async () => {
-    const want = await shape(await migratedDb());
+    const migrated = await migratedDb();
+    await migrated.exec(m009);
+    const want = await shape(migrated);
     const names = (want.constraints as { conname: string }[]).map((c) => c.conname);
     expect(names).toEqual(expect.arrayContaining(["reel_scenes_shot_size_check", "reel_scenes_subject_check", "reel_scenes_motion_check"]));
     expect(await shape(await freshDb())).toEqual(want);

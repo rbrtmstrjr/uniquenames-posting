@@ -11,6 +11,10 @@ let fake = fakeSupabase((q) => respond(q));
 let owner: { id: string } | null = { id: "owner" };
 vi.mock("@/lib/supabase/server", () => ({ createClient: async () => fake.client, getOwner: async () => owner }));
 vi.mock("next/cache", () => ({ revalidatePath: () => {} }));
+// Work scheduled after the response (the reel caption): collected here and run by the tests that want it.
+const { afterTasks, generateJson } = vi.hoisted(() => ({ afterTasks: [] as (() => Promise<unknown>)[], generateJson: vi.fn() }));
+vi.mock("next/server", () => ({ after: (fn: () => Promise<unknown>) => { afterTasks.push(fn); } }));
+vi.mock("@/lib/ai/gemini", () => ({ generateJson }));
 const writeMock = vi.fn<(i: ReelScriptInput) => Promise<ReelScriptResult>>();
 vi.mock("@/lib/ai/reel-script", async (orig) => ({ ...(await orig<typeof import("@/lib/ai/reel-script")>()), writeReelScript: (i: ReelScriptInput) => writeMock(i) }));
 const A = await import("@/lib/actions/reels");
@@ -61,6 +65,10 @@ interface World {
   scene007Missing?: boolean;
   /** 008 not on the database yet: an insert naming a 008 column fails with PGRST204. */
   scene008Missing?: boolean;
+  /** 009 has run: settings has the hashtag fields. */
+  settings009?: boolean;
+  /** 009: the latest reels with a caption (newest first). */
+  captionHistory?: Record<string, unknown>[];
 }
 let w: World = {};
 function world(o: World = {}) {
@@ -72,7 +80,8 @@ function world(o: World = {}) {
     const eqv = (col: string) => q.ops.find((x) => x[0] === "eq" && x[1] === col)?.[2];
     if (q.table === "worker_status") return { data: { id: 1, last_seen: new Date().toISOString(), comfyui_ok: w.health === "ready" } };
     if (q.table === "settings") return { data: { id: 1, reel_max_images: w.maxImages, ...(w.speed === undefined ? {} : { reel_speed: w.speed }),
-      ...(w.themeId === undefined ? {} : { reel_theme_id: w.themeId }) } };
+      ...(w.themeId === undefined ? {} : { reel_theme_id: w.themeId }),
+      ...(w.settings009 ? { hashtags_always: "#uniquenames", hashtag_pool: "#babynames #babyboynames #momlife #newmom" } : {}) } };
     if (q.table === "reel_themes") {
       if (w.themesError) return { error: w.themesError };
       const id = eqv("id") as string;
@@ -86,6 +95,7 @@ function world(o: World = {}) {
       if (has("update")) return { data: w.reelUpdated ? [{ id: REEL }] : [] };
       if (has("delete")) return { data: w.deleted ? [{ id: REEL }] : [] };
       if (eqv("id")) return { data: w.reel };
+      if (has("not")) return { data: w.captionHistory ?? [] };
       return w.listError ? { error: w.listError } : { data: w.made };
     }
     if (q.table === "reel_scenes") {
@@ -109,7 +119,7 @@ const qs = (table: string, m: string) => fake.queries.filter((q) => q.table === 
 const patchOf = (q: Query) => op(q, "update")![1] as Record<string, unknown>;
 const rowsOf = (q: Query) => op(q, "insert")![1] as Record<string, unknown>[];
 
-beforeEach(() => { owner = { id: "owner" }; writeMock.mockReset(); world(); });
+beforeEach(() => { owner = { id: "owner" }; writeMock.mockReset(); generateJson.mockReset(); afterTasks.length = 0; world(); });
 afterEach(() => vi.useRealTimers());
 
 describe("every action: owner first, then the id", () => {
@@ -124,6 +134,7 @@ describe("every action: owner first, then the id", () => {
     ["retry", () => A.retryReelAction(REEL)],
     ["delete", () => A.deleteReelAction(REEL)],
     ["theme", () => A.setReelThemeAction(REEL, "clay")],
+    ["caption", () => A.rewriteReelCaptionAction(REEL)],
   ];
   for (const [name, call] of calls) {
     it(`${name}: signed out throws before any query`, async () => {
@@ -143,6 +154,7 @@ describe("every action: owner first, then the id", () => {
     ["retry", (id) => A.retryReelAction(id)],
     ["delete", (id) => A.deleteReelAction(id)],
     ["theme", (id) => A.setReelThemeAction(id, "clay")],
+    ["caption", (id) => A.rewriteReelCaptionAction(id)],
   ];
   for (const [name, call] of byId) {
     it(`${name}: a bad id is refused without a query`, async () => {
@@ -834,4 +846,96 @@ describe("007 review fixes", () => {
   });
 
   function scene07(id: string, position: number, idea: string) { return scene007(id, position, { idea }); }
+});
+
+describe("reel captions (009)", () => {
+  const CAPTION = "Nobody warns you about the quiet hour. One slow breath before you answer changes the whole evening. What helps you stay calm at bedtime?";
+  const TAGS = ["#toddlertantrums", "#gentleparenting", "#momtips", "#bedtimeroutine"];
+  const answer = (caption = CAPTION, tags = TAGS) => ({ ok: true, data: { caption, tags } });
+  const history = [{ id: "r9", caption: "Sound familiar? What helps you?", hashtags: "#uniquenames #toddlertantrums #gentleparenting #momtips" }];
+  const runLater = async () => { for (const t of afterTasks.splice(0)) await t(); };
+
+  it("Write script schedules the caption after the response; Gemini sees the script + recent reel captions; saved only if still empty", async () => {
+    world({ settings009: true, captionHistory: history });
+    writeMock.mockResolvedValueOnce(ok(script()));
+    generateJson.mockResolvedValueOnce(answer());
+    expect(await A.writeReelScriptAction({ topic: "bedtime" })).toEqual({ ok: true, reelId: NEW });
+    expect(afterTasks).toHaveLength(1);
+    expect(generateJson).not.toHaveBeenCalled();
+    await runLater();
+    const prompt = generateJson.mock.calls[0][0].prompt as string;
+    for (const want of ["Reel title: The Quiet Hour", "Topic: bedtime", "Hook card on screen: And nobody warned you", "Line 1 is spoken softly", "1. Sound familiar? What helps you?", "#toddlertantrums"]) {
+      expect(prompt).toContain(want);
+    }
+    const upd = qs("reels", "update").at(-1)!;
+    // The last reel used exactly the first three topic tags: the spare one is swapped in.
+    expect(patchOf(upd)).toEqual({ caption: CAPTION, hashtags: "#uniquenames #toddlertantrums #gentleparenting #bedtimeroutine" });
+    expect(upd.ops).toContainEqual(["is", "caption", null]);
+    expect(upd.ops).toContainEqual(["eq", "id", NEW]);
+  });
+
+  it("before 009 (no hashtag fields in settings): no Gemini call and no write", async () => {
+    writeMock.mockResolvedValueOnce(ok(script()));
+    expect((await A.writeReelScriptAction({})).ok).toBe(true);
+    await runLater();
+    expect(generateJson).not.toHaveBeenCalled();
+    expect(qs("reels", "update")).toHaveLength(0);
+  });
+
+  it("a Gemini failure (or only bait) leaves the caption empty: no write, the script is unaffected", async () => {
+    world({ settings009: true });
+    writeMock.mockResolvedValueOnce(ok(script()));
+    generateJson.mockResolvedValue(answer("Bedtime battles are real. Comment YES if this is you?"));
+    expect((await A.writeReelScriptAction({})).ok).toBe(true);
+    await runLater();
+    expect(qs("reels", "update")).toHaveLength(0);
+  });
+
+  it("New script writes a new caption over the old one", async () => {
+    world({ settings009: true, reel: reelRow({ caption: "Old caption?", hashtags: "#uniquenames #old" }) });
+    writeMock.mockResolvedValueOnce(ok(script("A New Title")));
+    generateJson.mockResolvedValueOnce(answer());
+    expect(await A.rewriteReelScriptAction(REEL)).toEqual({ ok: true });
+    await runLater();
+    const upd = qs("reels", "update").at(-1)!;
+    expect(patchOf(upd)).toMatchObject({ caption: CAPTION });
+    expect(upd.ops.some((o) => o[0] === "is")).toBe(false);
+  });
+
+  it("New script on a reel from before 009 schedules nothing", async () => {
+    writeMock.mockResolvedValueOnce(ok(script("A New Title")));
+    expect(await A.rewriteReelScriptAction(REEL)).toEqual({ ok: true });
+    expect(afterTasks).toHaveLength(0);
+  });
+
+  it("Rewrite caption: from the reel's own lines, saved and returned (any status)", async () => {
+    world({ settings009: true, reel: reelRow({ status: "ready", caption: null, hashtags: null }), captionHistory: history });
+    generateJson.mockResolvedValueOnce(answer());
+    const r = await A.rewriteReelCaptionAction(REEL);
+    expect(r).toEqual({ ok: true, caption: CAPTION, hashtags: "#uniquenames #toddlertantrums #gentleparenting #bedtimeroutine" });
+    expect(generateJson.mock.calls[0][0].prompt).toContain("narration 1 narration 2 narration 3");
+    expect(generateJson.mock.calls[0][0].timeoutMs).toBeLessThanOrEqual(15000);
+    expect(patchOf(qs("reels", "update")[0])).toEqual({ caption: CAPTION, hashtags: "#uniquenames #toddlertantrums #gentleparenting #bedtimeroutine" });
+  });
+
+  it("Rewrite caption: the reel's own caption is not in its history", async () => {
+    world({ settings009: true, reel: reelRow({ caption: "Mine?", hashtags: "#uniquenames #a" }), captionHistory: [{ id: REEL, caption: "Mine?", hashtags: "#uniquenames #a" }, ...history] });
+    generateJson.mockResolvedValueOnce(answer());
+    expect((await A.rewriteReelCaptionAction(REEL)).ok).toBe(true);
+    const prompt = generateJson.mock.calls[0][0].prompt as string;
+    expect(prompt).not.toContain("Mine?");
+    expect(prompt).toContain("1. Sound familiar? What helps you?");
+  });
+
+  it("Rewrite caption before 009: says to run 009, no Gemini call", async () => {
+    expect(await A.rewriteReelCaptionAction(REEL)).toEqual({ ok: false, error: expect.stringMatching(/009_captions\.sql/) });
+    expect(generateJson).not.toHaveBeenCalled();
+  });
+
+  it("Rewrite caption on an AI failure: unchanged, nothing written", async () => {
+    world({ settings009: true, reel: reelRow({ caption: "Old?", hashtags: null }) });
+    generateJson.mockResolvedValueOnce({ ok: false, error: "Gemini timed out." });
+    expect(await A.rewriteReelCaptionAction(REEL)).toEqual({ ok: false, error: expect.stringMatching(/unchanged/) });
+    expect(qs("reels", "update")).toHaveLength(0);
+  });
 });

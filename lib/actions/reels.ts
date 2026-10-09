@@ -13,6 +13,9 @@ import { speedOf } from "@/lib/reels/voices";
 import { generateLockReason } from "./generate-guard";
 import { UUID_RE } from "./helpers";
 import { fail, requireOwner, type ActionResult } from "./result";
+import { later } from "./later";
+import { makeReelCaption, missingColumn as missing009Column, type ReelCaptionSource } from "@/lib/captions/load";
+import { REWRITE_TIMEOUT_MS } from "@/lib/ai/caption";
 
 type SB = Awaited<ReturnType<typeof createClient>>;
 type DbError = { message: string; code?: string };
@@ -32,6 +35,7 @@ const BUCKET = "reels";
 const NEEDS_005 = "Run supabase/migrations/005_reels.sql first.";
 const NEEDS_007 = "Visual themes need the database update first (run supabase/migrations/007_reel_themes.sql).";
 const NEEDS_008 = "The hook card needs the database update first (run supabase/migrations/008_reel_playbook.sql).";
+const NEEDS_009 = "Reel captions need the database update first (run supabase/migrations/009_captions.sql).";
 const STALE = "This reel just changed. Reload the page and try again.";
 const NOT_FOUND = "Reel not found.";
 const SCRIPT_CHANGED = "The script changed in another tab. Try again.";
@@ -181,6 +185,24 @@ async function getScenes(sb: SB, reelId: string): Promise<{ scenes: ReelSceneRow
   return { scenes: (data ?? []) as ReelSceneRow[], error: error ?? undefined };
 }
 
+/**
+ * After a new script: Gemini writes the reel's post caption + hashtags in the background (after the response), so the
+ * script is never held up; on any failure (or before 009, when the reel has no caption column) it stays null and the
+ * owner can tap Write caption. A caption written meanwhile by Rewrite caption is never overwritten.
+ */
+function captionLater(sb: SB, reel: ReelCaptionSource, replace: boolean) {
+  later(async () => {
+    const { data: settings } = await sb.from("settings").select("*").eq("id", 1).maybeSingle();
+    if (!settings || !("hashtag_pool" in (settings as object))) return; // 009 not run: no caption columns, no Gemini call
+    const made = await makeReelCaption(sb, reel, undefined, settings as SettingsRow);
+    if (!made) return;
+    let q = sb.from("reels").update(made).eq("id", reel.id);
+    if (!replace) q = q.is("caption", null);
+    const { error } = await q;
+    if (error && !missing009Column(error)) console.error("reel caption: could not save it:", error.message);
+  });
+}
+
 /** "Write script": Gemini writes it, then the reel (status script, its theme) and its scenes (pending) are saved. */
 export async function writeReelScriptAction(input: { topic?: string }): Promise<ActionResult<{ reelId: string }>> {
   await requireOwner();
@@ -203,6 +225,7 @@ export async function writeReelScriptAction(input: { topic?: string }): Promise<
     await sb.from("reels").delete().eq("id", reelId);
     return fail(missing005(se) ? NEEDS_005 : `Could not save the script: ${se.message}`);
   }
+  captionLater(sb, { id: reelId, title: s.title, topic: topic ?? null, stage: s.stage, hook_text: s.hook_text, lines: s.scenes.map((x) => x.narration) }, false);
   revalidatePath("/reels", "layout");
   return { ok: true, reelId };
 }
@@ -232,7 +255,32 @@ export async function rewriteReelScriptAction(reelId: string): Promise<ActionRes
   if (de) return fail(`Could not replace the script: ${de.message}`);
   const { error: ie } = await insertCompat(sb, "reel_scenes", sceneRows(reelId, s, d.theme, d.has007));
   if (ie) return fail(`The new script's lines could not be saved (${ie.message}). Tap New script again.`);
+  // A new script gets a new caption (the old one was about the old script).
+  if ("caption" in reel) captionLater(sb, { id: reelId, title: s.title, topic: reel.topic, stage: s.stage, hook_text: s.hook_text, lines: s.scenes.map((x) => x.narration) }, true);
   return done();
+}
+
+/**
+ * "Write caption" / "Rewrite caption" on a reel: a fresh caption + hashtags from its title, topic, hook and script,
+ * different from the latest reel captions and hashtag sets. Works in every status (the PC never reads the caption).
+ * On any AI failure the saved caption is unchanged.
+ */
+export async function rewriteReelCaptionAction(reelId: string): Promise<ActionResult<{ caption: string; hashtags: string }>> {
+  await requireOwner();
+  if (!UUID_RE.test(reelId ?? "")) return fail(NOT_FOUND);
+  const sb = await createClient();
+  const [{ reel, error }, { scenes, error: se }] = await Promise.all([getReel(sb, reelId), getScenes(sb, reelId)]);
+  const readErr = error ?? se;
+  if (readErr) return dbFail(readErr);
+  if (!reel) return fail(NOT_FOUND);
+  if (!("caption" in reel)) return fail(NEEDS_009);
+  if (!scenes.length) return fail("This reel has no script yet, so there is nothing to write about.");
+  const made = await makeReelCaption(sb, { ...reel, lines: scenes }, REWRITE_TIMEOUT_MS);
+  if (!made) return fail("Could not write a caption right now. The caption is unchanged — try again in a moment.");
+  const { data, error: ue } = await sb.from("reels").update(made).eq("id", reelId).select("id");
+  if (ue) return fail(missing009Column(ue) ? NEEDS_009 : ue.message);
+  if (!data?.length) return fail(NOT_FOUND);
+  return { ok: true, ...made };
 }
 
 /**

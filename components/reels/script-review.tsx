@@ -82,8 +82,10 @@ function LineMood({ scene }: { scene: ReelSceneRow }) {
   );
 }
 
-export function ScriptReview({ reel, scenes, onApproved, narrator = null, themes = null }: {
+export function ScriptReview({ reel, scenes, onApproved, narrator = null, themes = null, caption = null }: {
   reel: ReelRow; scenes: ReelSceneRow[]; onApproved?: () => void; narrator?: Narrator | null; themes?: ThemeChoice | null;
+  /** The post caption panel, shown under the Script panel. */
+  caption?: React.ReactNode;
 }) {
   const router = useRouter();
   const { health } = useWorkerContext();
@@ -261,6 +263,7 @@ export function ScriptReview({ reel, scenes, onApproved, narrator = null, themes
               </div>
             </div>
           </Panel>
+          {caption}
         </aside>
 
         <section aria-label="Script lines" className="min-w-0 lg:order-1">

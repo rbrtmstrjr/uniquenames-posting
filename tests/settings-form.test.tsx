@@ -124,3 +124,43 @@ describe("SettingsForm (shadcn controls)", () => {
     expect(screen.getByText(/005_reels\.sql/)).toBeTruthy();
   });
 });
+
+describe("SettingsForm hashtags (009)", () => {
+  const with009 = { ...initial, hashtags_always: "#uniquenames", hashtag_pool: "#babynames #babygirlnames #babyboynames #momlife" };
+
+  it("Always + Pool fields replace the single Hashtags field; the help says ≤ 4 per post, rotated", () => {
+    render(<SettingsForm initial={with009} />);
+    expect((screen.getByRole("textbox", { name: /Always/ }) as HTMLInputElement).value).toBe("#uniquenames");
+    expect((screen.getByRole("textbox", { name: /Pool/ }) as HTMLTextAreaElement).value).toContain("#momlife");
+    expect(screen.queryByRole("textbox", { name: /^Hashtags$/ })).toBeNull();
+    expect(screen.getByText(/At most 4 hashtags per post/)).toBeTruthy();
+  });
+
+  it("the fallback preview shows the template + the always-tag + 2 pool tags (no boy tag on the girl preview)", () => {
+    render(<SettingsForm initial={with009} />);
+    expect(screen.getByText(/Fallback preview/).parentElement!.textContent).toContain("Unique girl names\n\n#uniquenames #babynames #babygirlnames");
+  });
+
+  it("edits are sent on Save; a bait tag blocks Save with a clear message", async () => {
+    render(<SettingsForm initial={with009} />);
+    const pool = screen.getByRole("textbox", { name: /Pool/ });
+    fireEvent.change(pool, { target: { value: "#babynames #fyp #momlife" } });
+    expect(screen.getByRole("alert").textContent).toMatch(/#fyp.*bait/);
+    expect((screen.getByRole("button", { name: "Save settings" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(pool, { target: { value: "#babynames #newmom #momlife" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+    expect(await captured()).toMatchObject({ hashtags_always: "#uniquenames", hashtag_pool: "#babynames #newmom #momlife" });
+  });
+
+  it("before 009: the fields show what posts use (old tags merged into the default pool), are read-only, are not sent, and say to run 009", async () => {
+    render(<SettingsForm initial={{ ...initial, hashtags: "#parenting #fypシ" }} />);
+    const pool = screen.getByRole("textbox", { name: /Pool/ }) as HTMLTextAreaElement;
+    expect(pool.value).toMatch(/^#babynames .* #parenting$/);
+    expect(pool.disabled).toBe(true);
+    expect(screen.getByText(/009_captions\.sql/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+    const sent = await captured();
+    expect(sent).not.toHaveProperty("hashtag_pool");
+    expect(sent).not.toHaveProperty("hashtags_always");
+  });
+});

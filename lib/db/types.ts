@@ -32,6 +32,8 @@ export interface PostRow {
   title_font?: string | null; meaning_font?: string | null; mark_font?: string | null;
   /** The child's age chosen on Today (migration 004; absent before it runs): 'random' | 'newborn' | '1'..'7'; null = a post made before ages. */
   subject_age?: string | null;
+  /** Migration 009 (absent before it runs): the caption style used (story, spotlight, question, choice, fact, compliment, template) and the hashtag set. */
+  caption_style?: string | null; hashtag_set?: string | null;
 }
 export interface CardRow {
   id: string; post_id: string | null; theme_id: string; kind: CardKind; position: number; name_id: string | null;
@@ -60,6 +62,8 @@ export interface SettingsRow {
   reel_music_volume?: number;
   /** Reels (migration 007; absent before it runs): the default visual theme, a reel_themes id (default 'knitted'). */
   reel_theme_id?: ReelThemeId;
+  /** Captions (migration 009; absent before it runs): the tags on every post (≤ 2) and the pool one tag per post is rotated from. */
+  hashtags_always?: string; hashtag_pool?: string;
   updated_at: string;
 }
 export type VoiceSampleStatus = "missing" | "queued" | "making" | "ready" | "failed";
@@ -149,6 +153,8 @@ export interface ReelRow {
   theme_id?: ReelThemeId | null;
   /** Migration 008 (absent before it runs): the hook card shown over the first 3.5 s (null = none). */
   hook_text?: string | null;
+  /** Migration 009 (absent before it runs): the post caption written after the script and its hashtags (null = none yet). */
+  caption?: string | null; hashtags?: string | null;
   version: number; claimed_at: string | null; started_at: string | null; finished_at: string | null;
   created_at: string; updated_at: string;
 }

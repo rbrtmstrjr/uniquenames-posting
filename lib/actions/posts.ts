@@ -5,7 +5,11 @@ import { planExtraCard, planPost, storedAge, subjectKey, type AgeChoice } from "
 import type { CardRow, Gender, NameRow, NameStyle, PostRow, SettingsRow, ThemeRow } from "@/lib/db/types";
 import { restampSelection, UUID_RE, validateCreatePost } from "./helpers";
 import { generateLockReason } from "./generate-guard";
-import { aiCaptionLine, CAPTION_TIMEOUT_MS, captionAiOn, composeCaption, REWRITE_TIMEOUT_MS, withHashtags } from "@/lib/ai/caption";
+import { aiCaptionLine, CAPTION_TIMEOUT_MS, captionAiOn, composePostCaption, REWRITE_TIMEOUT_MS, type AiCaption } from "@/lib/ai/caption";
+import { loadPostHistory, missingColumn as missing009 } from "@/lib/captions/load";
+import { recentTags, withFirst, withoutId, type CaptionHistory } from "@/lib/captions/history";
+import { splitCaption, tagsInText } from "@/lib/captions/hashtags";
+import { NAME_STYLES, pickStyle, type CaptionName, type CaptionStyle } from "@/lib/captions/styles";
 import { fail, requireOwner, type ActionResult } from "./result";
 import { fontsOf, sameFonts, validateFonts, type PostFonts } from "@/lib/fonts/post-fonts";
 
@@ -26,29 +30,34 @@ export async function createPostAction(input: {
   const fonts = input.fonts ? fontsOf(input.fonts) : null;
   const age: AgeChoice = input.subjectAge ?? "random";
   const sb = await createClient();
-  // The AI caption needs the theme the planner picks, so it runs right after the (parallel)
-  // reads and before create_post. It never throws, and ONE deadline (CAPTION_TIMEOUT_MS) covers
-  // the whole action, so a conflict retry on a different theme only gets the time left; past it
-  // the template is used: a post is never blocked or failed by AI. A retry on the same theme
-  // reuses the line instead of asking Gemini twice.
+  // The AI caption needs the theme (and names) the planner picks, so it runs right after the
+  // (parallel) reads and before create_post. It never throws, and ONE deadline (CAPTION_TIMEOUT_MS)
+  // covers the whole action, so a conflict retry on a different theme only gets the time left;
+  // past it the template is used: a post is never blocked or failed by AI. A retry on the same
+  // theme (and, for a style that names names, the same names) reuses the line.
   const aiDeadline = Date.now() + CAPTION_TIMEOUT_MS;
-  const lines = new Map<string, Promise<string | null>>();
-  const lineFor = (theme: ThemeRow) => {
+  const lines = new Map<string, Promise<AiCaption | null>>();
+  // Read once, in parallel with the first round of reads (no extra round trip).
+  const historyRead = loadPostHistory(sb);
+  let captionStyle: CaptionStyle | null = null;
+  const lineFor = (theme: ThemeRow, names: CaptionName[], style: CaptionStyle, h: CaptionHistory) => {
+    const key = `${theme.id}|${NAME_STYLES.includes(style) ? names.map((n) => n.name).join(",") : ""}`;
     const left = aiDeadline - Date.now();
-    if (!lines.has(theme.id)) {
+    if (!lines.has(key)) {
       if (left < 500) return Promise.resolve(null);
-      lines.set(theme.id, aiCaptionLine({ theme, gender: input.gender, style: input.style }, left));
+      lines.set(key, aiCaptionLine({ theme, gender: input.gender, style: input.style, captionStyle: style, names, recent: h.texts, recentTags: recentTags(h) }, left));
     }
-    return lines.get(theme.id)!;
+    return lines.get(key)!;
   };
   let fontsSaved = false;
   for (let attempt = 0; attempt < 2; attempt++) {
     // The Generate lock is read in parallel with the first round of reads (no extra round trip).
-    const [{ data: settings }, { data: names }, { data: themes }, lock] = await Promise.all([
+    const [{ data: settings }, { data: names }, { data: themes }, lock, h] = await Promise.all([
       sb.from("settings").select("*").eq("id", 1).single(),
       sb.from("names").select("*").eq("gender", input.gender).eq("style", input.style).eq("status", "available"),
       sb.from("themes").select("*").eq("gender", input.gender).eq("status", "available"),
       attempt === 0 ? generateLockReason(sb) : Promise.resolve(null),
+      historyRead,
     ]);
     if (lock) return fail(lock);
     if (!settings) return fail("Settings are missing. Run supabase/schema.sql.");
@@ -60,8 +69,12 @@ export async function createPostAction(input: {
     });
     if (!plan.ok) return fail(plan.reason);
     const theme = themeRows.find((t) => t.id === plan.theme_id);
-    const line = theme && captionAiOn(s) ? await lineFor(theme) : null;
-    const caption = composeCaption(line, input.gender, s).caption;
+    const postNames: CaptionName[] = plan.cards.map((c) => ({ name: c.name, meaning: c.meaning }));
+    // One style per action: the previous post's style is never repeated, the least recently used preferred.
+    captionStyle ??= pickStyle(h.styles, postNames);
+    const aiOn = captionAiOn(s);
+    const ai = theme && aiOn ? await lineFor(theme, postNames, captionStyle, h) : null;
+    const { caption, caption_style, hashtag_set } = composePostCaption({ ai, aiOn, captionStyle, gender: input.gender, settings: s, history: h });
     // Remember the fonts as the "last used" ones (Today's defaults, theme previews) BEFORE the
     // cards exist: without migration 003 the PC stamps with the settings fonts, so card 1 must
     // never be claimed with the previous fonts. Best effort: a failed save never blocks the post.
@@ -77,6 +90,10 @@ export async function createPostAction(input: {
     if (error) return fail(`Could not create the post: ${error.message}`);
     const r = data as { status: string; post_id?: string; reason?: string };
     if (r.status === "ok" && r.post_id) {
+      // The style and hashtag set (009) let the next post differ. create_post doesn't take them, so they
+      // follow in a second write; best effort: before 009, or on an error, the post is simply without them.
+      const { error: metaErr } = await sb.from("posts").update({ caption_style, hashtag_set }).eq("id", r.post_id);
+      if (metaErr && !missing009(metaErr)) console.error("createPostAction: could not save the caption style", metaErr.message);
       revalidatePath("/", "layout");
       return { ok: true, postId: r.post_id };
     }
@@ -109,28 +126,43 @@ export async function updateCaptionAction(postId: string, caption: string): Prom
 }
 
 /**
- * "Rewrite caption": a fresh Gemini caption for the post's theme + the owner's hashtags,
- * saved and returned. The owner asked for AI explicitly, so this works even with the
- * "Write captions with AI" switch off. On any AI failure the saved caption is unchanged.
+ * "Rewrite caption": a fresh Gemini caption in a new style (never the post's current one or the
+ * previous post's), written against the latest captions, with new hashtags (never the post's
+ * current set or one of the last 10), saved and returned. The owner asked for AI explicitly, so
+ * this works even with the "Write captions with AI" switch off. On any AI failure the saved caption
+ * is unchanged.
  */
 export async function rewriteCaptionAction(postId: string): Promise<ActionResult<{ caption: string }>> {
   await requireOwner();
   if (!UUID_RE.test(postId ?? "")) return fail("Post not found.");
   const sb = await createClient();
-  const [{ data: post }, { data: settings, error: settingsError }] = await Promise.all([
-    sb.from("posts").select("id, gender, style, theme_id").eq("id", postId).maybeSingle(),
-    sb.from("settings").select("hashtags").eq("id", 1).maybeSingle(),
+  const [{ data: post }, { data: settings, error: settingsError }, latest, { data: cards }] = await Promise.all([
+    sb.from("posts").select("*").eq("id", postId).maybeSingle(),
+    sb.from("settings").select("*").eq("id", 1).maybeSingle(),
+    loadPostHistory(sb),
+    sb.from("cards").select("name, meaning, position").eq("post_id", postId).order("position"),
   ]);
   if (!post) return fail("Post not found.");
   // Without the settings row the hashtags are unknown: writing would drop them, so stop here.
   if (settingsError || !settings) return fail("Could not read your settings. Your caption is unchanged — try again in a moment.");
-  const p = post as Pick<PostRow, "id" | "gender" | "style" | "theme_id">;
+  const p = post as PostRow;
   const { data: theme } = await sb.from("themes").select("*").eq("id", p.theme_id).maybeSingle();
   if (!theme) return fail("This post's theme was deleted, so there is nothing to write about.");
-  const line = await aiCaptionLine({ theme: theme as ThemeRow, gender: p.gender, style: p.style }, REWRITE_TIMEOUT_MS);
-  if (!line) return fail("Could not write a new caption right now. Your caption is unchanged — try again in a moment.");
-  const caption = withHashtags(line, (settings as { hashtags?: string }).hashtags ?? "");
-  const { data, error } = await sb.from("posts").update({ caption }).eq("id", postId).select("id");
+  const names: CaptionName[] = (Array.isArray(cards) ? (cards as { name?: string; meaning?: string }[]) : [])
+    .filter((c) => c.name && c.meaning).map((c) => ({ name: c.name!, meaning: c.meaning! }));
+  // The post's own caption first: the new style and hashtag set differ from it; the previous post's style is avoided too.
+  const others = withoutId(latest, postId);
+  const own = splitCaption(p.caption ?? "");
+  const history = withFirst(others, { id: postId, text: own.text, style: p.caption_style ?? null, set: p.hashtag_set ? tagsInText(p.hashtag_set) : own.tags });
+  const captionStyle = pickStyle(history.styles, names, Math.random, others.styles[0] ? [others.styles[0]] : []);
+  const ai = await aiCaptionLine({
+    theme: theme as ThemeRow, gender: p.gender, style: p.style, captionStyle, names, recent: history.texts, recentTags: recentTags(history),
+  }, REWRITE_TIMEOUT_MS);
+  if (!ai) return fail("Could not write a new caption right now. Your caption is unchanged — try again in a moment.");
+  const { caption, caption_style, hashtag_set } = composePostCaption({ ai, aiOn: true, captionStyle, gender: p.gender, settings: settings as SettingsRow, history });
+  let { data, error } = await sb.from("posts").update({ caption, caption_style, hashtag_set }).eq("id", postId).select("id");
+  // Before 009 there is no style / hashtag set column: save the caption alone.
+  if (missing009(error)) ({ data, error } = await sb.from("posts").update({ caption }).eq("id", postId).select("id"));
   if (error) return fail(error.message);
   return data?.length ? { ok: true, caption } : fail("Post not found.");
 }

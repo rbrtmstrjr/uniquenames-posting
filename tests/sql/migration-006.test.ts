@@ -16,6 +16,7 @@ const m006raw = read("supabase", "migrations", "006_reel_voices.sql");
 const m006 = stripSupabase(m006raw);
 const m007 = stripSupabase(read("supabase", "migrations", "007_reel_themes.sql"));
 const m008 = read("supabase", "migrations", "008_reel_playbook.sql");
+const m009 = read("supabase", "migrations", "009_captions.sql");
 
 const GEMINI = [
   ["zephyr", "Bright"], ["puck", "Upbeat"], ["charon", "Informative"], ["kore", "Firm"], ["fenrir", "Excitable"],
@@ -315,6 +316,7 @@ describe("fresh schema.sql matches v1 + 002..006 (+ 007, 008)", () => {
     const migrated = await migratedDb();
     await migrated.exec(m007);
     await migrated.exec(m008);
+    await migrated.exec(m009);
     const want = await shape(migrated);
     expect(want.functions).toHaveLength(7);
     expect(want.voices).toHaveLength(31);

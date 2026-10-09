@@ -1,5 +1,5 @@
 -- Unique Names posting: database. Paste the whole file into the Supabase SQL editor and run it once.
--- A project created before v2 runs supabase/migrations/002_v2.sql, 003_post_fonts.sql, 004_subject_age.sql, 005_reels.sql, 006_reel_voices.sql, 007_reel_themes.sql then 008_reel_playbook.sql instead (this file already includes them).
+-- A project created before v2 runs supabase/migrations/002_v2.sql, 003_post_fonts.sql, 004_subject_age.sql, 005_reels.sql, 006_reel_voices.sql, 007_reel_themes.sql, 008_reel_playbook.sql then 009_captions.sql instead (this file already includes them).
 -- Status 'pending' = an AI-suggested name/theme waiting for approval; nothing here ever plans it (only 'available').
 
 -- ---------------------------------------------------------------- tables
@@ -105,6 +105,10 @@ create table if not exists public.settings (
   reel_music_volume int not null default 18 constraint settings_reel_music_volume_check check (reel_music_volume between 5 and 40),
   -- reels (007): the default visual theme
   reel_theme_id text not null default 'knitted' references public.reel_themes (id),
+  -- captions (009): the hashtags on every post + the pool one tag per post is rotated from (`hashtags` is kept for older app versions)
+  hashtags_always text not null default '#uniquenames',
+  hashtag_pool text not null default
+    '#babynames #babygirlnames #babyboynames #uniquebabynames #namemeaning #momlife #newmom #pregnancy #momtobe #babynameideas',
   updated_at timestamptz not null default now(),
   check (min_images <= max_images)
 );
@@ -152,7 +156,10 @@ create table if not exists public.posts (
   meaning_font text,
   mark_font text,
   -- the child's age chosen on Today (004): 'random' or 'newborn'/'1'..'7'; null = a post made before ages existed
-  subject_age text check (subject_age in ('random', 'newborn', '1', '2', '3', '4', '5', '6', '7'))
+  subject_age text check (subject_age in ('random', 'newborn', '1', '2', '3', '4', '5', '6', '7')),
+  -- captions (009): the caption style used and the hashtag set (the next post differs from both)
+  caption_style text,
+  hashtag_set text
 );
 
 create table if not exists public.names (
@@ -214,6 +221,9 @@ create table if not exists public.reels (
   theme_id text references public.reel_themes (id) on delete set null,
   -- 008: the hook card shown over the first 3.5 s (null = none)
   hook_text text,
+  -- 009: the post caption written after the script, and its hashtags
+  caption text,
+  hashtags text,
   duration_s numeric,
   version int not null default 1,
   claimed_at timestamptz, started_at timestamptz, finished_at timestamptz,

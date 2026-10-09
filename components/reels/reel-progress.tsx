@@ -48,8 +48,10 @@ const fileName = (title: string) => `${title.replace(/[\\/:*?"<>|]+/g, "").repla
  * A reel after approval: status + step strip + overall bar, banners (needs attention / stopped),
  * the 9:16 preview player when ready, and the grid of images (tap one → New picture / Skip).
  */
-export function ReelProgress({ reel, scenes, onPatchScene, onPatchReel, music = false }: {
+export function ReelProgress({ reel, scenes, onPatchScene, onPatchReel, music = false, caption = null }: {
   reel: ReelRow; scenes: ReelSceneRow[]; music?: boolean;
+  /** The post caption panel, shown under the Video / Progress panel. */
+  caption?: React.ReactNode;
   onPatchScene?: (id: string, patch: Partial<ReelSceneRow>) => void; onPatchReel?: (patch: Partial<ReelRow>) => void;
 }) {
   const router = useRouter();
@@ -216,6 +218,7 @@ export function ReelProgress({ reel, scenes, onPatchScene, onPatchReel, music = 
               {reel.status === "ready" && !reel.preview_path && <p className="mt-3 text-xs text-muted">The preview has expired (kept 14 days). The full video is on your PC{reel.pc_path ? `: ${reel.pc_path}` : "."}</p>}
             </Panel>
           )}
+          {caption}
         </aside>
 
         <Panel title="Images" className="min-w-0 lg:order-1" action={<span className="text-xs font-semibold tabular-nums text-muted">{counts.finished}/{counts.total}{counts.skipped ? ` · ${counts.skipped} skipped` : ""}</span>}>

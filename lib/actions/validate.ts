@@ -5,18 +5,23 @@ import { SIZE_RANGES } from "@/lib/text/layout";
 import { fontsOf } from "@/lib/fonts/post-fonts";
 import { SPEED_MAX, SPEED_MIN, VOICE_ID_RE, VOLUME_MAX, VOLUME_MIN, roundSpeed } from "@/lib/reels/voices";
 import { isThemeId } from "@/lib/reels/themes";
+import { ALWAYS_MAX, POOL_MAX, POOL_MIN, validateTagList } from "@/lib/captions/hashtags";
 
 export interface ThemeInput { title: string; gender: Gender; backdrop: string; outfit: string; props: string; lighting: string; palette: string }
 /** The card text settings (columns added by migration 002). */
 export type TextSettings = Pick<SettingsRow, "title_font" | "meaning_font" | "mark_font" | "title_size" | "meaning_size" | "mark_size" | "text_position">;
 export const TEXT_SETTING_KEYS = ["title_font", "meaning_font", "mark_font", "title_size", "meaning_size", "mark_size", "text_position"] as const satisfies readonly (keyof TextSettings)[];
-export interface SettingsInput extends TextSettings { caption_template: string; hashtags: string; handle: string; min_images: number; max_images: number; sound_on: boolean; caption_ai: boolean;
+export interface SettingsInput extends TextSettings { caption_template: string;
+  /** The old single hashtags field (kept for older callers; the form sends the 009 fields instead). */
+  hashtags?: string; handle: string; min_images: number; max_images: number; sound_on: boolean; caption_ai: boolean;
   /** Reels (migration 005): most images per reel, 10–40. Optional so older callers still validate. */
   reel_max_images?: number;
   /** Reels narrator + music (migration 006). Optional: only sent once the database has them. */
   reel_voice_id?: string; reel_speed?: number; reel_music?: boolean; reel_music_volume?: number;
   /** Reels visual theme (migration 007). Optional: only sent once the database has it. */
-  reel_theme_id?: string }
+  reel_theme_id?: string;
+  /** Captions (migration 009): the tags on every post and the rotated pool. Optional: only sent once the database has them. */
+  hashtags_always?: string; hashtag_pool?: string }
 export const REEL_IMAGES_MIN = 10;
 export const REEL_IMAGES_MAX = 40;
 export const REEL_IMAGES_DEFAULT = 40;
@@ -72,6 +77,14 @@ export function validateSettings(s: SettingsInput): string | null {
   if (s.reel_music_volume !== undefined && (!Number.isInteger(s.reel_music_volume) || s.reel_music_volume < VOLUME_MIN || s.reel_music_volume > VOLUME_MAX))
     return `Music volume must be ${VOLUME_MIN} to ${VOLUME_MAX} %.`;
   if (s.reel_theme_id !== undefined && !isThemeId(s.reel_theme_id)) return "Pick a theme from the list.";
+  if (s.hashtags_always !== undefined) {
+    const bad = typeof s.hashtags_always === "string" ? validateTagList(s.hashtags_always, "Always", 0, ALWAYS_MAX) : "Bad hashtags.";
+    if (bad) return bad;
+  }
+  if (s.hashtag_pool !== undefined) {
+    const bad = typeof s.hashtag_pool === "string" ? validateTagList(s.hashtag_pool, "Pool", POOL_MIN, POOL_MAX) : "Bad hashtags.";
+    if (bad) return bad;
+  }
   // Fonts are not edited in Settings any more (picked per post on Today, never written by a
   // Settings save), so a stale/unknown font id must not block Save: normalise, don't reject.
   return validateTextSettings({ ...s, ...fontsOf(s) });

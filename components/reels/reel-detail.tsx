@@ -10,6 +10,7 @@ import { createClient } from "@/lib/supabase/client";
 import { useRealtimeRows } from "@/lib/realtime/use-table";
 import { ScriptReview } from "./script-review";
 import { ReelProgress } from "./reel-progress";
+import { ReelCaption } from "./reel-caption";
 
 const byPosition = (a: ReelSceneRow, b: ReelSceneRow) => a.position - b.position;
 
@@ -37,14 +38,16 @@ export function ReelDetail({ reel: initialReel, scenes: initialScenes, narrator 
 
   const patchReel = (p: Partial<ReelRow>) => setReels((prev) => prev.map((r) => ({ ...r, ...p })));
   const patchScene = (sid: string, p: Partial<ReelSceneRow>) => setScenes((prev) => prev.map((s) => (s.id === sid ? { ...s, ...p } : s)));
+  // The post caption + hashtags: while the script is reviewed and once the video is made (and in between).
+  const caption = <ReelCaption reel={reel} onPatch={patchReel} />;
 
   return (
     <div className="space-y-2">
       <Link href="/reels" className="inline-flex min-h-11 items-center gap-1.5 text-sm font-semibold text-muted hover:text-ink"><ArrowLeft className="size-4" /> Reels</Link>
       {reel.status === "script"
-        ? <ScriptReview reel={reel} scenes={scenes} narrator={narrator} themes={themes}
+        ? <ScriptReview reel={reel} scenes={scenes} narrator={narrator} themes={themes} caption={caption}
             onApproved={() => { patchReel({ status: "queued" }); setScenes((prev) => prev.map((s) => (s.status === "pending" ? { ...s, status: "queued" } : s))); }} />
-        : <ReelProgress reel={reel} scenes={scenes} music={music} onPatchReel={patchReel} onPatchScene={patchScene} />}
+        : <ReelProgress reel={reel} scenes={scenes} music={music} onPatchReel={patchReel} onPatchScene={patchScene} caption={caption} />}
     </div>
   );
 }

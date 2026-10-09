@@ -346,6 +346,15 @@ describe("list, new reel, setup, nav", () => {
     rows = null;
   });
 
+  it("the reel page shows the post caption + hashtags while the script is reviewed and once the video is made", () => {
+    const withCaption = { caption: "Nobody warned you. What helps you?", hashtags: "#uniquenames #bedtime" };
+    for (const status of ["script", "ready"] as const) {
+      render(<ReelDetail reel={reel({ status, ...withCaption })} scenes={scenes(2, status === "ready" ? "done" : "pending")} />);
+      expect(screen.getByTestId("reel-caption").textContent).toContain("Nobody warned you. What helps you?#uniquenames #bedtime");
+      cleanup();
+    }
+  });
+
   it("nav has a Reels tab", () => {
     expect(NAV.some((n) => n.href === "/reels" && n.label === "Reels")).toBe(true);
   });
