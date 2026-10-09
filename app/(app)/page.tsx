@@ -7,8 +7,8 @@ import { Empty } from "@/components/ui/empty";
 import { ImageIcon } from "lucide-react";
 import { PageHeader } from "@/components/ui/page-header";
 
-// Create post (and Make A–Z) waits on Gemini for the caption (9 s budget) plus a few DB round trips;
-// Fill missing letters waits on Gemini for name ideas (up to ~50 s).
+// Create post waits on Gemini for the caption (9 s budget) plus a few DB round trips;
+// By letter > Suggest with AI waits on Gemini for name ideas (up to ~50 s).
 export const maxDuration = 60;
 
 export default async function TodayPage() {
@@ -22,10 +22,10 @@ export default async function TodayPage() {
         {/* Phones: New post first. Desktop: the post being made + Stock on the wide left (70%), New post on the right (30%). */}
         <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_380px] xl:grid-cols-[minmax(0,1fr)_440px] 2xl:grid-cols-[minmax(0,7fr)_minmax(0,3fr)]">
           <div className="min-w-0 lg:order-2">
-            <NewPostPanel settings={d.settings} themes={d.themes} stock={d.stock} busy={d.activePosts.some((a) => a.post.status === "generating")} az={d.az} />
+            <NewPostPanel settings={d.settings} themes={d.themes} stock={d.stock} busy={d.activePosts.some((a) => a.post.status === "generating")} letters={d.letters} />
           </div>
           <div className="min-w-0 space-y-4 lg:order-1">
-            {/* An A–Z series shows both parts, Part 1 first. */}
+            {/* An A–Z series (made before posts by letter) shows both parts, Part 1 first. */}
             {d.activePosts.length
               ? d.activePosts.map((a) => <ActivePost key={a.post.id} post={a.post} initialCards={a.cards} />)
               : <Empty icon={<ImageIcon className="size-6" />} title="No post in progress" text="Pick Boy or Girl and press Generate post." />}

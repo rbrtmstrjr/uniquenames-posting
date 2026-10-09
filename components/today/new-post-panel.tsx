@@ -10,7 +10,6 @@ import { DatePicker } from "@/components/ui/date-picker";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/shadcn/select";
 import { useHotkey } from "@/lib/realtime/hotkey";
 import { createPostAction } from "@/lib/actions/posts";
-import { createAzSeriesAction } from "@/lib/actions/series";
 import { callAction } from "@/lib/actions/call";
 import type { Gender, NameStyle, SettingsRow, ThemeRow } from "@/lib/db/types";
 import { useWorkerContext } from "@/components/shell/app-shell";
@@ -21,10 +20,9 @@ import { titleText } from "@/lib/text/layout";
 import { CatalogFontsLink, FontFields, FontSummary, fontStyle } from "@/components/fonts/font-select";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/shadcn/collapsible";
 import { AGE_CHOICES, AGE_LABELS, type AgeChoice } from "@/lib/planner/age";
-import { azSummary, postSummary } from "@/lib/today/summary";
-import type { AzToday } from "@/lib/data/today";
-import { missingLetters } from "@/lib/series/az";
-import { AzLetters } from "@/components/today/az-letters";
+import { postSummary } from "@/lib/today/summary";
+import { letterKey, type LetterStock } from "@/lib/series/letter";
+import { LetterPicker } from "@/components/today/letter-picker";
 import { useTodaySelection } from "@/components/today/selection";
 import { cn } from "@/lib/utils/cn";
 
@@ -83,12 +81,12 @@ function manilaToday() {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Manila" }).format(new Date());
 }
 
-type Mode = "post" | "az";
+type Mode = "post" | "letter";
 
-export function NewPostPanel({ settings, themes, stock, busy, az }: {
+export function NewPostPanel({ settings, themes, stock, busy, letters }: {
   settings: SettingsRow; themes: ThemeRow[]; stock: { gender: Gender; style: NameStyle; count: number }[]; busy: boolean;
-  /** The A–Z series (migration 011): the option only shows once the database has it. */
-  az?: AzToday;
+  /** Posts by letter: available names per letter for each gender + style (the By letter option shows with it). */
+  letters?: LetterStock;
 }) {
   const { health } = useWorkerContext();
   // Shared with the Stock card on Today (it highlights the matching count).
@@ -101,9 +99,10 @@ export function NewPostPanel({ settings, themes, stock, busy, az }: {
   // Always starts on Random (a different child and age per card); the owner picks a fixed age per post.
   const [age, setAge] = useState<AgeChoice>("random");
   const [pending, start] = useTransition();
-  // A–Z series: one single name per letter, two posts (A–M, N–Z) on one theme.
+  // By letter: a normal post where every name starts with the chosen letter.
   const [mode, setMode] = useState<Mode>("post");
-  const isAz = mode === "az" && !!az?.ready;
+  const [letter, setLetter] = useState<string | null>(null);
+  const byLetter = mode === "letter" && !!letters;
 
   const genderThemes = useMemo(() => themes.filter((t) => t.gender === gender), [themes, gender]);
   const theme = genderThemes.find((t) => t.id === themeId) ?? genderThemes[0];
@@ -111,32 +110,24 @@ export function NewPostPanel({ settings, themes, stock, busy, az }: {
   const counts = Array.from({ length: settings.max_images - settings.min_images + 1 }, (_, i) => String(settings.min_images + i));
   const wanted = count === "auto" ? settings.min_images : Number(count);
   const gen = canGenerate(health);
-  const coverage = az?.coverage[gender] ?? [];
-  const missing = isAz ? missingLetters(coverage) : [];
-  const summary = isAz
-    ? azSummary({ gender, age, themeTitle: theme?.title })
-    : postSummary({ count, min: settings.min_images, max: settings.max_images, gender, style, age, themeTitle: theme?.title });
+  const letterCounts = letters?.[letterKey(gender, style)] ?? {};
+  const forLetter = byLetter && letter ? letterCounts[letter] ?? 0 : 0;
+  const summary = postSummary({ count, min: settings.min_images, max: settings.max_images, gender, style, age, themeTitle: theme?.title, letter: byLetter ? letter : null });
   // The PC lock comes first: it is the one the owner fixes at the PC, not on this form.
   const blocked = !gen.ok ? gen.reason
-    : isAz
-      ? missing.length ? `No ${gender} name yet for ${missing.join(", ")}. Fill the missing letters and approve the names first.` : !theme ? `No ${gender} theme left. Add a theme first.` : null
-      : left < wanted ? `Only ${left} ${gender} ${style} names left${count === "auto" ? "" : `, but you chose ${count} cards`}. Add names or pick fewer cards.` : !theme ? `No ${gender} theme left. Add a theme first.` : null;
+    : byLetter && !letter ? "Pick a letter."
+      : byLetter && forLetter < wanted ? `Only ${forLetter} ${gender} ${style} names start with ${letter}${count === "auto" ? "" : `, but you chose ${count} cards`}. Suggest more with AI or pick fewer cards.`
+        : left < wanted ? `Only ${left} ${gender} ${style} names left${count === "auto" ? "" : `, but you chose ${count} cards`}. Add names or pick fewer cards.` : !theme ? `No ${gender} theme left. Add a theme first.` : null;
 
   const generate = () => {
     if (blocked || pending) return;
     start(async () => {
       const postDate = date || manilaToday();
-      if (isAz) {
-        // One request id per press: the database makes one series for it, however often it arrives.
-        const r = await callAction(() => createAzSeriesAction({ gender, postDate, themeId: theme?.id, requestId: crypto.randomUUID(), fonts, subjectAge: age }));
-        if (!r.ok) { toast.error(r.error); return; }
-        toast.success("A–Z series queued: Part 1 (A–M) and Part 2 (N–Z). Cards will appear as they are made.");
-        return;
-      }
-      const r = await callAction(() => createPostAction({ gender, style, count: count === "auto" ? null : Number(count), postDate, themeId: theme?.id, requestId: crypto.randomUUID(), fonts, subjectAge: age }));
+      const only = byLetter && letter ? { letter } : {};
+      const r = await callAction(() => createPostAction({ gender, style, count: count === "auto" ? null : Number(count), postDate, themeId: theme?.id, requestId: crypto.randomUUID(), fonts, subjectAge: age, ...only }));
       if (!r.ok) { toast.error(r.error); return; }
       // The action's revalidatePath re-renders Today with the new post in the same response.
-      toast.success("Post queued. Cards will appear as they are made.");
+      toast.success(only.letter ? `${only.letter} post queued. Cards will appear as they are made.` : "Post queued. Cards will appear as they are made.");
     });
   };
   useHotkey("g", generate);
@@ -149,10 +140,9 @@ export function NewPostPanel({ settings, themes, stock, busy, az }: {
           <DatePicker label="Post date" value={date} onChange={setDate} today={manilaToday()} className="w-auto" />
         </div>
 
-        {az?.ready && (
-          <Segmented fill label="Post type" value={mode}
-            onChange={(v) => { setMode(v); if (v === "az") setSel({ gender, style: "single" }); }}
-            options={[{ value: "post", label: "Normal post" }, { value: "az", label: "A–Z series" }]} />
+        {letters && (
+          <Segmented fill label="Post type" value={mode} onChange={setMode}
+            options={[{ value: "post", label: "Normal post" }, { value: "letter", label: "By letter" }]} />
         )}
 
         <Section label="Who">
@@ -163,10 +153,8 @@ export function NewPostPanel({ settings, themes, stock, busy, az }: {
                 options={[{ value: "boy", label: "Boy" }, { value: "girl", label: "Girl" }]} />
             </Field>
             <Field label="Name style">
-              {isAz
-                ? <p className="flex h-11 items-center rounded-xl bg-surface-2 px-3.5 text-sm font-semibold text-ink">Single names</p>
-                : <Segmented fill label="Name style" value={style} onChange={(v) => setSel({ gender, style: v })}
-                    options={[{ value: "two-word", label: "Two-word" }, { value: "single", label: "Single" }]} />}
+              <Segmented fill label="Name style" value={style} onChange={(v) => setSel({ gender, style: v })}
+                options={[{ value: "two-word", label: "Two-word" }, { value: "single", label: "Single" }]} />
             </Field>
             <Field label="Child age" id="age-label" className="col-span-2 @2xl:col-span-1">
               <Select value={age} onValueChange={(v) => setAge(v as AgeChoice)}>
@@ -213,20 +201,20 @@ export function NewPostPanel({ settings, themes, stock, busy, az }: {
           </div>
         </Section>
 
-        {isAz ? (
+        {byLetter && (
           <Section label="Letters">
-            <AzLetters gender={gender} coverage={coverage} />
-          </Section>
-        ) : (
-          <Section label="Cards">
-            {/* Phone: an even 6-column grid (Auto takes two). Wider: one full-width track. */}
-            <Segmented fill label="Number of cards" value={count} onChange={setCount} className="grid h-auto grid-cols-6 @2xl:flex @2xl:h-11"
-              options={[
-                { value: "auto", label: `Auto ${settings.min_images}–${settings.max_images}`, className: "col-span-2 h-11 @2xl:h-9 @2xl:flex-[1.8]" },
-                ...counts.map((c) => ({ value: c, label: c, className: "h-11 @2xl:h-9" })),
-              ]} />
+            <LetterPicker gender={gender} style={style} counts={letterCounts} need={wanted} value={letter} onChange={setLetter} />
           </Section>
         )}
+
+        <Section label="Cards">
+          {/* Phone: an even 6-column grid (Auto takes two). Wider: one full-width track. */}
+          <Segmented fill label="Number of cards" value={count} onChange={setCount} className="grid h-auto grid-cols-6 @2xl:flex @2xl:h-11"
+            options={[
+              { value: "auto", label: `Auto ${settings.min_images}–${settings.max_images}`, className: "col-span-2 h-11 @2xl:h-9 @2xl:flex-[1.8]" },
+              ...counts.map((c) => ({ value: c, label: c, className: "h-11 @2xl:h-9" })),
+            ]} />
+        </Section>
 
         <div className="flex flex-col gap-3 border-t border-line pt-5 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0 space-y-1">
@@ -237,10 +225,10 @@ export function NewPostPanel({ settings, themes, stock, busy, az }: {
                 ? <span className="block text-xs font-semibold text-warn-text">{blocked}</span>
                 : busy
                   ? <span className="block text-xs text-muted">If a post is still being made, the new cards wait in line.</span>
-                  : <span className="block text-xs text-muted">{isAz ? "One theme for both parts, names in A–Z order" : `${left} names left`}<span className="hidden sm:inline"> · press G</span></span>}
+                  : <span className="block text-xs text-muted">{byLetter ? `${forLetter} ${letter} names left` : `${left} names left`}<span className="hidden sm:inline"> · press G</span></span>}
           </div>
           <Button size="lg" onClick={generate} loading={pending} disabled={!!blocked} className="w-full shrink-0 sm:w-auto">
-            <Sparkles className="size-4" /> {isAz ? "Make A–Z (2 posts)" : "Generate post"}
+            <Sparkles className="size-4" /> {byLetter && letter ? `Generate ${letter} post` : "Generate post"}
           </Button>
         </div>
       </div>

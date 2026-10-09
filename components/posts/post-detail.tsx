@@ -29,7 +29,7 @@ import { restampSelection } from "@/lib/actions/helpers";
 import { regenerateCardAction, reorderCardsAction, selectAllAction, setSelectedAction } from "@/lib/actions/cards";
 import { callAction, optimistic } from "@/lib/actions/call";
 import type { ActionResult } from "@/lib/actions/result";
-import { seriesLabel } from "@/lib/series/az";
+import { postLabel } from "@/lib/series/letter";
 import { useUndoableDelete } from "@/components/cards/use-undoable-delete";
 import type { PostFonts } from "@/lib/fonts/post-fonts";
 import { RestampDialog } from "./restamp-dialog";
@@ -173,7 +173,7 @@ export function PostDetail({ post: initialPost, theme, initialCards, settingsFon
   const restampable = restampSelection(visible);
 
   const label = post.gender === "girl" ? "Girl" : "Boy";
-  const series = seriesLabel(post);
+  const kind = postLabel(post);
   const failed = visible.filter((c) => c.status === "failed");
   const hasCta = cards.some((c) => c.kind === "cta");
   const nameCards = visible.filter((c) => c.kind !== "cta").length;
@@ -187,7 +187,7 @@ export function PostDetail({ post: initialPost, theme, initialCards, settingsFon
             {new Date(post.post_date + "T00:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })} · {label}
           </h1>
           <p className="mt-1 text-sm text-muted">
-            {series && <><span className="font-semibold text-accent">{series}</span> · </>}
+            {kind && <><span className="font-semibold text-accent">{kind}</span> · </>}
             {theme.title} · {post.style} · {nameCards} cards{visible.length > nameCards ? " + closing card" : ""}
           </p>
         </div>
