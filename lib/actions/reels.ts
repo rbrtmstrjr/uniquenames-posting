@@ -39,6 +39,10 @@ const NEEDS_005 = "Run supabase/migrations/005_reels.sql first.";
 const NEEDS_007 = "Visual themes need the database update first (run supabase/migrations/007_reel_themes.sql).";
 const NEEDS_008 = "The hook card needs the database update first (run supabase/migrations/008_reel_playbook.sql).";
 const NEEDS_009 = "Reel captions need the database update first (run supabase/migrations/009_captions.sql).";
+const NEEDS_014 = "On-screen labels need the database update first (run supabase/migrations/014_reel_formats.sql).";
+/** A line's on-screen label (014): at most 8 words / 80 characters, never on line 1. */
+const LABEL_MAX = 80;
+const LABEL_MAX_WORDS = 8;
 const STALE = "This reel just changed. Reload the page and try again.";
 const NOT_FOUND = "Reel not found.";
 const SCRIPT_CHANGED = "The script changed in another tab. Try again.";
@@ -356,12 +360,13 @@ export async function rewriteReelCaptionAction(reelId: string): Promise<ActionRe
 
 /**
  * The review page's edits. `emotion`, `action` and `shot` are optional (after 007): leave them out to keep the line's
- * own. `hookText` (after 008) is the hook card: leave it out to keep it, '' removes it.
+ * own. `hookText` (after 008) is the hook card: leave it out to keep it, '' removes it. `on_screen` (after 014) is the
+ * line's label: leave it out to keep it, '' removes it.
  */
 export interface ReelScriptEdit {
   title: string;
   hookText?: string;
-  lines: { id: string; narration: string; idea: string; emotion?: string; action?: string; shot?: string }[];
+  lines: { id: string; narration: string; idea: string; emotion?: string; action?: string; shot?: string; on_screen?: string }[];
 }
 
 function badEdit(e: ReelScriptEdit): string | null {
@@ -395,6 +400,13 @@ function badLines(lines: ReelScriptEdit["lines"], positionOf: (id: string) => nu
     if (l.emotion !== undefined && !emotionOf(l.emotion)) return `${at}: pick a feeling from the list.`;
     if (l.shot !== undefined && !shotOf(l.shot)) return `${at}: pick a framing from the list.`;
     if (l.action !== undefined && (typeof l.action !== "string" || oneLine(l.action).length > ACTION_MAX)) return `${at}'s body language is longer than ${ACTION_MAX} characters.`;
+    if (l.on_screen !== undefined) {
+      if (typeof l.on_screen !== "string") return "Bad label. Reload the page and try again.";
+      const label = oneLine(l.on_screen);
+      if (label && positionOf(l.id) === 1) return "Line 1 has the hook card, so it has no on-screen label.";
+      if (label.length > LABEL_MAX) return `${at}'s on-screen label is longer than ${LABEL_MAX} characters.`;
+      if (wordCount(label) > LABEL_MAX_WORDS) return `${at}'s on-screen label is longer than ${LABEL_MAX_WORDS} words.`;
+    }
   }
   return null;
 }
@@ -421,6 +433,9 @@ export async function saveReelScriptAction(reelId: string, edit: ReelScriptEdit)
   if (badLine) return fail(badLine);
   const has007 = scenes.length > 0 && scenes.every((s) => "emotion" in s);
   if (!has007 && edit.lines.some((l) => l.emotion !== undefined || l.action !== undefined || l.shot !== undefined)) return fail(NEEDS_007);
+  // 014: the lines carry on_screen; before it a label can't be saved (an empty one is simply ignored)
+  const has014 = scenes.length > 0 && scenes.every((s) => "on_screen" in s);
+  if (!has014 && edit.lines.some((l) => !!oneLine(l.on_screen))) return fail(NEEDS_014);
   const hook = edit.hookText === undefined ? undefined : (oneLine(edit.hookText) || null);
   const hookChanged = hook !== undefined && hook !== (reel.hook_text ?? null);
   if (hookChanged && !("hook_text" in reel)) return fail(NEEDS_008);
@@ -431,12 +446,14 @@ export async function saveReelScriptAction(reelId: string, edit: ReelScriptEdit)
   const edits = new Map(edit.lines.map((l) => [l.id, l]));
   const next = scenes.map((s) => {
     const l = edits.get(s.id);
-    if (!l) return { s, edited: false, narration: s.narration, idea: s.idea, emotion: s.emotion ?? null, action: s.action ?? null, shot: s.shot ?? null };
+    const label = s.on_screen ?? null;
+    if (!l) return { s, edited: false, narration: s.narration, idea: s.idea, emotion: s.emotion ?? null, action: s.action ?? null, shot: s.shot ?? null, label };
     return {
       s, edited: true, narration: oneLine(l.narration), idea: lightClean(oneLine(l.idea)),
       emotion: l.emotion !== undefined ? emotionOf(l.emotion) : (s.emotion ?? null),
       action: l.action !== undefined ? (lightClean(oneLine(l.action)) || null) : (s.action ?? null),
       shot: l.shot !== undefined ? shotOf(l.shot) : (s.shot ?? null),
+      label: has014 && l.on_screen !== undefined ? (oneLine(l.on_screen) || null) : label,
     };
   });
   const needsPrompt = (n: (typeof next)[number]) => n.idea !== n.s.idea || n.emotion !== (n.s.emotion ?? null) ||
@@ -470,6 +487,8 @@ export async function saveReelScriptAction(reelId: string, edit: ReelScriptEdit)
       }
       if (s.punch && !punchIn(n.narration, s.punch)) { patch.punch = null; patch.key_moment = false; }
     }
+    // a new label only changes the label (the worker draws it over the picture)
+    if (n.edited && n.label !== (s.on_screen ?? null)) patch.on_screen = n.label;
     if (!Object.keys(patch).length) return [];
     patch.version = s.version + 1;
     return [sb.from("reel_scenes").update(patch).eq("id", s.id).eq("version", s.version).eq("status", "pending").select("id")];

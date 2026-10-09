@@ -16,7 +16,10 @@ import { canGenerate } from "@/lib/status/worker-health";
 import { approveReelAction, deleteReelAction, rewriteReelScriptAction, saveReelScriptAction } from "@/lib/actions/reels";
 import { callAction } from "@/lib/actions/call";
 import { useNow } from "@/lib/realtime/hooks";
-import { HOOK_TEXT_MAX_WORDS, LINE_MAX_WORDS, TITLE_MAX, clock, estimateSeconds, wordCount, wordTarget } from "@/lib/reels/status";
+import {
+  HOOK_TEXT_MAX_WORDS, LINE_MAX_WORDS, ON_SCREEN_MAX, ON_SCREEN_MAX_WORDS, REEL_SECONDS, TITLE_MAX, clock, estimateSeconds, wordCount, wordTarget,
+} from "@/lib/reels/status";
+import { FORMAT_SPECS, isReelFormat } from "@/lib/reels/formats";
 import type { Narrator } from "@/lib/data/voices";
 import type { ThemeChoice } from "@/lib/data/reel-themes";
 import { lineMood } from "@/lib/reels/labels";
@@ -26,9 +29,13 @@ import { VoicePicker } from "./voice-picker";
 import { ThemePicker } from "./theme-picker";
 import { cn } from "@/lib/utils/cn";
 
-type Text = { narration: string; idea: string };
+/** A line's editable text; `on_screen` only on lines that have the 014 field. */
+type Text = { narration: string; idea: string; on_screen?: string };
 const oneLine = (s: string) => s.replace(/\s+/g, " ").trim();
-const same = (a: Text, b: Text) => oneLine(a.narration) === oneLine(b.narration) && oneLine(a.idea) === oneLine(b.idea);
+const same = (a: Text, b: Text) => oneLine(a.narration) === oneLine(b.narration) && oneLine(a.idea) === oneLine(b.idea) &&
+  oneLine(a.on_screen ?? "") === oneLine(b.on_screen ?? "");
+/** The line's own text as stored (the label only when the line has the 014 field). */
+const textOf = (s: ReelSceneRow): Text => ({ narration: s.narration, idea: s.idea, ...(s.on_screen !== undefined ? { on_screen: s.on_screen ?? "" } : {}) });
 
 /** m:ss since `since`, ticking on its own (so the long list doesn't re-render every second). */
 function Elapsed({ since }: { since: number }) {
@@ -49,6 +56,7 @@ function firstProblem(title: string, lines: (Text & { position: number })[], hoo
     if (!oneLine(l.narration)) return `${at} has no words.`;
     if (wordCount(l.narration) > LINE_MAX_WORDS) return `${at} is longer than ${LINE_MAX_WORDS} words.`;
     if (!oneLine(l.idea)) return `${at} has no picture idea.`;
+    if (l.on_screen !== undefined && wordCount(l.on_screen) > ON_SCREEN_MAX_WORDS) return `${at}'s on-screen label is longer than ${ON_SCREEN_MAX_WORDS} words.`;
   }
   return null;
 }
@@ -105,9 +113,9 @@ export function ScriptReview({ reel, scenes, onApproved, narrator = null, themes
   const baseTitle = savedTitle ?? reel.title;
   const title = titleEdit ?? baseTitle;
   const lines = useMemo(() => scenes.map((s) => {
-    const base = saved[s.id] ?? { narration: s.narration, idea: s.idea };
+    const base = saved[s.id] ?? textOf(s);
     const cur = edits[s.id] ?? base;
-    return { ...s, base, narration: cur.narration, idea: cur.idea, dirty: !same(cur, base) };
+    return { ...s, base, narration: cur.narration, idea: cur.idea, on_screen: cur.on_screen, dirty: !same(cur, base) };
   }), [scenes, edits, saved]);
   const dirtyLines = lines.filter((l) => l.dirty);
   const titleDirty = oneLine(title) !== oneLine(baseTitle);
@@ -125,18 +133,20 @@ export function ScriptReview({ reel, scenes, onApproved, narrator = null, themes
 
   const edit = (id: string, patch: Partial<Text>) => setEdits((prev) => {
     const l = lines.find((x) => x.id === id)!;
-    return { ...prev, [id]: { narration: l.narration, idea: l.idea, ...patch } };
+    return { ...prev, [id]: { narration: l.narration, idea: l.idea, ...(l.on_screen !== undefined ? { on_screen: l.on_screen } : {}), ...patch } };
   });
   const discard = () => { setEdits({}); setTitleEdit(null); setHookEdit(null); };
 
   const save = async (quiet = false): Promise<boolean> => {
     const payload = {
       title: oneLine(title), ...(hookDirty ? { hookText: oneLine(hook) } : {}),
-      lines: dirtyLines.map((l) => ({ id: l.id, narration: oneLine(l.narration), idea: oneLine(l.idea) })),
+      lines: dirtyLines.map((l) => ({
+        id: l.id, narration: oneLine(l.narration), idea: oneLine(l.idea), ...(l.on_screen !== undefined ? { on_screen: oneLine(l.on_screen) } : {}),
+      })),
     };
     const r = await callAction(() => saveReelScriptAction(reel.id, payload));
     if (!r.ok) { toast.error(r.error); return false; }
-    const sent: Record<string, Text> = Object.fromEntries(payload.lines.map((l) => [l.id, { narration: l.narration, idea: l.idea }]));
+    const sent: Record<string, Text> = Object.fromEntries(payload.lines.map(({ id, ...text }) => [id, text]));
     setSaved((prev) => ({ ...prev, ...sent }));
     setSavedTitle(payload.title);
     // Only drop edits that are exactly what was saved: anything typed while saving stays (and stays dirty).
@@ -183,6 +193,8 @@ export function ScriptReview({ reel, scenes, onApproved, narrator = null, themes
   };
 
   const locked = busy === "rewrite" || busy === "approve" || busy === "delete";
+  // 014: the script's format (absent / null on older reels: no chip)
+  const format = isReelFormat(reel.format) ? reel.format : null;
   // The reel's look: the pinned theme (007); null (or before 007) means knitted dolls, like the server's loadTheme
   // and the worker, never the Settings default. A theme just saved here shows until the reel row catches up.
   const [themeSaved, setThemeSaved] = useState<ReelThemeId | null>(null);
@@ -204,6 +216,11 @@ export function ScriptReview({ reel, scenes, onApproved, narrator = null, themes
         <Input id="reel-title" value={title} maxLength={TITLE_MAX} disabled={locked} onChange={(e) => setTitleEdit(e.target.value)}
           className="h-auto min-h-12 border-transparent bg-transparent px-2 -mx-2 font-display text-2xl text-ink hover:border-line focus-visible:border-ring sm:text-3xl md:text-3xl" />
         <p className="text-sm text-muted">
+          {format && (
+            <span data-testid="format-chip" className="mr-2 inline-flex items-center rounded-full bg-accent-soft px-2.5 py-0.5 align-middle text-xs font-semibold text-accent">
+              <span className="sr-only">Format: </span>{FORMAT_SPECS[format].label}
+            </span>
+          )}
           Check every line, then approve.{reel.stage ? ` · ${reel.stage[0].toUpperCase()}${reel.stage.slice(1)}` : ""}{reel.topic ? ` · Topic: ${reel.topic}` : ""}
         </p>
       </div>
@@ -224,7 +241,7 @@ export function ScriptReview({ reel, scenes, onApproved, narrator = null, themes
               ))}
             </div>
             <p className={cn("mt-2 text-xs", lengthOk ? "text-muted" : "text-warn-text")}>
-              {lengthOk ? `Good length (aim ${TARGET.lo}–${TARGET.hi} words).` : `Aim for ${TARGET.lo}–${TARGET.hi} words (about 0:45–1:15).`}
+              {lengthOk ? `Good length (aim ${TARGET.lo}–${TARGET.hi} words).` : `Aim for ${TARGET.lo}–${TARGET.hi} words (about ${clock(REEL_SECONDS.lo)}–${clock(REEL_SECONDS.hi)}).`}
             </p>
             {themes && reel.theme_id !== undefined && (
               <div className="mt-3 border-t border-line pt-3" data-testid="theme">
@@ -312,6 +329,19 @@ export function ScriptReview({ reel, scenes, onApproved, narrator = null, themes
                         onChange={(e) => edit(l.id, { narration: e.target.value })}
                         className="min-h-11 resize-none px-3 py-2 text-base leading-snug md:text-[15px]" />
                       <LineMood scene={l} />
+                      {l.on_screen !== undefined && l.position > 1 && (
+                        <div className="flex min-w-0 items-center gap-2">
+                          <Input aria-label={`Line ${l.position} on-screen label`} value={l.on_screen} maxLength={ON_SCREEN_MAX} disabled={locked}
+                            placeholder="On-screen label (optional)"
+                            aria-invalid={wordCount(l.on_screen) > ON_SCREEN_MAX_WORDS || undefined}
+                            onChange={(e) => edit(l.id, { on_screen: e.target.value })} className="h-11 min-w-0 flex-1 text-sm md:h-9" />
+                          {l.on_screen.trim() && (
+                            <span className={cn("shrink-0 text-xs tabular-nums", wordCount(l.on_screen) > ON_SCREEN_MAX_WORDS ? "font-bold text-bad" : "text-muted")}>
+                              {wordCount(l.on_screen)}/{ON_SCREEN_MAX_WORDS}
+                            </span>
+                          )}
+                        </div>
+                      )}
                       <Disclosure triggerClassName="min-h-11 text-xs font-normal text-muted"
                         summary={<span className="flex min-w-0 gap-1.5"><span className="shrink-0 font-semibold text-ink">Picture idea</span><span className="line-clamp-1 break-all">{l.idea}</span></span>}>
                         <Textarea aria-label={`Line ${l.position} picture idea`} value={l.idea} disabled={locked}

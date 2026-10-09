@@ -118,6 +118,23 @@ describe("SettingsForm (shadcn controls)", () => {
     expect(await captured()).toMatchObject({ reel_max_images: 11 });
   });
 
+  it("Reels (014): an 'On-screen step labels' switch bound to reel_labels, sent on Save", async () => {
+    render(<SettingsForm initial={{ ...initial, reel_max_images: 20, reel_labels: true }} />);
+    const sw = screen.getByRole("switch", { name: "On-screen step labels" });
+    expect(sw.getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(sw);
+    expect(sw.getAttribute("aria-checked")).toBe("false");
+    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+    expect(await captured()).toMatchObject({ reel_labels: false });
+  });
+
+  it("Reels: before 014 (no reel_labels) the switch is hidden and never sent", async () => {
+    render(<SettingsForm initial={{ ...initial, reel_max_images: 20 }} />);
+    expect(screen.queryByRole("switch", { name: "On-screen step labels" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+    expect(await captured()).not.toHaveProperty("reel_labels");
+  });
+
   it("Reels: before migration 005 (no column) the slider shows 40 and says to run 005", () => {
     render(<SettingsForm initial={initial} />);
     expect(screen.getByRole("slider", { name: "Images per reel" }).getAttribute("aria-valuenow")).toBe("40");

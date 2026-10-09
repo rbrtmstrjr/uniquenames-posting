@@ -58,6 +58,10 @@ ${tags.join(" ")}` : line;
 const ctaOf = (row: Partial<SettingsRow>): { cta_enabled?: boolean; cta_messages?: string } =>
   row.cta_enabled === undefined ? {} : { cta_enabled: row.cta_enabled, cta_messages: row.cta_messages ?? CTA_MESSAGES_DEFAULT };
 
+/** The on-screen step labels switch; absent until migration 014 runs (the form then hides it and never sends it). */
+const labelsOf = (row: Partial<SettingsRow>): { reel_labels?: boolean } =>
+  row.reel_labels === undefined ? {} : { reel_labels: row.reel_labels !== false };
+
 /** The default visual theme; absent until migration 007 runs (the form then never sends it). */
 const themeIdOf = (row: Partial<SettingsRow>): { reel_theme_id?: ReelThemeId } =>
   row.reel_theme_id === undefined ? {} : { reel_theme_id: isThemeId(row.reel_theme_id) ? row.reel_theme_id : DEFAULT_THEME_ID };
@@ -78,7 +82,9 @@ export function SettingsForm({ initial, sample = DEFAULT_SAMPLE, voices = null, 
     // undefined until migration 009 runs: not sent then.
     ...hashtagsOf(initial),
     // undefined until migration 010 runs: not sent then.
-    ...ctaOf(initial) });
+    ...ctaOf(initial),
+    // undefined until migration 014 runs: hidden and not sent then.
+    ...labelsOf(initial) });
   const has010 = s.cta_enabled !== undefined;
   const has009 = s.hashtag_pool !== undefined;
   // Before 009 posts use the default always-tag + the pool made from the old hashtags field.
@@ -168,6 +174,14 @@ export function SettingsForm({ initial, sample = DEFAULT_SAMPLE, voices = null, 
         <p className="mt-2 text-xs text-muted">{initial.reel_max_images === undefined
           ? "Reels need the database update first (run supabase/migrations/005_reels.sql); until then 40 is used."
           : "The most pictures a new script can have. Fewer images make a reel faster on your PC."}</p>
+        {s.reel_labels !== undefined && (
+          <div className="mt-3 border-t border-line pt-3">
+            <label htmlFor="reel-labels" className="inline-flex min-h-11 cursor-pointer items-center gap-3 text-sm font-semibold text-ink">
+              <Switch id="reel-labels" checked={s.reel_labels} onCheckedChange={(v) => setS({ ...s, reel_labels: v })} /> On-screen step labels
+            </label>
+            <p className="text-xs text-muted">Short labels at the top of the picture while a step, swap or verdict is spoken (e.g. 1/3 · Get low). You can edit or clear them on each script.</p>
+          </div>
+        )}
       </Panel>
       <Panel title="Theme">
         <ThemeGrid themes={themes} value={s.reel_theme_id ?? null} onChange={(id) => setS({ ...s, reel_theme_id: id })} />

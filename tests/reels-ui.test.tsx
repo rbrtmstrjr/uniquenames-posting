@@ -178,6 +178,62 @@ describe("ScriptReview", () => {
     expect(actions.approveReelAction).not.toHaveBeenCalled();
   });
 
+  describe("formats + on-screen labels (014)", () => {
+    const labelled = () => [scene(1, { on_screen: null }), scene(2, { on_screen: "1/3 · Get low" }), scene(3, { on_screen: null })];
+
+    it("the format chip names the reel's format; an older reel (no format) has none", () => {
+      render(<ScriptReview reel={reel({ format: "say_this" })} scenes={labelled()} />);
+      expect(screen.getByTestId("format-chip").textContent).toContain("Say this, not that");
+      cleanup();
+      render(<ScriptReview reel={reel()} scenes={scenes(2)} />);
+      expect(screen.queryByTestId("format-chip")).toBeNull();
+      cleanup();
+      render(<ScriptReview reel={reel({ format: null })} scenes={labelled()} />);
+      expect(screen.queryByTestId("format-chip")).toBeNull();
+    });
+
+    it("every line but line 1 has an editable on-screen label; saving sends it (cleared = empty)", async () => {
+      render(<ScriptReview reel={reel({ format: "named_method" })} scenes={labelled()} />);
+      expect(screen.queryByRole("textbox", { name: "Line 1 on-screen label" })).toBeNull();
+      const l2 = screen.getByRole("textbox", { name: "Line 2 on-screen label" }) as HTMLInputElement;
+      expect(l2.value).toBe("1/3 · Get low");
+      expect(l2.maxLength).toBe(80);
+      fireEvent.change(l2, { target: { value: "" } });
+      fireEvent.change(screen.getByRole("textbox", { name: "Line 3 on-screen label" }), { target: { value: "  2/3 · Wait  " } });
+      fireEvent.click(btn(/^Save/));
+      await waitFor(() => expect(actions.saveReelScriptAction).toHaveBeenCalledTimes(1));
+      expect(actions.saveReelScriptAction).toHaveBeenCalledWith(RID, {
+        title: "Why toddlers say no",
+        lines: [
+          { id: sid(2), narration: "Line number 2 has some words here", idea: "Idea 2", on_screen: "" },
+          { id: sid(3), narration: "Line number 3 has some words here", idea: "Idea 3", on_screen: "2/3 · Wait" },
+        ],
+      });
+    });
+
+    it("a label over 8 words blocks Save with the reason", () => {
+      render(<ScriptReview reel={reel({ format: "named_method" })} scenes={labelled()} />);
+      fireEvent.change(screen.getByRole("textbox", { name: "Line 2 on-screen label" }), { target: { value: "one two three four five six seven eight nine" } });
+      expect(btn(/^Save/).disabled).toBe(true);
+      expect(screen.getAllByText(/Line 2's on-screen label is longer than 8 words/).length).toBeGreaterThan(0);
+    });
+
+    it("before 014 (lines without the field): no label boxes, and saves never send one", async () => {
+      render(<ScriptReview reel={reel()} scenes={scenes(2)} />);
+      expect(screen.queryByRole("textbox", { name: /on-screen label/ })).toBeNull();
+      fireEvent.change(screen.getByRole("textbox", { name: "Line 2 narration" }), { target: { value: "A shorter second line" } });
+      fireEvent.click(btn(/^Save/));
+      await waitFor(() => expect(actions.saveReelScriptAction).toHaveBeenCalledWith(RID, {
+        title: "Why toddlers say no", lines: [{ id: sid(2), narration: "A shorter second line", idea: "Idea 2" }],
+      }));
+    });
+
+    it("the length hint aims for 30-45 seconds", () => {
+      render(<ScriptReview reel={reel()} scenes={scenes(2)} />);
+      expect(screen.getByText(/about 0:30–0:45/)).toBeTruthy();
+    });
+  });
+
   it("Delete asks first, then deletes and goes back to the list", async () => {
     render(<ScriptReview reel={reel()} scenes={scenes(1)} />);
     fireEvent.click(btn(/Delete/));

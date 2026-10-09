@@ -678,6 +678,47 @@ describe("formats + topics + labels (014)", () => {
     await A.rewriteReelScriptAction(REEL);
     expect(writeMock.mock.calls[0][0]).toMatchObject({ format: "say_this", topic: "tantrums" });
   });
+
+  describe("save: the on-screen labels", () => {
+    const labelled = () => [sceneRow(S1, 1, { on_screen: null }), sceneRow(S2, 2, { on_screen: "1/3 · Get low" }), sceneRow(S3, 3, { on_screen: null })];
+    const by = (id: string) => qs("reel_scenes", "update").find((q) => q.ops.some((o) => o[0] === "eq" && o[1] === "id" && o[2] === id));
+
+    it("a new label alone is saved (trimmed; guarded); a cleared one becomes null; the picture prompt is not rebuilt", async () => {
+      world({ scenes: labelled() });
+      const lines = [
+        { id: S2, narration: "narration 2", idea: "idea 2", on_screen: "  " },
+        { id: S3, narration: "narration 3", idea: "idea 3", on_screen: "  2/3 ·   Wait  " },
+      ];
+      expect(await A.saveReelScriptAction(REEL, { title: "Old Title", lines })).toEqual({ ok: true });
+      expect(patchOf(by(S2)!)).toEqual({ on_screen: null, version: 3 });
+      expect(patchOf(by(S3)!)).toEqual({ on_screen: "2/3 · Wait", version: 3 });
+      expect(by(S3)!.ops).toContainEqual(["eq", "status", "pending"]);
+    });
+
+    it("an unchanged label writes nothing for that line", async () => {
+      world({ scenes: labelled() });
+      expect(await A.saveReelScriptAction(REEL, { title: "Old Title", lines: [{ id: S2, narration: "narration 2", idea: "idea 2", on_screen: "1/3 · Get low" }] })).toEqual({ ok: true });
+      expect(by(S2)).toBeUndefined();
+    });
+
+    it("refuses a label over 80 characters or 8 words, and any label on line 1", async () => {
+      world({ scenes: labelled() });
+      const one = (id: string, n: number, on_screen: string) => A.saveReelScriptAction(REEL, { title: "Old Title", lines: [{ id, narration: `narration ${n}`, idea: `idea ${n}`, on_screen }] });
+      expect(await one(S2, 2, "x".repeat(81))).toEqual({ ok: false, error: "Line 2's on-screen label is longer than 80 characters." });
+      expect(await one(S2, 2, "one two three four five six seven eight nine")).toEqual({ ok: false, error: "Line 2's on-screen label is longer than 8 words." });
+      expect(await one(S1, 1, "THE RULE")).toEqual({ ok: false, error: "Line 1 has the hook card, so it has no on-screen label." });
+      expect(await one(S1, 1, "")).toEqual({ ok: true });
+      expect(fake.queries.filter((q) => q.table === "reel_scenes" && isUpdate(q))).toHaveLength(0);
+    });
+
+    it("before 014 (lines without the field): a label can't be saved; an empty one is ignored", async () => {
+      world();
+      expect(await A.saveReelScriptAction(REEL, { title: "Old Title", lines: [{ id: S2, narration: "narration 2", idea: "idea 2", on_screen: "Step" }] }))
+        .toEqual({ ok: false, error: expect.stringMatching(/014_reel_formats\.sql/) });
+      expect(await A.saveReelScriptAction(REEL, { title: "Old Title", lines: [{ id: S2, narration: "narration 2", idea: "idea 2", on_screen: "" }] })).toEqual({ ok: true });
+      expect(fake.queries.filter((q) => q.table === "reel_scenes" && isUpdate(q))).toHaveLength(0);
+    });
+  });
 });
 
 describe("voices + music (006)", () => {

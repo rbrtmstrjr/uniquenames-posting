@@ -89,3 +89,24 @@ describe("saveSettingsAction: narrator + music", () => {
     expect(settingsUpdates()).toHaveLength(0);
   });
 });
+
+describe("saveSettingsAction: on-screen step labels (014)", () => {
+  it("saves the switch; refuses a non-boolean", async () => {
+    expect(await saveSettingsAction({ ...input, reel_labels: false })).toEqual({ ok: true });
+    expect(settingsUpdates()[0]).toMatchObject({ reel_labels: false });
+    expect(validateSettings({ ...input, reel_labels: "yes" as unknown as boolean })).toBe("Turn the on-screen labels on or off.");
+  });
+
+  it("a form without it writes none", async () => {
+    expect(await saveSettingsAction(input)).toEqual({ ok: true });
+    expect(settingsUpdates()[0]).not.toHaveProperty("reel_labels");
+  });
+
+  it("before 014 (PGRST204): the rest is saved, with a clear note", async () => {
+    failFirst({ message: "Could not find the 'reel_labels' column of 'settings' in the schema cache", code: "PGRST204" });
+    const r = await saveSettingsAction({ ...input, reel_labels: true });
+    expect(r).toEqual({ ok: false, error: expect.stringMatching(/on-screen labels.*014_reel_formats\.sql/) });
+    expect(settingsUpdates()).toHaveLength(2);
+    expect(settingsUpdates()[1]).not.toHaveProperty("reel_labels");
+  });
+});

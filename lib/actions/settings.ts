@@ -19,6 +19,8 @@ const V7_COLUMN = "reel_theme_id";
 const V9_COLUMNS = ["hashtags_always", "hashtag_pool"] as const;
 /** The closing card fields (migration 010). */
 const V10_COLUMNS = ["cta_enabled", "cta_messages"] as const;
+/** The on-screen step labels switch (migration 014). */
+const V14_COLUMN = "reel_labels";
 const SAVED_TEXT_KEYS = TEXT_SETTING_KEYS.filter((k) => !(FONT_KEYS as readonly string[]).includes(k));
 const NEEDS_MIGRATION = (what: string) =>
   `Saved, except ${what}: the database needs the v2 update first (run supabase/migrations/002_v2.sql). The defaults stay in use until then.`;
@@ -52,9 +54,11 @@ export async function saveSettingsAction(s: SettingsInput): Promise<ActionResult
     ...(s.cta_enabled === undefined ? {} : { cta_enabled: s.cta_enabled }),
     ...(s.cta_messages === undefined ? {} : { cta_messages: parseCtaMessages(s.cta_messages).join("\n") }),
   };
-  let v2Missing = false, reelMissing = false, v6Missing = false, v7Missing = false, v9Missing = false, v10Missing = false;
+  // On-screen step labels (migration 014): only when the form has it.
+  const v14: Record<string, unknown> = s.reel_labels === undefined ? {} : { [V14_COLUMN]: s.reel_labels };
+  let v2Missing = false, reelMissing = false, v6Missing = false, v7Missing = false, v9Missing = false, v10Missing = false, v14Missing = false;
   for (;;) {
-    const { error } = await sb.from("settings").update({ ...base, ...(v2Missing ? {} : v2), ...(reelMissing ? {} : reel), ...(v6Missing ? {} : v6), ...(v7Missing ? {} : v7), ...(v9Missing ? {} : v9), ...(v10Missing ? {} : v10) }).eq("id", 1);
+    const { error } = await sb.from("settings").update({ ...base, ...(v2Missing ? {} : v2), ...(reelMissing ? {} : reel), ...(v6Missing ? {} : v6), ...(v7Missing ? {} : v7), ...(v9Missing ? {} : v9), ...(v10Missing ? {} : v10), ...(v14Missing ? {} : v14) }).eq("id", 1);
     if (!error) break;
     // A narrator or theme id that isn't in its table (foreign key).
     if (error.code === "23503") {
@@ -64,6 +68,7 @@ export async function saveSettingsAction(s: SettingsInput): Promise<ActionResult
     // A database without the 002 / 005 columns refuses an update naming them: drop that group
     // and save everything else so the owner's other changes are not lost, then say what did not stick.
     const missing = error.code === "PGRST204" || /schema cache/i.test(error.message);
+    if (missing && !v14Missing && V14_COLUMN in v14 && error.message.includes(V14_COLUMN)) { v14Missing = true; continue; }
     if (missing && !v10Missing && V10_COLUMNS.some((c) => c in v10 && error.message.includes(c))) { v10Missing = true; continue; }
     if (missing && !v9Missing && V9_COLUMNS.some((c) => c in v9 && error.message.includes(c))) { v9Missing = true; continue; }
     if (missing && !v7Missing && V7_COLUMN in v7 && error.message.includes(V7_COLUMN)) { v7Missing = true; continue; }
@@ -91,5 +96,7 @@ export async function saveSettingsAction(s: SettingsInput): Promise<ActionResult
     notes.push("Saved, except the hashtags: the database needs the captions update first (run supabase/migrations/009_captions.sql).");
   if (v10Missing)
     notes.push("Saved, except the closing card: the database needs the closing card update first (run supabase/migrations/010_cta_card.sql).");
+  if (v14Missing)
+    notes.push("Saved, except the on-screen labels switch: the database needs the reel formats update first (run supabase/migrations/014_reel_formats.sql).");
   return notes.length ? fail(notes.join(" ")) : { ok: true };
 }
