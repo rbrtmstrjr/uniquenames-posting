@@ -302,28 +302,37 @@ def fit_meaning(font_id, text, px, max_w, log=print):
     return load(size), balanced_lines(load(size), words, most)
 
 
-def _mark_and_room(W, H, handle, style, mark_left, log=print):
-    """The watermark ({text, font, xy, box}) and the vertical room (lo, bottom) a text block may use."""
+def _mark_and_room(W, H, handle, style, mark_left, log=print, pill=False):
+    """The watermark ({text, font, xy, box}) and the vertical room (lo, bottom) a text block may use.
+    pill (the Name Nest layout): the handle sits in a rounded pill, mark["pill"] = its box, inside the same insets."""
     k = W / LAYOUT["baseWidth"]
     mk = fonts.load_safe(style.mark_font, LAYOUT["bodyWeight"], max(1, _px(style.mark_size * k)), log)
     mb = mk.getbbox(handle)
+    px, py = (mk.size * PILL_PAD[0], mk.size * PILL_PAD[1]) if pill else (0, 0)
     # The watermark sits bottom-right, out of the text's way; bottom-right text pushes it left.
-    mx = W * LAYOUT["markInsetX"] - mb[0] if mark_left else W - W * LAYOUT["markInsetX"] - mb[2]
-    my = H - H * LAYOUT["markInsetBottom"] - mb[3]
+    mx = W * LAYOUT["markInsetX"] - mb[0] + px if mark_left else W - W * LAYOUT["markInsetX"] - mb[2] - px
+    my = H - H * LAYOUT["markInsetBottom"] - mb[3] - py
     mark = {"text": handle, "font": mk, "xy": (mx, my), "box": (mx + mb[0], my + mb[1], mx + mb[2], my + mb[3])}
+    top = mark["box"][1]
+    if pill:
+        b = mark["box"]
+        mark["pill"] = (b[0] - px, b[1] - py, b[2] + px, b[3] + py)
+        top = mark["pill"][1]
 
     # The text block lives between the top padding and the bottom padding, and never reaches
     # the watermark row (on a short, wide card 10% of the height is less than a big watermark).
     lo = H * LAYOUT["padTop"]
-    bottom = min(H - H * LAYOUT["padBottom"], mark["box"][1] - W * LAYOUT["gap"] / 2)
+    bottom = min(H - H * LAYOUT["padBottom"], top - W * LAYOUT["gap"] / 2)
     return mark, lo, bottom
 
 
-def layout_text(size, name, meaning, handle, style, band="top", log=print):
+def layout_text(size, name, meaning, handle, style, band="top", log=print, detail=None, pill=False):
     """Where every line goes. Pure geometry (no drawing): {title, meaning: [{text, font, xy,
     box}], mark: {...}, block: ink box of title + meaning, band}. `xy` is the draw origin
     (Pillow's default "la" anchor), `box` the ink box on the image. `band` is only used
-    for the auto position."""
+    for the auto position. The Name Nest layout adds `detail` (a chip under the meaning:
+    result["chip"], its `box` = the chip, inside the block) and `pill` (the watermark pill);
+    without them the result is exactly the classic one (no "chip" key)."""
     W, H = size
     k = W / LAYOUT["baseWidth"]
     pos = style.position if style.position in LAYOUT["positions"] else "auto"
@@ -338,7 +347,7 @@ def layout_text(size, name, meaning, handle, style, band="top", log=print):
             return right - bb[2]
         return W / 2 - (bb[0] + bb[2]) / 2
 
-    mark, lo, bottom = _mark_and_room(W, H, handle, style, pos == "bottom-right", log)
+    mark, lo, bottom = _mark_and_room(W, H, handle, style, pos == "bottom-right", log, pill=pill)
 
     title = name.upper() if fonts.caps(style.title_font) else name
     scale = 1.0
@@ -353,6 +362,9 @@ def layout_text(size, name, meaning, handle, style, band="top", log=print):
         pitch = mf.size * (1 + LAYOUT["lineGap"])
         for i, ln in enumerate(lines):
             parts.append({"text": ln, "font": mf, "y": tb[3] + W * LAYOUT["gap"] * scale - first[1] + i * pitch, "bb": mf.getbbox(ln)})
+        if detail:
+            parts.append(_chip_part(style.mark_font, detail, style.mark_size * k * scale, W * LAYOUT["gap"] * scale,
+                                    max(p["y"] + p["bb"][3] for p in parts), log))
         top = min(p["y"] + p["bb"][1] for p in parts)
         height = max(p["y"] + p["bb"][3] for p in parts) - top
         if height <= bottom - lo or scale < 0.15:
@@ -380,20 +392,104 @@ def layout_text(size, name, meaning, handle, style, band="top", log=print):
 
     boxes = [p["box"] for p in out]
     block = (min(b[0] for b in boxes), min(b[1] for b in boxes), max(b[2] for b in boxes), max(b[3] for b in boxes))
+    if pill or detail:
+        chip = out[-1] if detail else None
+        return {"title": out[:1], "meaning": out[1:-1] if detail else out[1:], "chip": chip, "mark": mark, "block": block,
+                "band": band if pos == "auto" else pos}
     return {"title": out[:1], "meaning": out[1:], "mark": mark, "block": block, "band": band if pos == "auto" else pos}
 
 
-def compose_card(photo, name, meaning, handle, style=None, band=None, log=print):
+def compose_card(photo, name, meaning, handle, style=None, band=None, log=print, layout="classic", detail=None):
     """Stamp the name / meaning / handle on the photo with the owner's text settings.
-    Returns (image, band or fixed position, band scores)."""
+    Returns (image, band or fixed position, band scores). layout "name-nest" (migration 015) stamps in
+    the Name Nest brand colours with the `detail` chip ("#38 in the US · Greek") and a watermark pill;
+    any other layout is the classic stamp, exactly as before."""
     img = photo.convert("RGB")
     style = style or text_style({})
     scores = {}
     if style.position == "auto" and band is None:
         band, scores = pick_band(img)
+    if layout == NEST_LAYOUT:
+        lay = layout_text(img.size, name, meaning, handle, style, band or "top", log, detail=detail or None, pill=True)
+        out = _stamp_nest(img, lay["title"], lay["meaning"], lay["chip"], lay["block"], lay["mark"])
+        return out, lay["band"], scores
     lay = layout_text(img.size, name, meaning, handle, style, band or "top", log)
     out = _stamp(img, [(p, 255) for p in lay["title"]] + [(p, 240) for p in lay["meaning"]], lay["block"], lay["mark"])
     return out, lay["band"], scores
+
+
+# ---------------------------------------------------------------- Name Nest layout (migration 015, worker 2.7.1)
+CARD_LAYOUTS = ("classic", "name-nest")
+NEST_LAYOUT = "name-nest"
+# The Name Nest palette (packs/name-nest): berry red, deep red, cream, ink.
+NEST_RED = (168, 50, 58)
+NEST_DEEP = (142, 39, 47)
+NEST_CREAM = (246, 238, 228)
+NEST_INK = (43, 30, 30)
+PILL_PAD = (0.75, 0.38)   # the watermark pill's padding, in font sizes (x, y)
+CHIP_PAD = (0.7, 0.34)    # the detail chip's padding, in font sizes (x, y)
+CHIP_SCALE = 1.3          # the chip text is the watermark size x this
+
+
+def card_layout(settings):
+    """The settings row's card layout: "name-nest", else "classic" (missing before migration 015, or unknown)."""
+    v = (settings or {}).get("card_layout")
+    return v if v in CARD_LAYOUTS else "classic"
+
+
+def detail_line(us_rank=None, origin=None):
+    """The Name Nest chip under the meaning: "#38 in the US · Greek", either half alone, or None."""
+    parts = []
+    if not isinstance(us_rank, bool):
+        try:
+            rank = int(us_rank) if us_rank is not None else 0
+        except (TypeError, ValueError):
+            rank = 0
+        if rank > 0:
+            parts.append("#%d in the US" % rank)
+    o = " ".join(str(origin or "").split())[:40]
+    if o:
+        parts.append(o)
+    return " \u00b7 ".join(parts) or None
+
+
+def _chip_part(font_id, text, mark_px, gap, above, log=print):
+    """The chip as a layout part: its `bb` is the padded chip box (so alignment and the block include the padding),
+    `y` puts the chip's top `gap` below `above` (the meaning's last ink line)."""
+    cf = fonts.load_safe(font_id, LAYOUT["titleWeight"], max(LAYOUT["minPx"], _px(mark_px * CHIP_SCALE)), log)
+    cb = cf.getbbox(text)
+    px, py = cf.size * CHIP_PAD[0], cf.size * CHIP_PAD[1]
+    bb = (cb[0] - px, cb[1] - py, cb[2] + px, cb[3] + py)
+    return {"text": text, "font": cf, "y": above + gap - bb[1], "bb": bb}
+
+
+def _stamp_nest(img, title, meaning, chip, bx, m):
+    """The Name Nest stamp: the name in deep red (light backdrop) or cream (dark), the meaning in ink or cream, both
+    with the classic soft halo; the detail chip and the watermark in cream on berry-red pills."""
+    W, H = img.size
+    pad = W * LAYOUT["gap"]
+    block = (max(0, int(bx[0] - pad)), max(0, int(bx[1] - pad)), min(W, int(bx[2] + pad)), min(H, int(bx[3] + pad)))
+    light = ImageStat.Stat(img.convert("L").crop(block)).mean[0] > LIGHT_BACKDROP
+    title_ink, body_ink = (NEST_DEEP, NEST_INK) if light else (NEST_CREAM, NEST_CREAM)
+    halo_rgba = (255, 255, 255, 110) if light else (0, 0, 0, 120)
+
+    lines = [(p, title_ink, 255) for p in title] + [(p, body_ink, 240) for p in meaning]
+    halo = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    sd = ImageDraw.Draw(halo)
+    off = max(2, W // 400)
+    for p, _ink, _a in lines:
+        sd.text((p["xy"][0], p["xy"][1] + off), p["text"], font=p["font"], fill=halo_rgba)
+    pills = [(m["pill"], m["text"], m["font"], m["xy"])] + ([(chip["box"], chip["text"], chip["font"], chip["xy"])] if chip else [])
+    for box, _t, _f, _xy in pills:
+        sd.rounded_rectangle((box[0], box[1] + off, box[2], box[3] + off), radius=(box[3] - box[1]) / 2, fill=(0, 0, 0, 70))
+    out = Image.alpha_composite(img.convert("RGBA"), halo.filter(ImageFilter.GaussianBlur(max(3, W // 220))))
+    d = ImageDraw.Draw(out)
+    for p, ink, a in lines:
+        d.text(p["xy"], p["text"], font=p["font"], fill=ink + (a,))
+    for box, text, font, xy in pills:
+        d.rounded_rectangle(box, radius=(box[3] - box[1]) / 2, fill=NEST_RED + (240,))
+        d.text(xy, text, font=font, fill=NEST_CREAM + (255,))
+    return out.convert("RGB")
 
 
 def _stamp(img, parts, bx, m):
@@ -462,7 +558,7 @@ def fit_cta(font_id, lines, px, max_w, log=print):
     return load(size), lines
 
 
-def layout_cta(size, message, handle, style, log=print):
+def layout_cta(size, message, handle, style, log=print, pill=False):
     """Where the closing card's message goes: centred lines in the meaning font at about the title
     size, no meaning line, the usual watermark. The text position setting picks the height (auto =
     the upper-middle calm area); the message is always centred across. {lines: [part], mark, block, band}."""
@@ -471,7 +567,7 @@ def layout_cta(size, message, handle, style, log=print):
     pos = style.position if style.position in LAYOUT["positions"] else "auto"
     vert = "auto" if pos == "auto" else pos.split("-")[0]
     max_w = W * LAYOUT["maxWidthCenter"]
-    mark, lo, bottom = _mark_and_room(W, H, handle, style, False, log)
+    mark, lo, bottom = _mark_and_room(W, H, handle, style, False, log, pill=pill)
     lines = cta_lines(message) or [""]
 
     scale = 1.0
@@ -507,10 +603,13 @@ def layout_cta(size, message, handle, style, log=print):
     return {"lines": out, "mark": mark, "block": block, "band": "cta" if pos == "auto" else pos}
 
 
-def compose_cta(photo, message, handle, style=None, log=print):
-    """Stamp the closing card: the message lines and the watermark, no meaning."""
+def compose_cta(photo, message, handle, style=None, log=print, layout="classic"):
+    """Stamp the closing card: the message lines and the watermark, no meaning (Name Nest: brand ink + the pill)."""
     img = photo.convert("RGB")
     style = style or text_style({})
+    if layout == NEST_LAYOUT:
+        lay = layout_cta(img.size, message, handle, style, log, pill=True)
+        return _stamp_nest(img, lay["lines"], [], None, lay["block"], lay["mark"])
     lay = layout_cta(img.size, message, handle, style, log)
     return _stamp(img, [(p, 255) for p in lay["lines"]], lay["block"], lay["mark"])
 
@@ -653,9 +752,9 @@ class ComfyRenderer:
                 return fit_to_size(Image.open(io.BytesIO(data)).convert("RGB"), width, height)
         raise JobError("ComfyUI did not finish within %d seconds." % self.timeout)
 
-    def compose(self, photo, name, meaning, handle, style=None):
-        img, _band, _scores = compose_card(photo, name, meaning, handle, style, log=self.log)
+    def compose(self, photo, name, meaning, handle, style=None, layout="classic", detail=None):
+        img, _band, _scores = compose_card(photo, name, meaning, handle, style, log=self.log, layout=layout, detail=detail)
         return img
 
-    def compose_cta(self, photo, message, handle, style=None):
-        return compose_cta(photo, message, handle, style, log=self.log)
+    def compose_cta(self, photo, message, handle, style=None, layout="classic"):
+        return compose_cta(photo, message, handle, style, log=self.log, layout=layout)

@@ -13,7 +13,7 @@ import urllib.parse
 
 from PIL import Image
 
-from render import JobError, slugify, text_style
+from render import JobError, card_layout, detail_line, slugify, text_style
 from supa import SupaError
 
 VERSION = "2.7.1"
@@ -374,10 +374,33 @@ class Runner:
 
     def _compose(self, card, photo, s):
         """The stamped card: the closing card (kind 'cta', migration 010) gets its message lines
-        (name = the message, "/" = a line break) and no meaning; every other card its name + meaning."""
+        (name = the message, "/" = a line break) and no meaning; every other card its name + meaning.
+        The Name Nest layout (settings.card_layout, migration 015) also gets the name's US rank / origin line."""
+        layout = card_layout(s)
+        if layout == "classic":  # Unique Names: exactly the calls from before 015
+            if card.get("kind") == "cta":
+                return self.renderer.compose_cta(photo, card["name"], s["handle"], s["style"])
+            return self.renderer.compose(photo, card["name"], card["meaning"], s["handle"], s["style"])
         if card.get("kind") == "cta":
-            return self.renderer.compose_cta(photo, card["name"], s["handle"], s["style"])
-        return self.renderer.compose(photo, card["name"], card["meaning"], s["handle"], s["style"])
+            return self.renderer.compose_cta(photo, card["name"], s["handle"], s["style"], layout=layout)
+        return self.renderer.compose(photo, card["name"], card["meaning"], s["handle"], s["style"], layout=layout,
+                                     detail=self._name_detail(card))
+
+    def _name_detail(self, card):
+        """"#38 in the US · Greek" from the card's name row, or None: no name row, a card whose text was changed to
+        another name, a name with neither, or a read that failed (logged; the card is stamped without the line)."""
+        if not card.get("name_id"):
+            return None
+        try:
+            rows = self._retry(lambda: self.supa.select(
+                "names", "id=eq.%s&select=name,origin,us_rank,us_year" % urllib.parse.quote(str(card["name_id"]), safe="")))
+        except SupaError as e:
+            self.log("could not read the name's US rank / origin (stamping without it): %s" % str(e)[:160])
+            return None
+        row = (rows or [None])[0]
+        if not row or str(row.get("name") or "").strip().lower() != str(card.get("name") or "").strip().lower():
+            return None
+        return detail_line(row.get("us_rank"), row.get("origin"))
 
     # ------------------------------------------------------------ results
     def _match(self, card):
