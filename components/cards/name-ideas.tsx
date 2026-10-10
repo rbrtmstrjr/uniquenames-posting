@@ -36,7 +36,7 @@ export function NameIdeas({ cardId, current, onPick }: { cardId: string; current
           <Sparkles className="size-4" /> {ideas.length ? "More ideas" : "Suggest names"}
         </Button>
       </div>
-      {loading && !ideas.length && <p className="mt-2 text-xs text-muted" aria-live="polite">Asking Gemini for 5 new names…</p>}
+      {loading && !ideas.length && <p className="mt-2 text-xs text-muted" aria-live="polite">Asking the AI for 5 new names…</p>}
       {error && <p role="alert" className="mt-2 text-xs font-medium text-bad">{error}</p>}
       {ideas.length > 0 && (
         <ul aria-label="Name ideas" className={cn("mt-2 grid gap-1.5", loading && "opacity-60")}>

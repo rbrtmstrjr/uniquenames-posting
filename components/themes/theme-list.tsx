@@ -308,7 +308,7 @@ export function ThemeList({ themes: serverThemes, previews: initialPreviews }: {
         </div>
       </Dialog>
       <SuggestDialog open={suggest} onOpenChange={setSuggest} noun="theme" title="Suggest themes with AI"
-        description="Gemini designs new photoshoot sets. Titles or prop sets you already have are skipped; the rest wait for your approval."
+        description="The AI designs new photoshoot sets. Titles or prop sets you already have are skipped; the rest wait for your approval."
         range={THEME_COUNT} defaultCount={5} ideaPlaceholder="e.g. autumn harvest, under the sea, cozy winter"
         fields={<Segmented label="Gender" value={sgGender} onChange={setSgGender} options={[{ value: "boy", label: "Boy" }, { value: "girl", label: "Girl" }]} />}
         run={(count, vibe) => suggestThemesAction({ gender: sgGender, count, vibe })}

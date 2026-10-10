@@ -290,7 +290,7 @@ export function ScriptReview({ reel, scenes, onApproved, narrator = null, themes
         <section aria-label="Script lines" className="min-w-0 lg:order-1">
           {busy === "rewrite" && (
             <p role="status" className="mb-3 flex items-center justify-between gap-3 rounded-xl bg-accent-soft px-3 py-2.5 text-sm font-semibold text-accent">
-              <span>Gemini is writing a new script… usually 1–3 minutes.</span>
+              <span>The AI is writing a new script… usually 1–3 minutes.</span>
               <Elapsed since={rewriteStart} />
             </p>
           )}
@@ -358,7 +358,7 @@ export function ScriptReview({ reel, scenes, onApproved, narrator = null, themes
       </div>
 
       <Dialog open={confirm === "rewrite"} onOpenChange={(o) => !o && setConfirm(null)} title="Write a new script?"
-        description="Gemini writes a new title and new lines for the same topic. This script is replaced.">
+        description="The AI writes a new title and new lines for the same topic. This script is replaced.">
         <div className="flex justify-end gap-2">
           <Button variant="ghost" onClick={() => setConfirm(null)}>Keep this one</Button>
           <Button onClick={() => void rewrite()}><Shuffle className="size-4" aria-hidden /> New script</Button>

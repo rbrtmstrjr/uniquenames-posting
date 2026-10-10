@@ -1,5 +1,6 @@
 import "server-only";
-import { generateJson, type GeminiSchema } from "./gemini";
+import type { GeminiSchema } from "./gemini";
+import { aiJson } from "./provider";
 
 /**
  * What post and reel captions share: cleaning the model's text, the engagement-bait and
@@ -89,8 +90,8 @@ export async function askCaption(o: {
   for (let attempt = 0; attempt < (o.attempts ?? 2); attempt++) {
     const left = deadline - Date.now();
     if (left <= 0 || (attempt > 0 && left < RETRY_MIN_MS)) break;
-    const r = await generateJson({
-      system: o.system, prompt: o.prompt + note, schema: CAPTION_SCHEMA(o.maxTags), temperature: 1, timeoutMs: left, parse,
+    const r = await aiJson({
+      task: "small", system: o.system, prompt: o.prompt + note, schema: CAPTION_SCHEMA(o.maxTags), temperature: 1, timeoutMs: left, parse,
     });
     if (!r?.ok) {
       console.warn(`${o.label}: no AI caption:`, r?.error ?? "no answer");

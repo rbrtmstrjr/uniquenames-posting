@@ -190,7 +190,7 @@ describe("letterNameIdeasAction", () => {
     generateJson.mockResolvedValueOnce({ ok: true, data: [{ name: "Kian", meaning: "ancient one" }] });
     expect(await letterNameIdeasAction({ gender: "boy", style: "single", letter: "K", count: 3 })).toMatchObject({ ok: false, error: expect.stringMatching(/no new real K names/) });
     generateJson.mockResolvedValueOnce({ ok: false, error: "Gemini timed out." });
-    expect(await letterNameIdeasAction({ gender: "boy", style: "single", letter: "K", count: 3 })).toEqual({ ok: false, error: "Gemini could not suggest names: Gemini timed out." });
+    expect(await letterNameIdeasAction({ gender: "boy", style: "single", letter: "K", count: 3 })).toEqual({ ok: false, error: "The AI could not suggest names: Gemini timed out." });
     world();
     expect(await letterNameIdeasAction({ gender: "boy", style: "single", letter: "kk", count: 3 })).toEqual({ ok: false, error: "Pick a letter A to Z." });
     expect(await letterNameIdeasAction({ gender: "boy", style: "single", letter: "K", count: 40 })).toEqual({ ok: false, error: "Ask for 1 to 12 names." });

@@ -8,7 +8,8 @@ import {
 } from "@/lib/reels/shots";
 import { DEFAULT_THEME_ID, isDollTheme, type ReelTheme } from "@/lib/reels/themes";
 import { FORMAT_SPECS, isReelFormat, QUOTE_RE, quoteCount, REEL_FORMATS, type ReelFormat } from "@/lib/reels/formats";
-import { generateJson, type GeminiSchema } from "./gemini";
+import type { GeminiSchema } from "./gemini";
+import { aiJson } from "./provider";
 
 /** Same model as the n8n Knitted Doll storyboard. */
 export const REEL_SCRIPT_MODEL = "gemini-3.1-pro-preview";
@@ -550,12 +551,12 @@ export function validateReelScript(raw: unknown, maxScenes: number, speed = 1, t
   return { ok: true, script: { title, stage, format, cast, hook_text, scenes } };
 }
 
-/** Write a reel script with Gemini. Never throws. */
+/** Write a reel script with the configured AI (Gemini, or Claude with AI_PROVIDER=claude). Never throws. */
 export async function writeReelScript(input: ReelScriptInput): Promise<ReelScriptResult> {
   try {
     const { system, prompt } = reelScriptPrompt(input);
-    const r = await generateJson<Record<string, unknown>>({
-      system, prompt, schema: schemaFor(input.theme?.id ?? DEFAULT_THEME_ID), model: REEL_SCRIPT_MODEL, thinkingLevel: "low", temperature: 1,
+    const r = await aiJson<Record<string, unknown>>({
+      task: "script", system, prompt, schema: schemaFor(input.theme?.id ?? DEFAULT_THEME_ID), model: REEL_SCRIPT_MODEL, thinkingLevel: "low", temperature: 1,
       timeoutMs: input.timeoutMs ?? REEL_SCRIPT_TIMEOUT_MS,
       parse: (x) => (x && typeof x === "object" && !Array.isArray(x) ? (x as Record<string, unknown>) : null),
     });

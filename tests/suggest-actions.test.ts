@@ -86,7 +86,7 @@ describe("suggestNamesAction", () => {
   it("passes on Gemini's failure without touching the database", async () => {
     generateJson.mockResolvedValueOnce({ ok: false, error: "Gemini timed out." });
     const r = await suggestNamesAction({ gender: "girl", style: "two-word", count: 5 });
-    expect(r).toEqual({ ok: false, error: "Gemini could not suggest names: Gemini timed out." });
+    expect(r).toEqual({ ok: false, error: "The AI could not suggest names: Gemini timed out." });
     expect(inserted()).toBeUndefined();
   });
 

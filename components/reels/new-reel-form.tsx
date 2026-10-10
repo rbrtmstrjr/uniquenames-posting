@@ -19,7 +19,7 @@ const STAGES = [
   { after: 0, text: "Picking the story and the two dolls…" },
   { after: 25, text: "Writing short lines, one picture each…" },
   { after: 70, text: "Checking the length and the title…" },
-  { after: 130, text: "Still going — Gemini is rewriting it to fit. Hang on…" },
+  { after: 130, text: "Still going — the AI is rewriting it to fit. Hang on…" },
 ];
 
 /** The live "what's happening" line + timer while Gemini writes (ticks on its own). */
@@ -59,7 +59,7 @@ export function NewReelForm() {
             <Label htmlFor="reel-topic" className="text-sm font-semibold text-ink">Topic <span className="font-normal text-muted">(optional)</span></Label>
             <Input id="reel-topic" value={topic} maxLength={TOPIC_MAX} disabled={busy} autoComplete="off"
               placeholder="e.g. why toddlers say no" onChange={(e) => setTopic(e.target.value)} />
-            <p className="text-xs text-muted">Leave it blank and Gemini picks a proven parenting topic you haven&apos;t used lately, in the next of the 5 story formats.</p>
+            <p className="text-xs text-muted">Leave it blank and the AI picks a proven parenting topic you haven&apos;t used lately, in the next of the 5 story formats.</p>
           </div>
 
           {error && !busy && (
@@ -96,7 +96,7 @@ export function NewReelForm() {
       <Panel title="How it works" className="lg:sticky lg:top-20">
         <ol className="space-y-3 text-sm text-ink">
           {[
-            ["Write", "Gemini writes a 30–45 second lesson: about 12–16 short lines, one picture each."],
+            ["Write", "The AI writes a 30–45 second lesson: about 12–16 short lines, one picture each."],
             ["Check", "Read the lines, fix any words, then approve."],
             ["Make", "Your PC records the voice, makes the pictures in your style (Crayon or Red Thread) and the captioned video."],
             ["Save", "The full video lands in Pictures › Unique Names › Reels; a preview plays here."],

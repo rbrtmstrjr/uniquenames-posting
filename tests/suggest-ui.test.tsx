@@ -98,7 +98,7 @@ describe("Names: suggest + approve", () => {
     fireEvent.click(within(dlg).getByRole("radio", { name: "Single" }));
     fireEvent.change(within(dlg).getByRole("textbox"), { target: { value: "sea names" } });
     fireEvent.click(within(dlg).getByRole("button", { name: /Suggest 10 names/ }));
-    expect(await within(dlg).findByText(/Gemini is thinking up 10 names/)).toBeTruthy();
+    expect(await within(dlg).findByText(/The AI is thinking up 10 names/)).toBeTruthy();
     expect(m.suggestNamesAction).toHaveBeenCalledWith({ gender: "boy", style: "single", count: 10, vibe: "sea names" });
     await act(async () => { d.resolve({ ok: true, added: 7, duplicates: 2, invalid: 1 }); });
     expect(await within(dlg).findByText("Added 7 suggestions (2 duplicates, 1 unusable skipped).")).toBeTruthy();

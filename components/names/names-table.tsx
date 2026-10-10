@@ -181,7 +181,7 @@ export function NamesTable({ names: serverNames, initial = {} }: { names: NameRo
         </div>
       </Dialog>
       <SuggestDialog open={suggest} onOpenChange={setSuggest} noun="name" title="Suggest names with AI"
-        description="Gemini suggests new names with meanings. Names already in your list are skipped; the rest wait for your approval."
+        description="The AI suggests new names with meanings. Names already in your list are skipped; the rest wait for your approval."
         range={NAME_COUNT} defaultCount={10} ideaPlaceholder="e.g. nature names, soft sounds, Greek myths"
         fields={<div className="flex flex-wrap gap-2">
           <Segmented label="Gender" value={sg.gender} onChange={(g) => setSg((x) => ({ ...x, gender: g }))} options={[{ value: "boy", label: "Boy" }, { value: "girl", label: "Girl" }]} />

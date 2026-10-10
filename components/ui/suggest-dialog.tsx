@@ -93,7 +93,7 @@ export function SuggestDialog({ open, onOpenChange, noun, title, description, ra
           {running && (
             <p role="status" className="flex items-start gap-2 rounded-xl bg-accent-soft px-3 py-3 text-sm text-ink">
               <Loader2 className="mt-px size-4 shrink-0 animate-spin text-accent" aria-hidden />
-              <span>Gemini is thinking up {count} {noun}s and checking them against your list… this can take up to a minute.</span>
+              <span>The AI is thinking up {count} {noun}s and checking them against your list… this can take up to a minute.</span>
             </p>
           )}
           {error && <p role="alert" className="text-sm text-bad">{error}</p>}
