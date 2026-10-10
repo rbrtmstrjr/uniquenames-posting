@@ -54,7 +54,7 @@ class DeliveryTest(unittest.TestCase):
         self.assertEqual(voice.DEFAULT_VOICE, "gacrux")
 
     def test_worker_version(self):
-        self.assertEqual(jobs.VERSION, "2.6.0")
+        self.assertEqual(jobs.VERSION, "2.7.0")
 
 
 class TrimEdgesTest(unittest.TestCase):

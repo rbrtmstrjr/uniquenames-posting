@@ -71,13 +71,23 @@ def load_env(path):
     return cfg
 
 
-def default_output_root():
-    # The owner's Pictures folder lives in OneDrive, so cards also sync to the phone.
+def default_output_root(folder="Unique Names"):
+    # The owner's Pictures folder lives in OneDrive, so cards also sync to the phone. `folder`: the page's
+    # name (worker/pages/*.env PAGE_LABEL); Unique Names when the worker serves one page from worker.env.
     for p in (os.path.join(os.path.expanduser("~"), "OneDrive", "Pictures"),
               os.path.join(os.path.expanduser("~"), "Pictures")):
         if os.path.isdir(p):
-            return os.path.join(p, "Unique Names")
-    return os.path.join(os.path.expanduser("~"), "Unique Names")
+            return os.path.join(p, folder)
+    return os.path.join(os.path.expanduser("~"), folder)
+
+
+# ComfyUI names per page (2.7.0): output files under <namespace>/..., voice clips in the input folder's <namespace>/
+# subfolder, client id <namespace>-worker. The Unique Names page keeps today's names.
+DEFAULT_NAMESPACE = "unique-names"
+
+
+def comfy_client_id(namespace=None):
+    return "%s-worker" % (namespace or DEFAULT_NAMESPACE)
 
 
 # ---------------------------------------------------------------- pure helpers
@@ -565,8 +575,9 @@ class JobError(Exception):
 
 
 class ComfyRenderer:
-    def __init__(self, comfy_url, timeout, font_files=None, log=print):
+    def __init__(self, comfy_url, timeout, font_files=None, log=print, namespace=DEFAULT_NAMESPACE):
         self.comfy = comfy_url.rstrip("/")
+        self.namespace = namespace or DEFAULT_NAMESPACE  # the page: ComfyUI file prefix + client id
         self.timeout = int(timeout)
         self.font_files = font_files  # the prefetched fallback; other fonts load per card
         self.log = log
@@ -596,7 +607,7 @@ class ComfyRenderer:
 
     def _submit(self, graph):
         try:
-            return http_json(self.comfy + "/prompt", {"prompt": graph, "client_id": "unique-names-worker"}, timeout=30)
+            return http_json(self.comfy + "/prompt", {"prompt": graph, "client_id": comfy_client_id(self.namespace)}, timeout=30)
         except urllib.error.HTTPError as e:
             body = e.read().decode("utf-8", "replace")
             err = JobError("ComfyUI refused the job: %s" % body[:300])
@@ -608,14 +619,14 @@ class ComfyRenderer:
     def generate_photo(self, prompt, seed, width, height):
         fast = self.use_fast()
         try:
-            sub = self._submit(comfy_graph(prompt, seed, width, height, "unique-names/raw", fast=fast))
+            sub = self._submit(comfy_graph(prompt, seed, width, height, self.namespace + "/raw", fast=fast))
         except JobError as e:
             # the fp8 encoder file went missing since the check: remember, and send the old files once
             if not (fast and "not in list" in getattr(e, "detail", "").lower()):
                 raise
             self.fast = False
             self.log("ComfyUI refused %s: pictures use %s from now on" % (FAST_CLIP, SAFE_CLIP))
-            sub = self._submit(comfy_graph(prompt, seed, width, height, "unique-names/raw", fast=False))
+            sub = self._submit(comfy_graph(prompt, seed, width, height, self.namespace + "/raw", fast=False))
         pid = sub.get("prompt_id")
         if not pid:
             raise JobError("ComfyUI did not accept the job: %s" % json.dumps(sub)[:300])

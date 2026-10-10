@@ -9,7 +9,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from render import JobError, http_json
+from render import DEFAULT_NAMESPACE, JobError, comfy_client_id, http_json
 
 TAGS = "heartwarming, soft piano, gentle strings, warm lullaby, slow, instrumental, no vocals"
 EXTRA_SECONDS = 2.0          # the reel (and the music in it) outlasts the voice by this: the music rings out
@@ -31,7 +31,7 @@ def random_seed():
     return random.randint(0, 2 ** 32 - 1)
 
 
-def ace_step_graph(seconds, seed, prefix="unique-names/reel-music"):
+def ace_step_graph(seconds, seed, prefix=None, ns=None):
     """ComfyUI API graph (the spike's working graph): ACE-Step 1.5 turbo, 8 steps -> FLAC from node 10."""
     seconds, seed = float(seconds), int(seed)
     return {
@@ -50,16 +50,17 @@ def ace_step_graph(seconds, seed, prefix="unique-names/reel-music"):
             "model": ["4", 0], "positive": ["5", 0], "negative": ["6", 0], "latent_image": ["7", 0], "seed": seed,
             "steps": 8, "cfg": 1.0, "sampler_name": "euler", "scheduler": "simple", "denoise": 1.0}},
         "9": {"class_type": "VAEDecodeAudio", "inputs": {"samples": ["8", 0], "vae": ["3", 0]}},
-        "10": {"class_type": "SaveAudioAdvanced", "inputs": {"audio": ["9", 0], "filename_prefix": prefix, "format": "flac"}},
+        "10": {"class_type": "SaveAudioAdvanced", "inputs": {
+            "audio": ["9", 0], "filename_prefix": prefix or (ns or DEFAULT_NAMESPACE) + "/reel-music", "format": "flac"}},
     }
 
 
-def comfy_audio(comfy_url, graph, out_node, timeout, what, beat=None, sleep=time.sleep):
+def comfy_audio(comfy_url, graph, out_node, timeout, what, beat=None, sleep=time.sleep, ns=None):
     """Run a ComfyUI graph and return the bytes of the first audio file node `out_node` saved.
     beat() is called about every BEAT_SECONDS while waiting (it may raise to stop)."""
     comfy = comfy_url.rstrip("/")
     try:
-        sub = http_json(comfy + "/prompt", {"prompt": graph, "client_id": "unique-names-worker"}, timeout=30)
+        sub = http_json(comfy + "/prompt", {"prompt": graph, "client_id": comfy_client_id(ns)}, timeout=30)
     except urllib.error.HTTPError as e:
         raise JobError("ComfyUI refused the %s job: %s" % (what, e.read().decode("utf-8", "replace")[:300]))
     except Exception:
@@ -93,9 +94,9 @@ def comfy_audio(comfy_url, graph, out_node, timeout, what, beat=None, sleep=time
     raise JobError("ComfyUI did not finish the %s within %d seconds." % (what, timeout))
 
 
-def make_bed(comfy_url, seconds, seed, timeout, beat=None):
-    """FLAC bytes of a new ACE-Step bed `seconds` long."""
-    return comfy_audio(comfy_url, ace_step_graph(seconds, seed), "10", timeout, "music", beat)
+def make_bed(comfy_url, seconds, seed, timeout, beat=None, ns=None):
+    """FLAC bytes of a new ACE-Step bed `seconds` long. ns: the page's ComfyUI namespace (None = unique-names)."""
+    return comfy_audio(comfy_url, ace_step_graph(seconds, seed, ns=ns), "10", timeout, "music", beat, ns=ns)
 
 
 # ---------------------------------------------------------------- the mix (render)

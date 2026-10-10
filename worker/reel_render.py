@@ -321,6 +321,12 @@ def pc_path(folder, title, day=None, reuse=None):
     return path
 
 
+def reels_folder(runner):
+    """Where the full videos go on the PC: the page's REELS_OUTPUT (2.7.0), else <its output folder>\\Reels
+    (Pictures\\Unique Names\\Reels when the worker serves Unique Names alone)."""
+    return getattr(runner, "reels_dir", None) or os.path.join(getattr(runner, "output_root", None) or default_output_root(), "Reels")
+
+
 def copy_to_pc(src, dest):
     """Copy via <dest>.part, then rename: OneDrive never syncs a half-written video."""
     os.makedirs(os.path.dirname(dest), exist_ok=True)
@@ -414,7 +420,7 @@ def render_reel(runner, reel, scenes):
                 raise JobError("The preview came out over %d MB. Press Retry." % PREVIEW_CAP_MB)
         beat()
 
-        reels_dir = os.path.join(getattr(runner, "output_root", None) or default_output_root(), "Reels")
+        reels_dir = reels_folder(runner)
         old_pc = reel.get("pc_path")
         dest = pc_path(reels_dir, reel.get("title"), reuse=old_pc)
         try:

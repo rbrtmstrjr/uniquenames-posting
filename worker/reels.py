@@ -16,7 +16,7 @@ import traceback
 import urllib.parse
 import wave
 
-from render import JobError, fit_to_size
+from render import DEFAULT_NAMESPACE, JobError, fit_to_size
 from supa import SupaError
 import music
 import themes
@@ -70,14 +70,22 @@ def _match(row):
 
 
 class ReelRunner:
-    def __init__(self, supa, renderer, log=print, sleep=time.sleep, output_root=None):
+    def __init__(self, supa, renderer, log=print, sleep=time.sleep, output_root=None, reels_dir=None, preview_cast=None):
         self.supa = supa
-        self.output_root = output_root    # full videos go to <output_root>/Reels (None = Pictures/Unique Names)
+        self.output_root = output_root    # full videos go to <output_root>/Reels (None = Pictures/Unique Names) ...
+        self.reels_dir = reels_dir        # ... or to the page's REELS_OUTPUT folder when it sets one (2.7.0)
+        self.preview_cast = preview_cast  # the page's theme-preview moment / cast (None = today's mom and baby)
         self.renderer = renderer          # ComfyRenderer: .comfy, .timeout, .health(), .generate_photo()
         self.log = log
         self.sleep = sleep
         self._refs = {}                   # (ref_path, version) -> the clip's name in ComfyUI's input folder
         self._refs_lock = threading.Lock()
+
+    def _ns(self):
+        """The page's ComfyUI namespace as a keyword, only for a page other than Unique Names (whose calls stay
+        exactly as before 2.7.0)."""
+        ns = getattr(self.renderer, "namespace", None)
+        return {"ns": ns} if ns and ns != DEFAULT_NAMESPACE else {}
 
     # ------------------------------------------------------------ dispatch
     def run_step(self, job):
@@ -129,7 +137,7 @@ class ReelRunner:
 
         # one Chatterbox call per line (model kept loaded), edges trimmed, room tone between (2.6.0) ...
         wav = voice.narrate_lines(self.renderer.comfy, lines, voice_seed(reel["id"]), ref, self.renderer.timeout,
-                                  on_line=on_line)
+                                  on_line=on_line, **self._ns())
         # ... then sped up (nothing to do at 1.0); Whisper (timing) hears this final track
         wav = voice.speed_up(wav, speed)
         self.log("reel voice: %d lines, %.1f s of voice in %.0f s" % (len(lines), voice_seconds(wav), time.time() - started))
@@ -183,7 +191,7 @@ class ReelRunner:
             if is_http_4xx(e):
                 raise JobError(missing)
             raise JobError(NO_NET)
-        name = voice.upload_input(self.renderer.comfy, voice.input_name(path, version), data)
+        name = voice.upload_input(self.renderer.comfy, voice.input_name(path, version), data, **self._ns())
         with self._refs_lock:
             self._refs[key] = name
         try:
@@ -241,7 +249,8 @@ class ReelRunner:
             seed = music.random_seed()
             self.log("reel music: %.1f s bed (seed %d)" % (secs, seed))
             self._heartbeat(reel)
-            flac = music.make_bed(self.renderer.comfy, secs, seed, self.renderer.timeout, lambda: self._heartbeat(reel))
+            flac = music.make_bed(self.renderer.comfy, secs, seed, self.renderer.timeout, lambda: self._heartbeat(reel),
+                                  **self._ns())
             self._heartbeat(reel)
             self._retry(lambda: self.supa.upload(BUCKET, path, flac, "audio/flac"))
         except StaleReel:
@@ -292,7 +301,8 @@ class ReelRunner:
                     raise JobError("This voice has no reference clip yet. Press Set up voices.")
                 ref = self._comfy_ref(row["ref_path"], version, "The reference clip is missing from storage. Press Set up voices.")
             # one line in the reel style (2.6.0): edges trimmed, the model not kept
-            wav = voice.narrate_lines(self.renderer.comfy, [voice.SAMPLE_TEXT], voice.SAMPLE_SEED, ref, self.renderer.timeout)
+            wav = voice.narrate_lines(self.renderer.comfy, [voice.SAMPLE_TEXT], voice.SAMPLE_SEED, ref, self.renderer.timeout,
+                                      **self._ns())
             wav = voice.speed_up(wav, speed)
             self._net(lambda: self.supa.upload(BUCKET, path, wav, "audio/wav"))
         except Exception as e:
@@ -340,7 +350,7 @@ class ReelRunner:
                 raise JobError(COMFY_CLOSED)
             if not str(row.get("style") or "").strip():
                 raise JobError("This theme has no style text.")
-            photo = self.renderer.generate_photo(themes.preview_prompt(row), themes.PREVIEW_SEED, IMAGE_W, IMAGE_H)
+            photo = self.renderer.generate_photo(themes.preview_prompt(row, self.preview_cast), themes.PREVIEW_SEED, IMAGE_W, IMAGE_H)
             photo = themes.apply_colour(photo, themes.colour_mode(row))
             data = to_jpeg(fit_to_size(photo, OUT_W, OUT_H), 90)
             self._net(lambda: self.supa.upload(BUCKET, path, data))

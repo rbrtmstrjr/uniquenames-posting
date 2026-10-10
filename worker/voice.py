@@ -15,7 +15,7 @@ import urllib.request
 import uuid
 import wave
 
-from render import JobError, http_json
+from render import DEFAULT_NAMESPACE, JobError, comfy_client_id, http_json
 
 NODE = "FL_ChatterboxTTS"
 RATE = 24000                 # Chatterbox output: 24 kHz mono
@@ -52,15 +52,21 @@ HOUSE_VOICES = ("gacrux", "sulafat", "vindemiatrix", "achernar")
 DEFAULT_VOICE = "gacrux"
 
 
-def chatterbox_graph(text, seed, voice_ref=None, keep_loaded=False):
+def _ns_kw(ns):
+    """Pass the page's namespace on only when it is set (the Unique Names page calls exactly as before 2.7.0)."""
+    return {"ns": ns} if ns else {}
+
+
+def chatterbox_graph(text, seed, voice_ref=None, keep_loaded=False, ns=None):
     """ComfyUI API graph: text -> Chatterbox -> FLAC. voice_ref = a file in ComfyUI's input folder to clone.
-    keep_loaded: the node keeps the model for the next line (a reel's last line passes False, which unloads it)."""
+    keep_loaded: the node keeps the model for the next line (a reel's last line passes False, which unloads it).
+    ns: the page's ComfyUI namespace (None = unique-names)."""
     tts = {"text": text, "exaggeration": DELIVERY["exaggeration"], "cfg_weight": DELIVERY["cfg_weight"],
            "temperature": DELIVERY["temperature"], "seed": int(seed),
            "use_cpu": False, "keep_model_loaded": bool(keep_loaded)}
     g = {
         "1": {"class_type": NODE, "inputs": tts},
-        "2": {"class_type": "SaveAudioAdvanced", "inputs": {"audio": ["1", 0], "filename_prefix": "unique-names/reel-voice",
+        "2": {"class_type": "SaveAudioAdvanced", "inputs": {"audio": ["1", 0], "filename_prefix": (ns or DEFAULT_NAMESPACE) + "/reel-voice",
                                                             "format": "flac"}},
     }
     if voice_ref:
@@ -207,11 +213,11 @@ def ensure_node(comfy_url):
         raise JobError(NEEDS_RESTART)
 
 
-def upload_input(comfy_url, filename, data):
-    """Put a reference voice clip in ComfyUI's input folder; returns the name LoadAudio takes."""
+def upload_input(comfy_url, filename, data, ns=None):
+    """Put a reference voice clip in ComfyUI's input folder (the page's subfolder); returns the name LoadAudio takes."""
     boundary = uuid.uuid4().hex
     parts = []
-    for k, v in (("subfolder", "unique-names"), ("type", "input"), ("overwrite", "true")):
+    for k, v in (("subfolder", ns or DEFAULT_NAMESPACE), ("type", "input"), ("overwrite", "true")):
         parts.append(('--%s\r\nContent-Disposition: form-data; name="%s"\r\n\r\n%s\r\n' % (boundary, k, v)).encode())
     parts.append(('--%s\r\nContent-Disposition: form-data; name="image"; filename="%s"\r\n'
                   'Content-Type: application/octet-stream\r\n\r\n' % (boundary, filename)).encode() + data + b"\r\n")
@@ -311,13 +317,13 @@ def concat_wavs(wavs, pause_s=PAUSE_SECONDS):
     return pcm_to_wav(gap.join(wav_pcm(w) for w in wavs))
 
 
-def synthesize(comfy_url, text, seed, voice_ref, timeout, keep_loaded=False):
+def synthesize(comfy_url, text, seed, voice_ref, timeout, keep_loaded=False, ns=None):
     """One Chatterbox generation (keep it under ~40 s of speech) -> WAV bytes (24 kHz mono 16-bit)."""
     comfy = comfy_url.rstrip("/")
     ensure_node(comfy)
     try:
-        sub = http_json(comfy + "/prompt", {"prompt": chatterbox_graph(text, seed, voice_ref, keep_loaded),
-                                            "client_id": "unique-names-worker"}, timeout=30)
+        sub = http_json(comfy + "/prompt", {"prompt": chatterbox_graph(text, seed, voice_ref, keep_loaded, ns),
+                                            "client_id": comfy_client_id(ns)}, timeout=30)
     except urllib.error.HTTPError as e:
         raise JobError("ComfyUI refused the voice job: %s" % e.read().decode("utf-8", "replace")[:300])
     except Exception:
@@ -411,16 +417,16 @@ def join_lines(wavs):
     return pcm_to_wav(b"".join(parts))
 
 
-def unload_model(comfy_url, voice_ref, timeout):
+def unload_model(comfy_url, voice_ref, timeout, ns=None):
     """Free the VRAM of a Chatterbox model left loaded by a reel that stopped part-way: one tiny line without
     keep_model_loaded (the node then drops its cached model). Never raises."""
     try:
-        synthesize(comfy_url, UNLOAD_TEXT, SAMPLE_SEED, voice_ref, min(int(timeout), 120), keep_loaded=False)
+        synthesize(comfy_url, UNLOAD_TEXT, SAMPLE_SEED, voice_ref, min(int(timeout), 120), keep_loaded=False, **_ns_kw(ns))
     except Exception:
         pass
 
 
-def narrate_lines(comfy_url, lines, seed, voice_ref, timeout, on_line=None):
+def narrate_lines(comfy_url, lines, seed, voice_ref, timeout, on_line=None, ns=None):
     """The narration as one WAV: one Chatterbox call per non-empty line (the same seed), the model kept loaded until
     the last line (which unloads it), joined by join_lines. on_line(i, n, text) runs before each line (logging, the
     reel's heartbeat). If anything fails after a line asked to keep the model, the model is unloaded before re-raising."""
@@ -434,12 +440,12 @@ def narrate_lines(comfy_url, lines, seed, voice_ref, timeout, on_line=None):
                 on_line(i, len(lines), text)
             keep = i < len(lines) - 1
             maybe_loaded = maybe_loaded or keep
-            w = synthesize(comfy_url, text, seed, voice_ref, timeout, keep_loaded=keep)
+            w = synthesize(comfy_url, text, seed, voice_ref, timeout, keep_loaded=keep, **_ns_kw(ns))
             if not has_speech(wav_pcm(w)):
                 raise JobError("Chatterbox gave no speech for line %d. Press Retry." % (i + 1))
             wavs.append(w)
         maybe_loaded = False  # the last line ran without keep_model_loaded: the node dropped the model
     finally:
         if maybe_loaded:
-            unload_model(comfy_url, voice_ref, timeout)
+            unload_model(comfy_url, voice_ref, timeout, **_ns_kw(ns))
     return join_lines(wavs)

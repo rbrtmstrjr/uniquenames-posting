@@ -15,6 +15,35 @@ Sends a heartbeat every 15 s so the website can show "PC ready / ComfyUI closed 
 - Needs: Python 3.12 + Pillow, ComfyUI Desktop with `z_image_turbo_bf16`, `qwen_3_4b_fp8_mixed` (fast fp8 text encoder, run with
   `fp8_e4m3fn` weights; if the file is missing the worker falls back to `qwen_3_4b` + default weights), `ae`.
 
+## Several pages (2.7.0)
+
+One worker (one ComfyUI) can serve several pages, each its own Supabase project (e.g. Unique Names + Name Nest).
+With only `worker.env` nothing changes: that is the Unique Names page, same folders, same log lines.
+
+**Add a page**
+1. Make the page's Supabase project and run `supabase/schema.sql` (+ migrations) there; copy its URL and service-role key.
+2. Copy `pages/example.env.example` to `pages/<id>.env` (e.g. `pages/name-nest.env`, git-ignored) and fill in `PAGE_ID`,
+   `PAGE_LABEL`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`; optionally `OUTPUT_ROOT` (default
+   `OneDrive\Pictures\<PAGE_LABEL>`), `REELS_OUTPUT` (default `<OUTPUT_ROOT>\Reels`) and the theme-preview scene
+   (`PREVIEW_MOMENT` / `PREVIEW_CAST` / `PREVIEW_DOLL_CAST`; default the Unique Names mom and baby). See `pages/README.md`.
+3. Restart the worker (Task Scheduler: end + run "Unique Names card worker"). The top of `worker.log` lists every page
+   it serves (`[name-nest] Name Nest -> https://… , cards in …`) and any pages file it skipped, with the reason.
+4. Open the page's website: its PC status turns "ready" within 15 s (each project gets its own `worker_status` heartbeat).
+
+**Rules**
+- `worker.env` is the `unique-names` page unless a pages file has the same `PAGE_ID` or the same `SUPABASE_URL` (then
+  the pages file wins: a project is never served twice). ComfyUI, poll, heartbeat and timeout settings come from
+  `worker.env` only. A pages file with a missing key, a bad id, or an id/project already used is skipped.
+- Turns: round-robin, one job at a time. Each turn runs one job (a card, or one whole reel step) from the next page
+  that has one, so a reel's voice step (Chatterbox kept loaded across its lines) is never interleaved with another
+  page's picture, and a busy page can't starve a quiet one. Within a page the order is as before (cards and restamps,
+  then reel steps, then voice samples and theme previews).
+- A page whose project can't be reached is skipped and retried after 3 s, 6 s, 12 s … up to 5 minutes; the others go on.
+- Per page: its own heartbeat thread, log prefix (`[name-nest] …`, only with two or more pages), PC folders, cache
+  (`cache/<id>/`; Unique Names keeps `cache/`) and ComfyUI names (`<id>/raw`, `<id>/reel-voice`, `<id>/reel-music`,
+  voice clips in the input folder's `<id>/`, client id `<id>-worker`; Unique Names keeps `unique-names/…`).
+  The handle/watermark, fonts and text layout come from each project's `settings` row, as before.
+
 ## Reels (voice, timing, images, video)
 
 When no card is waiting, the worker takes the next reel step from `claim_next_reel_step()` (migration 005).
@@ -103,7 +132,7 @@ Steps, in order: voice → timing → music → images → render.
   `<id>/preview-v<reel version>.mp4`, `voices/<id>/sample-v<voice version>.wav`, `themes/<id>/preview-v<theme version>.jpg`.
   The superseded file is removed after a successful save. Previews older than 14 days are swept (the site shows
   "preview expired"; the PC copy stays).
-- **PC output folder**: `OneDrive\Pictures\Unique Names\Reels\<YYYY-MM-DD> <title>.mp4`, written as `.part` then
+- **PC output folder**: `OneDrive\Pictures\Unique Names\Reels\<YYYY-MM-DD> <title>.mp4` (another page: its `REELS_OUTPUT`), written as `.part` then
   renamed (OneDrive never syncs half a file); making the video again replaces that reel's file.
 - Every result is saved version-guarded (an edit/redo meanwhile drops it and deletes the upload) and clears the claim;
   long steps re-touch `reels.claimed_at` (between voice chunks, every 20 s of ACE-Step, every 60 s of ffmpeg). A step claimed for 10 minutes

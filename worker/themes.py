@@ -26,20 +26,25 @@ COMPOSITION = ("Composition: the scene fills the whole frame edge to edge; the c
                "stretch of the scene's own floor, blanket or background.")
 
 
-def preview_prompt(theme):
+def preview_prompt(theme, cast=None):
     """The Z-Image prompt for a theme's preview. A theme with a saved preview prompt (012: Crayon, Red Thread) uses
-    it verbatim. Otherwise the fixed moment, the theme's style block and a simple cast (dolls for knitted). The same
+    it verbatim. Otherwise the fixed moment, the theme's style block and a simple cast (dolls for knitted).
+    cast: the page's own {"moment", "cast", "doll_cast"} (worker/pages/*.env PREVIEW_*, 2.7.0); a part it leaves out
+    keeps today's Unique Names text (MOMENT, CAST, DOLL_CAST). The same
     moment is used for every old theme, knitted included: the spike's no-lift rule is for script lines (a doll lift
     there added a second baby), and this one preview moment passed for knitted in spike r1, so it is kept as is."""
     saved = str((theme or {}).get("preview_prompt") or "").strip()
     if saved:
         return saved
+    cast = cast or {}
     dolls = (theme or {}).get("id") == "knitted"
     who = "the same two dolls in every picture" if dolls else "the same two people in every picture"
     style = str((theme or {}).get("style") or "").strip()
+    moment = cast.get("moment") or MOMENT
+    people = (cast.get("doll_cast") or DOLL_CAST) if dolls else (cast.get("cast") or CAST)
     return "\n".join([
-        "A single full-bleed vertical 9:16 picture of one tender moment. Moment: %s. Lens: %s." % (MOMENT, LENS),
-        "%s Characters (%s): %s." % (style, who, DOLL_CAST if dolls else CAST),
+        "A single full-bleed vertical 9:16 picture of one tender moment. Moment: %s. Lens: %s." % (moment, LENS),
+        "%s Characters (%s): %s." % (style, who, people),
         COMPOSITION,
         NO_TEXT,
     ])
