@@ -398,7 +398,7 @@ describe("list, new reel, setup, nav", () => {
       render(<NewReelForm />);
       await act(async () => { fireEvent.click(btn(/Suggest topics/)); });
       expect(actions.suggestReelTopicsAction).toHaveBeenCalledWith({ exclude: [] });
-      expect(screen.getByText(/Finding fresh topics… a few seconds/)).toBeTruthy();
+      expect(screen.getByText(/Finding fresh topics… about 10 seconds/)).toBeTruthy();
       await act(async () => { resolve({ ok: true, ideas: IDEAS }); });
       expect(cards()).toHaveLength(5);
       const first = cards()[0];

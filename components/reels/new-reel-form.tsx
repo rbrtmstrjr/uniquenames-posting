@@ -128,7 +128,7 @@ export function NewReelForm() {
             )}
             {suggesting && (
               <div role="status" aria-live="polite" className="space-y-2">
-                <p className="text-xs font-semibold text-muted">Finding fresh topics… a few seconds</p>
+                <p className="text-xs font-semibold text-muted">Finding fresh topics… about 10 seconds</p>
                 {!list.length && [0, 1, 2].map((i) => <Skeleton key={i} className="h-24 w-full rounded-xl" />)}
               </div>
             )}

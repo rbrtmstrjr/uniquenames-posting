@@ -10,7 +10,7 @@ import { plainWordsProblem } from "./plain-words";
 import { aiJson } from "./provider";
 import { CTA_RE, GREETING_RE, MECHANISM_RE, narratorFirstPerson, OUTRO_RE, REASSURE_RE } from "./reel-script";
 
-/** The owner waits on this with a spinner: Haiku (low effort) answers in a few seconds. */
+/** The owner waits on this with a spinner: Haiku (low effort) answers in about 5-15 seconds. */
 export const IDEAS_TIMEOUT_MS = 30_000;
 /** Fresh ideas asked for: one more than shown, so a rule-breaker can be dropped. */
 export const FRESH_ASK = FRESH_IDEAS + 1;
