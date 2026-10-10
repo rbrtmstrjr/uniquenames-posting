@@ -131,7 +131,7 @@ Reels are now short, useful lessons (30–45 s) instead of slow stories. Each ne
 ## Use Claude instead of Gemini (optional)
 Reel scripts, captions and the name/theme/letter suggestions can be written by Anthropic Claude instead of Gemini. Voices (TTS) and pictures stay as they are, so `GEMINI_API_KEY` is still needed for **Set up voices** and narration.
 1. Create a key at https://platform.claude.com (Settings > API keys) and add prepaid credits (Billing).
-2. `.env.local` on your PC: add `ANTHROPIC_API_KEY=...` and `AI_PROVIDER=claude`. Optional: `AI_SCRIPT_MODEL=sonnet` for reel scripts on Claude Sonnet 5.5 (stronger, about 20× the price); the default is Claude Haiku 5.5. Captions and suggestions always use Haiku.
+2. `.env.local` on your PC: add `ANTHROPIC_API_KEY=...` and `AI_PROVIDER=claude`. Recommended: `AI_SCRIPT_MODEL=sonnet` for reel scripts on Claude Sonnet 5.5 (in the 2026-10-10 test: 5 of 5 scripts passed first time, about 35 s and $0.06 each); without it scripts use Claude Haiku 5.5 (about $0.01 each, but slower with more rewrites and more fact slips). `AI_SCRIPT_EFFORT` (`low`, `medium` or `high`, default `medium`) sets how hard Claude thinks about scripts; `low` fails the script checks too often on Haiku. Captions and suggestions always use Haiku.
 3. Vercel > Settings > Environment Variables: add `ANTHROPIC_API_KEY` (tick **Sensitive**, Production and Preview), `AI_PROVIDER` = `claude` and, if you want it, `AI_SCRIPT_MODEL` = `sonnet`. Redeploy.
 
 `ANTHROPIC_API_KEY` is a server-only secret like the Gemini key: never name it `NEXT_PUBLIC_...`. To go back to Gemini, remove `AI_PROVIDER` (or set it to `gemini`) and redeploy. When the Claude balance is empty, the AI buttons say "Your Claude credits have run out".
