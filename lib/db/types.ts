@@ -21,6 +21,8 @@ export type CardKind = "post" | "preview" | "cta";
 export interface NameRow {
   id: string; name: string; meaning: string; gender: Gender; style: NameStyle; status: NameStatus;
   post_id: string | null; position: number | null; created_at: string; updated_at: string;
+  /** Name Nest (migration 015; absent before it runs): the origin, and the US SSA rank for its gender + that list's year. */
+  origin?: string | null; us_rank?: number | null; us_year?: number | null;
 }
 export interface ThemeRow {
   id: string; title: string; gender: Gender; backdrop: string; outfit: string; props: string; lighting: string; palette: string;
@@ -47,6 +49,8 @@ export interface CardRow {
   queued_at: string; claimed_at: string | null; started_at: string | null; finished_at: string | null; attempts: number;
   created_at: string; updated_at: string;
 }
+/** How the PC stamps a card (migration 015): 'classic' = Unique Names, 'name-nest' = brand colours + the US rank / origin line. */
+export type CardLayout = "classic" | "name-nest";
 export interface SettingsRow {
   id: 1; caption_template: string; hashtags: string; handle: string; min_images: number; max_images: number;
   width: number; height: number; sound_on: boolean;
@@ -73,6 +77,8 @@ export interface SettingsRow {
   cta_enabled?: boolean; cta_messages?: string;
   /** Reels (migration 014; absent before it runs): draw the on-screen step labels (default on). */
   reel_labels?: boolean;
+  /** Name Nest (migration 015; absent before it runs): how the PC stamps a card ('classic' = Unique Names). */
+  card_layout?: CardLayout;
   updated_at: string;
 }
 export type VoiceSampleStatus = "missing" | "queued" | "making" | "ready" | "failed";

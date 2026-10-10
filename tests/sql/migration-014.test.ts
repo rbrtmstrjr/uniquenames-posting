@@ -15,6 +15,7 @@ const earlier = [
   "008_reel_playbook.sql", "009_captions.sql", "010_cta_card.sql", "011_az_series.sql", "012_two_styles.sql", "013_letter_posts.sql",
 ].map((m) => stripSupabase(read("supabase", "migrations", m)));
 const m014 = stripSupabase(read("supabase", "migrations", "014_reel_formats.sql"));
+const m015 = stripSupabase(read("supabase", "migrations", "015_name_nest.sql"));
 
 async function liveDb() {
   const db = new PGlite();
@@ -85,7 +86,9 @@ describe("fresh schema.sql matches v1 + 002..014 (reels, reel_scenes, settings)"
   });
 
   it("has the same columns, constraints and settings row", async () => {
-    const want = await shape(await migratedDb());
+    const migrated = await migratedDb();
+    await migrated.exec(m015);
+    const want = await shape(migrated);
     const cols = (want.columns as { table_name: string; column_name: string }[]).map((c) => `${c.table_name}.${c.column_name}`);
     expect(cols).toEqual(expect.arrayContaining(["reels.format", "reels.topic_id", "reel_scenes.on_screen", "settings.reel_labels"]));
     expect(await shape(await freshDb())).toEqual(want);

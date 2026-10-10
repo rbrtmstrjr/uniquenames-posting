@@ -22,6 +22,7 @@ const m011 = stripSupabase(read("supabase", "migrations", "011_az_series.sql"));
 const m012 = stripSupabase(read("supabase", "migrations", "012_two_styles.sql"));
 const m013 = stripSupabase(read("supabase", "migrations", "013_letter_posts.sql"));
 const m014 = stripSupabase(read("supabase", "migrations", "014_reel_formats.sql"));
+const m015 = stripSupabase(read("supabase", "migrations", "015_name_nest.sql"));
 
 const GEMINI = [
   ["zephyr", "Bright"], ["puck", "Upbeat"], ["charon", "Informative"], ["kore", "Firm"], ["fenrir", "Excitable"],
@@ -327,6 +328,7 @@ describe("fresh schema.sql matches v1 + 002..006 (+ 007, 008)", () => {
     await migrated.exec(m012);
     await migrated.exec(m013);
     await migrated.exec(m014);
+    await migrated.exec(m015);
     const want = await shape(migrated);
     expect(want.functions).toHaveLength(7);
     expect(want.voices).toHaveLength(31);

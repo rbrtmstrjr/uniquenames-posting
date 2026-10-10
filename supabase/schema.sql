@@ -1,5 +1,5 @@
 -- Unique Names posting: database. Paste the whole file into the Supabase SQL editor and run it once.
--- A project created before v2 runs supabase/migrations/002_v2.sql, 003_post_fonts.sql, 004_subject_age.sql, 005_reels.sql, 006_reel_voices.sql, 007_reel_themes.sql, 008_reel_playbook.sql, 009_captions.sql, 010_cta_card.sql, 011_az_series.sql, 012_two_styles.sql, 013_letter_posts.sql then 014_reel_formats.sql instead (this file already includes them).
+-- A project created before v2 runs supabase/migrations/002_v2.sql, 003_post_fonts.sql, 004_subject_age.sql, 005_reels.sql, 006_reel_voices.sql, 007_reel_themes.sql, 008_reel_playbook.sql, 009_captions.sql, 010_cta_card.sql, 011_az_series.sql, 012_two_styles.sql, 013_letter_posts.sql, 014_reel_formats.sql then 015_name_nest.sql instead (this file already includes them).
 -- Status 'pending' = an AI-suggested name/theme waiting for approval; nothing here ever plans it (only 'available').
 
 -- ---------------------------------------------------------------- tables
@@ -138,6 +138,8 @@ create table if not exists public.settings (
     E'Follow for more / baby name ideas.\nFollow us for a new / name list every day.\nStill searching? Follow for / more unique names.\nSave this post and follow / for more name ideas.\nMore {gender} names tomorrow. / Follow so you don''t miss them.\nFound a favorite? / Follow for more like it.\nFollow for a fresh list / of unique {gender} names.\nNew names every day. / Follow along!',
   -- reels (014): draw the on-screen step labels
   reel_labels boolean not null default true,
+  -- Name Nest (015): how the PC stamps a card ('classic' = Unique Names; 'name-nest' = brand colours + the US rank / origin line)
+  card_layout text not null default 'classic' constraint settings_card_layout_check check (card_layout in ('classic', 'name-nest')),
   updated_at timestamptz not null default now(),
   check (min_images <= max_images)
 );
@@ -211,6 +213,10 @@ create table if not exists public.names (
   status text not null default 'available' check (status in ('available', 'reserved', 'used', 'skip', 'pending')),
   post_id uuid references public.posts (id) on delete set null,
   position int,
+  -- Name Nest (015): the origin, and the rank for its gender + the year in the US SSA baby-name data (null = not known)
+  origin text constraint names_origin_len check (origin is null or char_length(origin) between 1 and 40),
+  us_rank int constraint names_us_rank_check check (us_rank is null or us_rank between 1 and 100000),
+  us_year int constraint names_us_year_check check (us_year is null or us_year between 1880 and 2100),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
