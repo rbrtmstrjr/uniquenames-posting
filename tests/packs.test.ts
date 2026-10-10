@@ -99,7 +99,7 @@ describe("pack modules stay plain and the prompts stay out of the browser", () =
 
   it("the client-safe modules never import the full pack", () => {
     for (const f of ["packs/shared.ts", "packs/theme.ts", "packs/niche.ts", ...packFiles.filter((p) => /[\\/]shared\.ts$/.test(p))]) {
-      expect([f, /from\s+["'](?:@\/packs|\.\/index|\.\.\/index|\.\/unique-names)["']/.test(read(f).replace(/import type[^;]+;/g, ""))]).toEqual([f, false]);
+      expect([f, /from\s+["'](?:@\/packs|\.\/index|\.\.\/index|\.\/unique-names|\.\/name-nest)["']/.test(read(f).replace(/import type[^;]+;/g, ""))]).toEqual([f, false]);
     }
   });
 
