@@ -49,6 +49,8 @@ export interface HouseVoice { id: string; label: string; tone: string }
 export interface PackShared {
   id: string;
   brand: PackBrand;
+  /** The post caption template a new project starts with ({gender} = boy / girl; used when AI captions are off). */
+  captionTemplate: string;
   /** Defaults used when the settings row has none (the database defaults are the Unique Names values). */
   hashtags: { always: string; pool: string };
   /** One closing-card message per line ("/" = a line break, {gender} = boy / girl). */

@@ -9,6 +9,7 @@ import { chime, notify } from "@/lib/realtime/chime";
 import type { WorkerStatusRow } from "@/lib/db/types";
 import { createContext, useContext } from "react";
 import type { WorkerHealth } from "@/lib/status/worker-health";
+import { brand } from "@/packs/shared";
 
 const WorkerCtx = createContext<{ health: WorkerHealth; lastSeen: string; row: WorkerStatusRow | null }>({ health: "unknown", lastSeen: "never", row: null });
 export const useWorkerContext = () => useContext(WorkerCtx);
@@ -17,11 +18,11 @@ export function AppShell({ initialWorker, soundOn, children }: { initialWorker: 
   const worker = useWorker(initialWorker);
   const activity = useActivity(() => {
     if (soundOn) chime();
-    notify("Post ready", "Your Unique Names cards are done.");
+    notify("Post ready", brand().postReadyText);
   });
 
   useEffect(() => {
-    const base = "Unique Names";
+    const base = brand().name;
     document.title = activity.post ? `(${activity.done}/${activity.total}) ${base}` : activity.finishedPostId ? `✓ ${base}` : base;
   }, [activity.post, activity.done, activity.total, activity.finishedPostId]);
 
@@ -29,7 +30,7 @@ export function AppShell({ initialWorker, soundOn, children }: { initialWorker: 
     <WorkerCtx.Provider value={worker}>
       <div className="min-h-dvh bg-bg md:grid md:grid-cols-[232px_1fr]">
         <aside className="sticky top-0 hidden h-dvh flex-col border-r border-line px-3 py-5 md:flex">
-          <div className="mb-6 px-3 font-display text-xl text-ink"><span className="italic text-accent">✿</span> Unique Names</div>
+          <div className="mb-6 px-3 font-display text-xl text-ink"><span className="italic text-accent">{brand().mark}</span> {brand().name}</div>
           <SideNav />
           <div className="mt-auto space-y-3 px-3">
             <PcStatus health={worker.health} lastSeen={worker.lastSeen} />
@@ -38,7 +39,7 @@ export function AppShell({ initialWorker, soundOn, children }: { initialWorker: 
         </aside>
         <div className="min-w-0">
           <header className="sticky top-0 z-20 flex min-h-14 items-center justify-between gap-3 border-b border-line bg-bg/90 px-4 backdrop-blur md:justify-end md:px-8">
-            <div className="font-display text-lg text-ink md:hidden"><span className="italic text-accent">✿</span> Unique Names</div>
+            <div className="font-display text-lg text-ink md:hidden"><span className="italic text-accent">{brand().mark}</span> {brand().name}</div>
             <div className="flex items-center gap-3">
               <ActivityPill a={activity} />
               <div className="md:hidden"><PcStatus health={worker.health} lastSeen={worker.lastSeen} compact /></div>

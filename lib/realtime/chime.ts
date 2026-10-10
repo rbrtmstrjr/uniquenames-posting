@@ -1,4 +1,5 @@
 "use client";
+import { brand } from "@/packs/shared";
 
 export function chime() {
   try {
@@ -16,6 +17,6 @@ export function chime() {
 
 export function notify(title: string, body: string) {
   if (typeof Notification !== "undefined" && Notification.permission === "granted" && document.visibilityState !== "visible") {
-    new Notification(title, { body, icon: "/icon.svg" });
+    new Notification(title, { body, icon: brand().assets.icon });
   }
 }

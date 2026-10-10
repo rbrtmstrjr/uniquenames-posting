@@ -23,6 +23,7 @@ import { ThemeGrid } from "./theme-grid";
 import { DEFAULT_THEME_ID, isThemeId } from "@/lib/reels/themes";
 import { houseDefault, MUSIC_DEFAULT, speedOf, VOLUME_DEFAULT } from "@/lib/reels/voices";
 import { CTA_MAX_LINES, CTA_MESSAGES_DEFAULT } from "@/lib/cta/messages";
+import { brand } from "@/packs/shared";
 
 // Card counts are picked on sliders, so a value is always a whole number in range;
 // validateSettings still rejects "fewest" above "most" with a clear message.
@@ -191,7 +192,7 @@ export function SettingsForm({ initial, sample = DEFAULT_SAMPLE, voices = null, 
       </Panel>
       <Panel title="Card text">
         <CardTextSettings value={textOf(s)} onChange={(t) => setS({ ...s, ...t })} sample={sample}
-          aspect={initial.height / initial.width || 1} handle={s.handle.trim() || "@unique_names"} />
+          aspect={initial.height / initial.width || 1} handle={s.handle.trim() || brand().handle} />
       </Panel>
       <Panel title="App">
         <div className="flex flex-wrap items-center gap-3">

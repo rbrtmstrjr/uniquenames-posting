@@ -37,6 +37,7 @@ export const UNIQUE_NAMES_SHARED: PackShared = {
       themeColor: { light: "#FBF6EF", dark: "#0F0E0D" },
     },
   },
+  captionTemplate: "Here are some beautiful names you can give to your baby {gender}. 🥰",
   hashtags: {
     always: "#uniquenames",
     pool: "#babynames #babygirlnames #babyboynames #uniquebabynames #namemeaning #momlife #newmom #pregnancy #momtobe #babynameideas",

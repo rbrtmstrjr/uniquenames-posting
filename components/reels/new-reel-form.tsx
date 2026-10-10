@@ -15,6 +15,7 @@ import type { TopicIdea } from "@/lib/reels/topic-ideas";
 import { clock } from "@/lib/reels/status";
 import { useNow } from "@/lib/realtime/hooks";
 import { cn } from "@/lib/utils/cn";
+import { brand } from "@/packs/shared";
 
 const TOPIC_MAX = 120;
 
@@ -188,7 +189,7 @@ export function NewReelForm() {
             ["Write", "The AI writes a 60–90 second lesson: about 20–30 short lines, one picture each, with a fresh hook every few seconds."],
             ["Check", "Read the lines, fix any words, then approve."],
             ["Make", "Your PC records the voice, makes the pictures in your style (Crayon or Red Thread) and the captioned video."],
-            ["Save", "The full video lands in Pictures › Unique Names › Reels; a preview plays here."],
+            ["Save", `The full video lands in Pictures › ${brand().pcFolder} › Reels; a preview plays here.`],
           ].map(([t, d], i) => (
             <li key={t} className="flex gap-3">
               <span className="grid size-7 shrink-0 place-items-center rounded-full bg-accent-soft text-xs font-bold text-accent">{i + 1}</span>

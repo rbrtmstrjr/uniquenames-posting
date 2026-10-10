@@ -6,6 +6,7 @@ import { TodaySelectionProvider } from "@/components/today/selection";
 import { Empty } from "@/components/ui/empty";
 import { ImageIcon } from "lucide-react";
 import { PageHeader } from "@/components/ui/page-header";
+import { brand } from "@/packs/shared";
 
 // Create post waits on Gemini for the caption (9 s budget) plus a few DB round trips;
 // By letter > Suggest with AI waits on Gemini for name ideas (up to ~50 s).
@@ -17,6 +18,8 @@ export default async function TodayPage() {
   return (
     <>
       <PageHeader title="Today" subtitle="Make today's post. Cards appear here as your PC finishes them." />
+      {/* the active pack's posting-time hint (none for Unique Names) */}
+      {brand().postingTimeHint && <p className="-mt-3 mb-4 text-xs font-semibold text-muted">{brand().postingTimeHint}</p>}
       {/* The Stock card highlights the gender + style picked in New post (shared selection). */}
       <TodaySelectionProvider>
         {/* Phones: New post first. Desktop: the post being made + Stock on the wide left (70%), New post on the right (30%). */}

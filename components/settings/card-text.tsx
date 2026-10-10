@@ -8,8 +8,9 @@ import { CatalogFontsLink } from "@/components/fonts/font-select";
 import { Slider } from "@/components/ui/shadcn/slider";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/shadcn/toggle-group";
 import { cn } from "@/lib/utils/cn";
+import { brand } from "@/packs/shared";
 
-export const FALLBACK_PREVIEW = "/login/light-wide.webp";
+export const FALLBACK_PREVIEW = brand().assets.login.lightWide;
 export interface PreviewSample { photoUrl: string | null; name: string; meaning: string }
 
 const FONT_FIELDS = [

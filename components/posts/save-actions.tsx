@@ -7,6 +7,7 @@ import type { CardRow, PostRow } from "@/lib/db/types";
 import { MAX_SHARE_FILES, batchLabel, nextBatchIndex, orderedSelection, shareBatches, shareFiles, zipCards } from "@/lib/files/save";
 import { downloadName } from "@/lib/files/download-name";
 import { useCardBlobs } from "./use-card-blobs";
+import { brand } from "@/packs/shared";
 
 export function SaveActions({ post, cards, caption }: { post: PostRow; cards: CardRow[]; caption: string }) {
   const [busy, setBusy] = useState<"share" | "zip" | null>(null);
@@ -24,7 +25,7 @@ export function SaveActions({ post, cards, caption }: { post: PostRow; cards: Ca
   const sent = sentFor.key === selKey ? sentFor.n : 0; // a new selection starts at batch 1
   const idx = nextBatchIndex(batches.length, sent);
 
-  const zipName = `unique-names-${post.post_date}-${post.gender}.zip`;
+  const zipName = `${brand().zipPrefix}-${post.post_date}-${post.gender}.zip`;
 
   const zip = async (why?: string) => {
     if (why) toast.warning(why);
