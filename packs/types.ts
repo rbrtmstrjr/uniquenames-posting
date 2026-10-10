@@ -85,6 +85,8 @@ export interface PackCaptions {
   styleGuide: Readonly<Record<CaptionStyle, (g: Gender) => string>>;
   /** The reel caption system prompt. */
   reelSystem: (maxChars: number) => string;
+  /** An extra check on a post caption line (null = fine); a problem makes the AI try again. None = no extra check. */
+  postProblem?: (line: string) => string | null;
 }
 
 export interface PackSuggest {

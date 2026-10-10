@@ -21,6 +21,7 @@ const postSystem = (maxChars: number) => [
   "Every caption must read clearly different from the recent captions in the prompt: a different opening word, a different sentence shape and a different question. Never reuse their phrases.",
   "Avoid stock openers and cliches such as \"Get ready\", \"Look no further\", \"Introducing\", \"These lovely\", \"Calling all\" or \"swoon\".",
   "Say \"baby boy names\" or \"baby girl names\" (or close wording) once so readers know what the post is.",
+  "This is a brand page, not a person: never write as I, me or my (no \"I know\", \"my favorite\"); speak to the reader as you.",
   "Only mention a name when the style asks for one, and then only names from the list in the prompt, spelled exactly. When you say what a name means, where it comes from or how popular it is in the US, use only the facts given for it in the list: never invent a meaning, an origin, a rank or a fact.",
   "Do not mention how many names there are.",
   "The photos are a styled photoshoot set for name ideas, not a real family: never write as if a real baby or family exists (no \"our little one\", \"we loved watching\", \"my baby\"); talk about the set, the mood and the names.",
@@ -37,7 +38,7 @@ const STYLE_GUIDE: Record<CaptionStyle, (g: Gender) => string> = {
   question: (g) => `Honest question. Open with a soft, genuine question to moms and dads-to-be about choosing a name (the question is the first sentence), then one short line tying in the photoshoot and these baby ${g} names. No second question. Do not name any names.`,
   choice: (g) => `This or that. Pick two names from the list and ask, naturally, which one would make the reader's short list (for example "Name or Name for ...?"), with a short line about the photoshoot and these baby ${g} names. You may add the meaning of one or both.`,
   fact: (g) => `Name fact. Share one small fact taken only from a name's given meaning, origin or US rank (for example where it comes from, or that it is in the US top 10), naming that name, then tie in these baby ${g} names. No outside facts. You may end with a short open question.`,
-  compliment: (g) => `Mom to mom. Open with a kind, specific line to moms and moms-to-be (the care that goes into a short list, the late-night name talks), then these baby ${g} names and the photoshoot's mood. A question is optional. Do not name any names.`,
+  compliment: (g) => `Kind word. Open with a kind, specific line to moms and moms-to-be (the care that goes into a short list, the late-night name talks), then a second sentence that contains the words "baby ${g} names" and the photoshoot's mood. A question is optional. Do not name any names.`,
 };
 
 /** The reel caption system prompt (`maxChars` = REEL_CAPTION_MAX). */
@@ -55,4 +56,12 @@ const reelSystem = (maxChars: number) => [
   "Return JSON: {\"caption\": \"...\", \"tags\": [\"#...\"]}.",
 ].join("\n");
 
-export const NAME_NEST_CAPTIONS: PackCaptions = { postSystem, styleGuide: STYLE_GUIDE, reelSystem };
+/** Name Nest's own caption checks: a brand voice (never I / me / my / we / our) that says what the post is. */
+function postProblem(line: string): string | null {
+  const me = line.match(/\b(?:I|I'm|I've|I'd|[Mm]e|[Mm]y|[Ww]e|[Oo]ur)\b/)?.[0];
+  if (me) return `speaks as a person ("${me}"): the page is a brand`;
+  if (!/\bbaby (?:boy|girl)\b/i.test(line)) return "does not say baby boy names or baby girl names";
+  return null;
+}
+
+export const NAME_NEST_CAPTIONS: PackCaptions = { postSystem, styleGuide: STYLE_GUIDE, reelSystem, postProblem };

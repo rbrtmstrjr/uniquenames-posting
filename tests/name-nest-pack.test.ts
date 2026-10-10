@@ -196,3 +196,14 @@ describe("NICHE=name-nest: the engine reads the Name Nest pack", () => {
     expect(red.prompt).toContain("stretched = distance (a parent working abroad, leaving for work, the first day apart)");
   });
 });
+
+describe("name-nest: its own caption checks", () => {
+  it("a brand voice that says what the post is; the US abbreviation is fine", () => {
+    const p = NN.captions.postProblem!;
+    expect(p("Hazel and Olivia, two sweet baby girl names ranked #1 in the US.")).toBeNull();
+    expect(p("I hope these baby boy names help.")).toMatch(/speaks as a person/);
+    expect(p("Our favorite baby girl names this fall.")).toMatch(/speaks as a person/);
+    expect(p("Picking a name takes real care.")).toMatch(/baby boy names or baby girl names/);
+    expect(UN.captions.postProblem).toBeUndefined();
+  });
+});

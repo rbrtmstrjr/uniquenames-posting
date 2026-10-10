@@ -121,6 +121,8 @@ const letterRe = (l: string) => new RegExp([
 export function captionProblem(line: string, input: Pick<CaptionInput, "captionStyle" | "names" | "recent" | "series" | "letter">): string | null {
   const w = firstWord(line);
   if (w && openers(input.recent ?? []).includes(w)) return `starts with "${w}" like a recent caption`;
+  const own = activePack().captions.postProblem?.(line);
+  if (own) return own;
   if (input.series && !partRe(input.series.part).test(line)) return `does not say it is Part ${input.series.part} of the A to Z series`;
   if (isLetter(input.letter) && !letterRe(input.letter).test(line)) return `does not say the names start with the letter ${input.letter}`;
   const need = input.captionStyle === "choice" ? 2 : NAME_STYLES.includes(input.captionStyle) ? 1 : 0;
