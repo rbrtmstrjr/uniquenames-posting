@@ -4,6 +4,9 @@ One codebase runs several Facebook pages. Everything one page does differently l
 (`packs/<id>/`). The engine (`lib/`, `app/`, `components/`) reads the active pack and holds no page-specific text.
 Spec: `docs/superpowers/specs/2026-10-10-niche-packs-name-nest-design.md`.
 
+Packs today: `unique-names` (the default, @unique_names) and `name-nest` (Name Nest – Baby Names & Parenting,
+@namenest, US only; setup in `docs/SETUP-NAME-NEST.md`).
+
 ## How NICHE picks the pack
 
 - Env `NICHE` = the pack id. Unset or empty means `unique-names`. An unknown id throws (`packs/niche.ts`), so a
@@ -18,12 +21,13 @@ Spec: `docs/superpowers/specs/2026-10-10-niche-packs-name-nest-design.md`.
 
 | Part | Client-safe? | What | Read by |
 |---|---|---|---|
-| `brand` | yes | name, description, mark, watermark handle, login texts, "post ready" text, zip prefix, PC folder name, posting-time hint, icon + login photos, colour tokens | layout, login, shell, Settings, Today, save, chime |
+| `brand` | yes | name, description, mark, watermark handle, login texts, "post ready" text, zip prefix, PC folder name, posting-time hint, icon, optional logo mark, login backdrops (photos or SVG), colour tokens | layout, login, shell, Settings, Today, save, chime |
+| `cardText` | yes | the card fonts and the card layout (`classic` / `name-nest`, settings.card_layout, migration 015) a new project starts with | `packs/seed` |
 | `captionTemplate`, `hashtags`, `ctaMessages`, `voices` | yes | a new project's settings and the fallbacks for empty ones; the house voices + default | `lib/captions/hashtags`, `lib/cta/messages`, `lib/reels/voices`, `packs/seed` |
 | `cards` | no | children's looks, shot lists per session, props-only shots, the closing card's moment | `lib/planner/prompt`, `lib/planner/shots` |
 | `captions` | no | post caption system prompt + style guide, reel caption system prompt | `lib/ai/caption`, `lib/ai/reel-caption` |
 | `suggest` | no | name / theme / by-letter suggestion prompts and default wishes | `lib/ai/suggest` |
-| `reels` | no | script system prompt (audience, language, ages), auto-topic line, vetted claims, cast rules, style stories, greeting name, topic-ideas prompt + format hints, topic bank, voice reference line | `lib/ai/reel-script`, `lib/ai/reel-ideas`, `lib/reels/topics`, `lib/ai/tts` |
+| `reels` | no | script system prompt (audience, language, ages), auto-topic line, vetted claims, cast rules, style stories, greeting name, topic-ideas prompt + format hints, topic bank, voice reference line, Red Thread distance wording (optional) | `lib/ai/reel-script`, `lib/ai/reel-ideas`, `lib/reels/topics`, `lib/ai/tts` |
 
 These stay in the engine and are the same for every pack: the Crayon / Red Thread guide text (`lib/reels/guide-text.ts`),
 the reel formats and their beats, the health rules, the Filipino / Tagalog and jargon ban lists (`lib/ai/plain-words.ts`),
@@ -52,3 +56,10 @@ The PC worker reads its own page settings (`worker/pages/<id>.env`); its pack id
 
 **Never** edit the unique-names snapshots to make a change pass. A diff there means the live Unique Names page
 would change.
+
+## Card layouts (worker 2.7.1)
+
+`settings.card_layout` (migration 015) picks how the PC stamps a card: `classic` (Unique Names: white or brown text,
+plain watermark; byte for byte as before, `worker/test_card_layout.py` holds its golden digests) or `name-nest` (brand
+ink, a "#38 in the US · Greek" chip from the name's `us_rank` / `origin`, a red watermark pill). A new layout is a new
+value in the check constraint, `worker/render.py` and `CardLayout`.
