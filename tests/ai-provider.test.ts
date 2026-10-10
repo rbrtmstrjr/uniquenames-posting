@@ -18,6 +18,7 @@ beforeEach(() => {
   claudeJson.mockReset().mockResolvedValue({ ok: true, data: { a: "c" } });
   vi.stubEnv("AI_PROVIDER", "");
   vi.stubEnv("AI_SCRIPT_MODEL", "");
+  vi.stubEnv("AI_SCRIPT_EFFORT", "");
 });
 afterEach(() => vi.unstubAllEnvs());
 
@@ -60,6 +61,21 @@ describe("aiJson", () => {
     expect(r).toEqual({ ok: true, data: { a: "c" } });
     expect(generateJson).not.toHaveBeenCalled();
     expect(claudeJson).toHaveBeenCalledWith({ system: "s", prompt: "p", schema, timeoutMs: 9000, parse, model: "claude-sonnet-5-5", effort: "medium" });
+  });
+
+  it("AI_SCRIPT_EFFORT tunes the script effort only (low|medium|high; anything else = medium)", async () => {
+    vi.stubEnv("AI_PROVIDER", "claude");
+    vi.stubEnv("AI_SCRIPT_EFFORT", "low");
+    await aiJson({ ...input, task: "script" });
+    expect(claudeJson.mock.calls[0][0].effort).toBe("low");
+    await aiJson({ ...input, task: "small" });
+    expect(claudeJson.mock.calls[1][0].effort).toBe("low");
+    vi.stubEnv("AI_SCRIPT_EFFORT", "high");
+    await aiJson({ ...input, task: "script" });
+    expect(claudeJson.mock.calls[2][0].effort).toBe("high");
+    vi.stubEnv("AI_SCRIPT_EFFORT", "max");
+    await aiJson({ ...input, task: "script" });
+    expect(claudeJson.mock.calls[3][0].effort).toBe("medium");
   });
 
   it("sends small tasks to Haiku at low effort", async () => {

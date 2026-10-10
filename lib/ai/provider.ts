@@ -18,7 +18,12 @@ export function claudeModelFor(task: AiTask): string {
   return want === "sonnet" || want === CLAUDE_SONNET ? CLAUDE_SONNET : CLAUDE_HAIKU;
 }
 
-const EFFORT: Record<AiTask, ClaudeEffort> = { script: "medium", small: "low" };
+/** Claude effort per task: scripts "medium" unless AI_SCRIPT_EFFORT is low / medium / high; small tasks always "low". */
+export function claudeEffortFor(task: AiTask): ClaudeEffort {
+  if (task !== "script") return "low";
+  const want = process.env.AI_SCRIPT_EFFORT?.trim().toLowerCase();
+  return want === "low" || want === "high" ? want : "medium";
+}
 
 /**
  * JSON from the configured AI. Gemini gets the call exactly as before; Claude gets the same prompt, schema,
@@ -29,5 +34,5 @@ export function aiJson<T>(input: AiJsonInput<T>): Promise<GenerateJsonResult<T>>
   const { task, ...rest } = input;
   if (aiProvider() !== "claude") return generateJson<T>(rest);
   const { system, prompt, schema, timeoutMs, parse } = rest;
-  return claudeJson<T>({ system, prompt, schema, timeoutMs, parse, model: claudeModelFor(task), effort: EFFORT[task] });
+  return claudeJson<T>({ system, prompt, schema, timeoutMs, parse, model: claudeModelFor(task), effort: claudeEffortFor(task) });
 }
