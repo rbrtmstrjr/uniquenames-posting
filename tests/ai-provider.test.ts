@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { generateJson, claudeJson } = vi.hoisted(() => ({ generateJson: vi.fn(), claudeJson: vi.fn() }));
 vi.mock("@/lib/ai/gemini", () => ({ generateJson }));
-vi.mock("@/lib/ai/claude", () => ({ claudeJson, CLAUDE_HAIKU: "claude-haiku-5-5", CLAUDE_SONNET: "claude-sonnet-5-5" }));
+vi.mock("@/lib/ai/claude", () => ({ claudeJson, CLAUDE_HAIKU: "claude-haiku-5-5", CLAUDE_SONNET: "claude-sonnet-5-5", CLAUDE_OPUS: "claude-opus-5-5" }));
 
 import { aiJson, aiProvider, claudeModelFor } from "@/lib/ai/provider";
 import type { GeminiSchema } from "@/lib/ai/gemini";
@@ -43,6 +43,14 @@ describe("claudeModelFor", () => {
     expect(claudeModelFor("script")).toBe("claude-sonnet-5-5");
     vi.stubEnv("AI_SCRIPT_MODEL", "gpt-9");
     expect(claudeModelFor("script")).toBe("claude-haiku-5-5");
+  });
+
+  it("uses Opus for scripts when AI_SCRIPT_MODEL=opus (small tasks stay on Haiku)", () => {
+    vi.stubEnv("AI_SCRIPT_MODEL", "opus");
+    expect(claudeModelFor("script")).toBe("claude-opus-5-5");
+    expect(claudeModelFor("small")).toBe("claude-haiku-5-5");
+    vi.stubEnv("AI_SCRIPT_MODEL", "claude-opus-5-5");
+    expect(claudeModelFor("script")).toBe("claude-opus-5-5");
   });
 });
 

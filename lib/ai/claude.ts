@@ -7,6 +7,8 @@ import { toClaudeSchema } from "./json-schema";
 export const CLAUDE_HAIKU = "claude-haiku-5-5";
 /** Stronger writer ($2 / $10 per MTok): reel scripts when AI_SCRIPT_MODEL=sonnet. */
 export const CLAUDE_SONNET = "claude-sonnet-5-5";
+/** Most capable ($4 / $20 per MTok; thinking always on): reel scripts when AI_SCRIPT_MODEL=opus. */
+export const CLAUDE_OPUS = "claude-opus-5-5";
 /** Room for adaptive thinking plus the JSON (a reel script is ~3-5K tokens); safe without streaming. */
 export const CLAUDE_MAX_TOKENS = 16000;
 

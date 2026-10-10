@@ -1,6 +1,6 @@
 import "server-only";
 import { generateJson, type GenerateJsonInput, type GenerateJsonResult } from "./gemini";
-import { claudeJson, CLAUDE_HAIKU, CLAUDE_SONNET, type ClaudeEffort } from "./claude";
+import { claudeJson, CLAUDE_HAIKU, CLAUDE_OPUS, CLAUDE_SONNET, type ClaudeEffort } from "./claude";
 
 /** "script" = a reel script (long, careful); "small" = captions and name / theme / letter suggestions. */
 export type AiTask = "script" | "small";
@@ -11,11 +11,13 @@ export function aiProvider(): "gemini" | "claude" {
   return process.env.AI_PROVIDER?.trim().toLowerCase() === "claude" ? "claude" : "gemini";
 }
 
-/** The Claude model for a task: Haiku, except scripts with AI_SCRIPT_MODEL=sonnet (or the full Sonnet id). */
+/** The Claude model for a task: Haiku, except scripts with AI_SCRIPT_MODEL=sonnet / opus (or the full model id). */
 export function claudeModelFor(task: AiTask): string {
   if (task !== "script") return CLAUDE_HAIKU;
   const want = process.env.AI_SCRIPT_MODEL?.trim().toLowerCase();
-  return want === "sonnet" || want === CLAUDE_SONNET ? CLAUDE_SONNET : CLAUDE_HAIKU;
+  if (want === "sonnet" || want === CLAUDE_SONNET) return CLAUDE_SONNET;
+  if (want === "opus" || want === CLAUDE_OPUS) return CLAUDE_OPUS;
+  return CLAUDE_HAIKU;
 }
 
 /** Claude effort per task: scripts "medium" unless AI_SCRIPT_EFFORT is low / medium / high; small tasks always "low". */
