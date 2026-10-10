@@ -125,7 +125,7 @@ export function ScriptReview({ reel, scenes, onApproved, narrator = null, themes
   const dirty = titleDirty || hookDirty || dirtyLines.length > 0;
   const problem = firstProblem(title, lines, hasHook ? hook : "");
   const totalWords = lines.reduce((n, l) => n + wordCount(l.narration), 0);
-  // The script length the prompt aims for (45–75 s of speech at the narration speed).
+  // The script length the prompt asks for (60–90 s of speech at the narration speed).
   const speed = narrator?.speed ?? 1;
   const TARGET = wordTarget(speed);
   const secs = estimateSeconds(totalWords, speed);

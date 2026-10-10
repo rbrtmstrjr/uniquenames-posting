@@ -12,8 +12,20 @@ describe("REEL_FORMATS / FORMAT_SPECS", () => {
       expect(s.beats.length).toBeGreaterThanOrEqual(4);
       expect(s.minQuotes).toBeGreaterThanOrEqual(1);
     }
-    expect(FORMAT_SPECS.named_method.minQuotes).toBeGreaterThanOrEqual(3);
-    expect(FORMAT_SPECS.say_this.minQuotes).toBeGreaterThanOrEqual(3);
+    // 60-90 s reels: more substance per format, so more exact words to say
+    expect(FORMAT_SPECS.named_method.minQuotes).toBeGreaterThanOrEqual(4);
+    expect(FORMAT_SPECS.say_this.minQuotes).toBeGreaterThanOrEqual(4);
+    for (const x of ["lola_science", "scene_lesson", "problem_fix"] as const) expect(FORMAT_SPECS[x].minQuotes).toBeGreaterThanOrEqual(2);
+    expect(FORMAT_SPECS.named_method.beats.join(" ")).toMatch(/STEPS 1-5.*4-5 steps/);
+    expect(FORMAT_SPECS.say_this.beats.join(" ")).toMatch(/SWAPS 1-5.*4-5 swaps/);
+    expect(FORMAT_SPECS.lola_science.beats.join(" ")).toMatch(/WHY LOLA BELIEVED IT/);
+    expect(FORMAT_SPECS.lola_science.beats.join(" ")).toMatch(/DO THIS INSTEAD: 3-4/);
+    expect(FORMAT_SPECS.scene_lesson.beats.join(" ")).toMatch(/SCENE: 2-3 short lines/);
+    expect(FORMAT_SPECS.scene_lesson.beats.join(" ")).toMatch(/WHEN IT DOESN'T WORK/);
+    expect(FORMAT_SPECS.problem_fix.beats.join(" ")).toMatch(/FIX 2/);
+    expect(FORMAT_SPECS.problem_fix.beats.join(" ")).toMatch(/IF THAT DOESN'T WORK/);
+    // every format re-hooks the viewer at least once mid-reel
+    for (const x of REEL_FORMATS) expect(FORMAT_SPECS[x].beats.join(" "), x).toMatch(/RE-HOOK/);
     expect(FORMAT_SPECS.lola_science.beats.join(" ")).toMatch(/lola/i);
     expect(isReelFormat("say_this")).toBe(true);
     expect(isReelFormat("pov")).toBe(false);

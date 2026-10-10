@@ -228,9 +228,9 @@ describe("ScriptReview", () => {
       }));
     });
 
-    it("the length hint aims for 30-45 seconds", () => {
+    it("the length hint aims for 60-90 seconds", () => {
       render(<ScriptReview reel={reel()} scenes={scenes(2)} />);
-      expect(screen.getByText(/about 0:30–0:45/)).toBeTruthy();
+      expect(screen.getByText(/Aim for 228–342 words \(about 1:00–1:30\)/)).toBeTruthy();
     });
   });
 
@@ -379,6 +379,12 @@ describe("list, new reel, setup, nav", () => {
     await act(async () => { fireEvent.click(btn(/Write script/)); });
     expect(actions.writeReelScriptAction).toHaveBeenCalledWith({ topic: "bedtime battles" });
     await waitFor(() => expect(push).toHaveBeenCalledWith(`/reels/${RID}`));
+  });
+
+  it("new reel: the help says the AI writes a 60–90 second lesson", () => {
+    render(<NewReelForm />);
+    expect(screen.getByText(/60–90 second lesson/)).toBeTruthy();
+    expect(screen.queryByText(/30–45 second/)).toBeNull();
   });
 
   it("new reel: an error shows inline with Try again", async () => {

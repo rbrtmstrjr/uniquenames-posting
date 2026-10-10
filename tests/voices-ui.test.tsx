@@ -251,11 +251,11 @@ describe("review page length + status label", () => {
       version: 1, claimed_at: null, created_at: "", updated_at: "",
     }));
     render(<ScriptReview reel={reel()} scenes={scenes} narrator={{ voices: [readyVoice("gacrux")], defaultId: "gacrux", speed: 1.12 }} />);
-    expect(screen.getByText(/Aim for 128–192 words/)).toBeTruthy();
+    expect(screen.getByText(/Aim for 255–383 words/)).toBeTruthy();
     expect(within(screen.getByTestId("narrator")).getByRole("combobox", { name: "Narrator" })).toBeTruthy();
     cleanup();
     render(<ScriptReview reel={reel()} scenes={scenes} />);
-    expect(screen.getByText(/Aim for 114–171 words/)).toBeTruthy();
+    expect(screen.getByText(/Aim for 228–342 words/)).toBeTruthy();
     expect(screen.queryByTestId("narrator")).toBeNull();
   });
 
