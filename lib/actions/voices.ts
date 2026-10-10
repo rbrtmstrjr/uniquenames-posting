@@ -3,7 +3,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import type { ReelRow, ReelVoiceRow } from "@/lib/db/types";
 import { geminiVoiceClip, REF_TEXT } from "@/lib/ai/tts";
-import { BUILTIN, needsRef, needsSample, refPath, sampleKey, speedOf, VOICE_ID_RE } from "@/lib/reels/voices";
+import { houseVoices, isHouseVoice, needsRef, needsSample, refPath, sampleKey, speedOf, VOICE_ID_RE } from "@/lib/reels/voices";
 import { UUID_RE } from "./helpers";
 import { fail, requireOwner, type ActionResult } from "./result";
 
@@ -50,27 +50,22 @@ const alreadyThere = (e: { message?: string; statusCode?: string | number } | nu
   !!e && (String(e.statusCode) === "409" || /already exists|duplicate/i.test(e.message ?? ""));
 
 /**
- * "Set up voices" (one time): a Gemini reference clip for every voice that has none, uploaded to
+ * "Set up voices" (one time): a Gemini reference clip for every house voice that has none, uploaded to
  * voices/<id>/ref.wav (insert only), then the voice's sample goes in line for the PC. Voices that
  * already have a clip are skipped, so it is safe to run again. Stops starting clips after ~270 s and
- * returns what is left: the page calls again until `remaining` is 0.
+ * returns what is left: the page calls again until `remaining` is 0. Other voices are left alone (2.6.0).
  */
 export async function setUpVoicesAction(): Promise<ActionResult<{ made: number; skipped: number; remaining: number; failed: number; lastError?: string }>> {
   await requireOwner();
   const deadline = Date.now() + SETUP_BUDGET_MS;
   const sb = await createClient();
-  const { voices, error } = await getVoices(sb);
+  const { voices: all, error } = await getVoices(sb);
   if (error) return dbFail(error);
   if (!process.env.GEMINI_API_KEY?.trim()) return fail("GEMINI_API_KEY is not set.");
+  const voices = houseVoices(all);
   const todo = voices.filter(needsRef);
-  const skipped = voices.filter((v) => v.id !== BUILTIN).length - todo.length;
-  // The built-in voice needs no clip: its sample goes in line the first time.
-  const builtin = voices.find((v) => v.id === BUILTIN && v.sample_status === "missing");
+  const skipped = voices.length - todo.length;
   let made = 0, failed = 0, lastError: string | undefined;
-  if (builtin) {
-    const { error: be } = await queueSample(sb, builtin);
-    if (be) lastError = `${builtin.label}: ${be.message}`;
-  }
   const queue = [...todo];
   const one = async (v: ReelVoiceRow): Promise<void> => {
     const left = deadline - Date.now();
@@ -94,20 +89,21 @@ export async function setUpVoicesAction(): Promise<ActionResult<{ made: number; 
   await Promise.all(Array.from({ length: Math.min(PARALLEL, Math.max(1, queue.length)) }, worker));
 
   const { voices: after, error: re } = await getVoices(sb);
-  const remaining = re ? todo.length - made : after.filter(needsRef).length;
+  const remaining = re ? todo.length - made : houseVoices(after).filter(needsRef).length;
   revalidatePath("/settings");
   return { ok: true, made, skipped, remaining, failed, ...(lastError ? { lastError } : {}) };
 }
 
 /**
- * "Make samples": every set-up voice with no sample, a failed one, or one made with other calm/speed
+ * "Make samples": every set-up house voice with no sample, a failed one, or one made with other delivery/speed
  * settings than the saved ones goes in line; the PC makes them when it has nothing else to do.
  */
 export async function queueVoiceSamplesAction(): Promise<ActionResult<{ queued: number; notSetUp: number }>> {
   await requireOwner();
   const sb = await createClient();
-  const [{ voices, error }, speed] = await Promise.all([getVoices(sb), savedSpeed(sb)]);
+  const [{ voices: all, error }, speed] = await Promise.all([getVoices(sb), savedSpeed(sb)]);
   if (error) return dbFail(error);
+  const voices = houseVoices(all);
   const key = sampleKey(speed);
   const todo = voices.filter((v) => needsSample(v, key));
   const results = await Promise.all(todo.map((v) => queueSample(sb, v)));
@@ -118,13 +114,13 @@ export async function queueVoiceSamplesAction(): Promise<ActionResult<{ queued: 
 }
 
 /**
- * The review page's narrator for one reel (null = the Settings default). Only while the script is
- * waiting for review: nothing has been spoken yet, so nothing else changes.
+ * The review page's narrator for one reel (null = the Settings default; otherwise one of the house voices). Only
+ * while the script is waiting for review: nothing has been spoken yet, so nothing else changes.
  */
 export async function setReelVoiceAction(reelId: string, voiceId: string | null): Promise<ActionResult> {
   await requireOwner();
   if (!UUID_RE.test(reelId ?? "")) return fail(NOT_FOUND);
-  if (voiceId !== null && (typeof voiceId !== "string" || !VOICE_ID_RE.test(voiceId))) return fail("Pick a voice from the list.");
+  if (voiceId !== null && (typeof voiceId !== "string" || !VOICE_ID_RE.test(voiceId) || !isHouseVoice(voiceId))) return fail("Pick a voice from the list.");
   const sb = await createClient();
   const { data, error } = await sb.from("reels").select("*").eq("id", reelId).maybeSingle();
   if (error) return dbFail(error);

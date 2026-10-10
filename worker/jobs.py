@@ -15,7 +15,7 @@ from PIL import Image
 from render import JobError, slugify, text_style
 from supa import SupaError
 
-VERSION = "2.5.0"
+VERSION = "2.6.0"
 BUCKET = "cards"
 COMFY_CLOSED = "ComfyUI is closed. Open ComfyUI Desktop on your PC, then press Retry."
 NO_NET_SAVE = "Couldn't reach the internet to save this card. Press Retry."

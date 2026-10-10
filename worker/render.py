@@ -150,13 +150,20 @@ def validate_card(body):
     return out
 
 
-def comfy_graph(prompt, seed, width, height, prefix):
+# Setup B (2026-10-10 A/B, .superpowers/sdd/2026-10-10-fast-images): the fp8 text encoder + fp8 weights look the
+# same as the bf16 files and are 15-30% faster. A ComfyUI without the fp8 encoder file gets the old files (SAFE_*).
+FAST_CLIP, FAST_DTYPE = "qwen_3_4b_fp8_mixed.safetensors", "fp8_e4m3fn"
+SAFE_CLIP, SAFE_DTYPE = "qwen_3_4b.safetensors", "default"
+
+
+def comfy_graph(prompt, seed, width, height, prefix, fast=True):
     # Z-Image Turbo, the same graph as the "Text to Image (Z-Image-Turbo)" template.
     # The latent must be a multiple of 16; the card is resized to the exact size later.
     lw, lh = max(16, width // 16 * 16), max(16, height // 16 * 16)
+    clip, dtype = (FAST_CLIP, FAST_DTYPE) if fast else (SAFE_CLIP, SAFE_DTYPE)
     return {
-        "1": {"class_type": "UNETLoader", "inputs": {"unet_name": "z_image_turbo_bf16.safetensors", "weight_dtype": "default"}},
-        "2": {"class_type": "CLIPLoader", "inputs": {"clip_name": "qwen_3_4b.safetensors", "type": "lumina2", "device": "default"}},
+        "1": {"class_type": "UNETLoader", "inputs": {"unet_name": "z_image_turbo_bf16.safetensors", "weight_dtype": dtype}},
+        "2": {"class_type": "CLIPLoader", "inputs": {"clip_name": clip, "type": "lumina2", "device": "default"}},
         "3": {"class_type": "VAELoader", "inputs": {"vae_name": "ae.safetensors"}},
         "4": {"class_type": "ModelSamplingAuraFlow", "inputs": {"model": ["1", 0], "shift": 3}},
         "5": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["2", 0], "text": prompt}},
@@ -563,6 +570,7 @@ class ComfyRenderer:
         self.timeout = int(timeout)
         self.font_files = font_files  # the prefetched fallback; other fonts load per card
         self.log = log
+        self.fast = None  # fp8 text encoder available? None = not asked yet (asked once per worker start)
 
     def health(self):
         try:
@@ -572,14 +580,42 @@ class ComfyRenderer:
         except Exception:
             return {"ok": False, "gpu": None, "error": "ComfyUI is not reachable at %s" % self.comfy}
 
-    def generate_photo(self, prompt, seed, width, height):
-        graph = comfy_graph(prompt, seed, width, height, "unique-names/raw")
+    def use_fast(self):
+        """True if ComfyUI lists the fp8 text encoder (asked once and remembered). ComfyUI not answering:
+        True for now and asked again next time (a refusal still falls back in generate_photo)."""
+        if self.fast is None:
+            try:
+                info = http_json(self.comfy + "/object_info/CLIPLoader", timeout=15)
+                names = info["CLIPLoader"]["input"]["required"]["clip_name"][0]
+            except Exception:
+                return True
+            self.fast = FAST_CLIP in names
+            if not self.fast:
+                self.log("%s is not in ComfyUI: pictures use %s (slower)" % (FAST_CLIP, SAFE_CLIP))
+        return self.fast
+
+    def _submit(self, graph):
         try:
-            sub = http_json(self.comfy + "/prompt", {"prompt": graph, "client_id": "unique-names-worker"}, timeout=30)
+            return http_json(self.comfy + "/prompt", {"prompt": graph, "client_id": "unique-names-worker"}, timeout=30)
         except urllib.error.HTTPError as e:
-            raise JobError("ComfyUI refused the job: %s" % e.read().decode("utf-8", "replace")[:300])
+            body = e.read().decode("utf-8", "replace")
+            err = JobError("ComfyUI refused the job: %s" % body[:300])
+            err.detail = body  # the whole answer: 'Value not in list' can sit past the first 300 characters
+            raise err
         except Exception:
             raise JobError("ComfyUI is closed. Open ComfyUI Desktop on your PC, then press Retry.")
+
+    def generate_photo(self, prompt, seed, width, height):
+        fast = self.use_fast()
+        try:
+            sub = self._submit(comfy_graph(prompt, seed, width, height, "unique-names/raw", fast=fast))
+        except JobError as e:
+            # the fp8 encoder file went missing since the check: remember, and send the old files once
+            if not (fast and "not in list" in getattr(e, "detail", "").lower()):
+                raise
+            self.fast = False
+            self.log("ComfyUI refused %s: pictures use %s from now on" % (FAST_CLIP, SAFE_CLIP))
+            sub = self._submit(comfy_graph(prompt, seed, width, height, "unique-names/raw", fast=False))
         pid = sub.get("prompt_id")
         if not pid:
             raise JobError("ComfyUI did not accept the job: %s" % json.dumps(sub)[:300])

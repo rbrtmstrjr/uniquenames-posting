@@ -28,6 +28,21 @@ def wav(seconds=1.0):
     return buf.getvalue()
 
 
+def spoken(seconds=1.0):
+    """A WAV with a tone (speech) between 0.3 s of silence on both sides: edge-trimmed to seconds + 2 x EDGE_PAD."""
+    import math
+    import struct
+    n, pad = int(24000 * seconds), b"\x00\x00" * int(24000 * 0.3)
+    tone = b"".join(struct.pack("<h", int(8000 * math.sin(2 * math.pi * 220 * i / 24000))) for i in range(n))
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(24000)
+        w.writeframes(pad + tone + pad)
+    return buf.getvalue()
+
+
 def make_reel(**kw):
     r = {"id": RID, "title": "Calm baby", "status": "voicing", "version": 3, "voice_path": None, "words": None,
          "preview_path": None, "claimed_at": "now"}
@@ -145,34 +160,34 @@ class ReelRunnerTest(unittest.TestCase):
         self.addCleanup(p.stop)
 
     # ------------------------------------------------------------ voice
-    def run_voice(self, reel=None, chunks=None):
-        synth = mock.Mock(side_effect=lambda url, text, seed, ref, timeout: wav(1.0))
+    def run_voice(self, reel=None):
+        synth = mock.Mock(side_effect=lambda url, text, seed, ref, timeout, keep_loaded=False: spoken(1.0))
         with mock.patch.object(reels.voice, "ensure_node"), mock.patch.object(reels.voice, "synthesize", synth), \
-                mock.patch.object(reels.voice, "chunk_lines", side_effect=chunks or reels.voice.chunk_lines):
+                mock.patch.object(reels.voice, "unload_model"):
             self.rr.run_step({"step": "voice", "reel": reel or make_reel(), "scene": None})
         return synth
 
-    def test_voice_chunks_uploads_versioned_wav_and_saves(self):
-        synth = self.run_voice(chunks=lambda lines: ["chunk one", "chunk two"])
-        self.assertEqual(synth.call_count, 2)
+    def test_voice_lines_upload_versioned_wav_and_save(self):
+        synth = self.run_voice()
+        self.assertEqual(synth.call_count, 3)                         # one call per line
         self.assertEqual(synth.call_args[0][0], "http://comfy")
-        self.assertIsNone(synth.call_args[0][3])                      # default voice
+        self.assertIsNone(synth.call_args[0][3])                      # pre-006 settings: the built-in voice
         path = "%s/voice-v3.wav" % RID
         bucket, data, ctype = self.supa.uploads[path]
         self.assertEqual((bucket, ctype), ("reels", "audio/wav"))
-        with wave.open(io.BytesIO(data), "rb") as w:                  # 2 x 1 s + one pause
-            self.assertAlmostEqual(w.getnframes() / 24000, 2 + reels.voice.PAUSE_SECONDS, places=2)
+        with wave.open(io.BytesIO(data), "rb") as w:                  # 3 trimmed lines + the hook gap + one line gap
+            self.assertAlmostEqual(w.getnframes() / 24000, 3 * 1.14 + 0.7 + 0.4, delta=0.03)
         heartbeats = [u for u in self.supa.of("reels") if set(u[2]) == {"claimed_at"} and u[2]["claimed_at"]]
-        self.assertEqual(len(heartbeats), 2)                          # before each chunk
+        self.assertEqual(len(heartbeats), 3)                          # before each line
         table, match, v = self.supa.of("reels")[-1]
         self.assertEqual(match, "id=eq.%s&version=eq.3" % RID)
         self.assertEqual(v["voice_path"], path)
         self.assertIsNone(v["claimed_at"])
 
-    def test_voice_joins_the_narration_lines(self):
+    def test_voice_speaks_each_narration_line(self):
         synth = self.run_voice()
-        self.assertEqual(synth.call_count, 1)
-        self.assertEqual(synth.call_args[0][1], "Line 1 is spoken here. Line 2 is spoken here. Line 3 is spoken here.")
+        self.assertEqual([c[0][1] for c in synth.call_args_list],
+                         ["Line 1 is spoken here.", "Line 2 is spoken here.", "Line 3 is spoken here."])
 
     def test_voice_uses_the_reference_clip_from_settings(self):
         self.supa.settings = [{"id": 1, "reel_voice_path": "voice/ref.mp3"}]
@@ -191,7 +206,7 @@ class ReelRunnerTest(unittest.TestCase):
 
     def test_heartbeat_on_a_changed_reel_stops_voicing_quietly(self):
         self.supa.stale.add("reels")
-        synth = self.run_voice(chunks=lambda lines: ["chunk one", "chunk two"])
+        synth = self.run_voice()
         self.assertEqual(synth.call_count, 0)
         self.assertEqual(self.supa.uploads, {})
         self.assertIn(reels.STALE, self.logs)
@@ -243,9 +258,12 @@ class ReelRunnerTest(unittest.TestCase):
         up, synth, _sp = self.run_voice_006(make_reel(voice_id="puck"))   # no reference clip yet
         self.assertIsNone(synth.call_args[0][3])
         self.assertTrue(any("puck has no reference clip" in m for m in self.logs))
-        self.supa.settings = [{"id": 1, "reel_voice_id": None}]
+        self.supa.settings = [{"id": 1, "reel_voice_id": None}]          # no default: Gacrux (2.6.0)
         up, synth, _sp = self.run_voice_006(make_reel())
-        self.assertIsNone(synth.call_args[0][3])
+        self.assertEqual(synth.call_args[0][3], "unique-names/voices-gacrux-ref-v2.wav")
+        self.supa.settings = [{"id": 1, "reel_voice_id": "kore"}]          # not a house voice: Gacrux
+        up, synth, _sp = self.run_voice_006(make_reel())
+        self.assertEqual(synth.call_args[0][3], "unique-names/voices-gacrux-ref-v2.wav")
 
     def test_reference_clip_is_cached_until_comfyui_loses_it(self):
         self.voices_db()
@@ -282,7 +300,7 @@ class ReelRunnerTest(unittest.TestCase):
             self.run_voice()
         with wave.open(io.BytesIO(self.supa.uploads["%s/voice-v3.wav" % RID][1]), "rb") as w:
             self.assertEqual((w.getnchannels(), w.getframerate()), (1, 24000))
-            self.assertAlmostEqual(w.getnframes() / 24000.0, 1.0 / 1.25, delta=0.03)
+            self.assertAlmostEqual(w.getnframes() / 24000.0, (3 * 1.14 + 0.7 + 0.4) / 1.25, delta=0.05)
 
     # ------------------------------------------------------------ music (006)
     def music_reel(self, **kw):
@@ -350,7 +368,7 @@ class ReelRunnerTest(unittest.TestCase):
     def run_sample(self, row, synth_boom=None):
         self.supa.settings = [{"id": 1, "reel_voice_id": "gacrux", "reel_speed": 1.12}]
         self.supa.uploads["voices/kore/ref.wav"] = ("reels", b"KORE", "audio/wav")
-        synth = mock.Mock(side_effect=synth_boom, return_value=wav(2.0))
+        synth = mock.Mock(side_effect=synth_boom, return_value=spoken(2.0))
         with mock.patch.object(reels.voice, "ensure_node"), mock.patch.object(reels.voice, "synthesize", synth), \
                 mock.patch.object(reels.voice, "upload_input", side_effect=lambda u, n, d: "unique-names/" + n), \
                 mock.patch.object(reels.voice, "speed_up", side_effect=lambda w, s: w) as sp:
@@ -368,7 +386,7 @@ class ReelRunnerTest(unittest.TestCase):
         _table, match, v = self.supa.of("reel_voices")[-1]
         self.assertEqual(match, "id=eq.kore&version=eq.4")
         self.assertEqual(v, {"sample_status": "ready", "sample_path": "voices/kore/sample-v4.wav",
-                             "sample_key": "e0.35-t0.7-c0.5-s1.12-g1", "error": None, "claimed_at": None})
+                             "sample_key": "e0.6-t0.8-c0.3-s1.12-l1", "error": None, "claimed_at": None})
         self.assertEqual(self.supa.removed, ["voices/kore/sample-v3.wav"])
 
     def test_builtin_sample_needs_no_reference(self):

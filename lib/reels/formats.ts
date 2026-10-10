@@ -16,14 +16,15 @@ export interface FormatSpec {
 
 export const FORMAT_SPECS: Record<ReelFormat, FormatSpec> = {
   // 60-90 s reels (owner, 2026-10-10): each format carries more substance (more steps / swaps / actions, a "when it
-  // doesn't work" line) and at least one mid-reel RE-HOOK; never padding.
+  // doesn't work" line) and at least one mid-reel RE-HOOK; never padding. The calm line-by-line narrator (worker 2.6.0)
+  // fits ~160-240 words, so steps and swaps stay at 4, each said in tighter words.
   named_method: {
     id: "named_method", label: "Named method", minQuotes: 4,
     beats: [
       "HOOK (line 1): a counterintuitive claim plus the method's name, or 'Stop saying \"X\". Try the [name] instead.'",
       "WHY THE USUAL WAY FAILS: one or two concrete lines, the brain or child's-eye reason.",
       "ANCHOR + PROMISE + OPEN LOOP: one soft credible anchor ('Psychologists call it …', 'Pediatricians suggest …'), 'Here's how.', and an open loop the reel pays off later ('The last step is the one most moms skip.').",
-      "STEPS 1-5: 4-5 steps, each numbered aloud ('One…', 'Two…', 'Three…'): what to do, then the EXACT WORDS in quotes, then a micro-why or a tiny real-life example (at most 2 lines per step after its first).",
+      "STEPS 1-4: 4 steps (never more than 5), each numbered aloud ('One…', 'Two…', 'Three…'): what to do, then the EXACT WORDS in quotes, then a micro-why or a tiny real-life example in ONE short line.",
       "RE-HOOK before the hardest step ('But step four feels wrong at first…'), then pay off the open loop.",
       "IF IT DOESN'T WORK: what to do or say when your child still melts down, with the exact words in quotes.",
       "'WAIT, THAT WORKS?': the surprising reason it works ('Kids calm faster when they feel understood, not stopped.').",
@@ -35,7 +36,7 @@ export const FORMAT_SPECS: Record<ReelFormat, FormatSpec> = {
     beats: [
       "HOOK (line 1): '4 things we all say that make [problem] worse, and what to say instead.' (the number matches the swaps).",
       "WHY WORDS MATTER: one or two lines on why the words change what the child does, then an open loop ('The last one is the one most moms say every day.').",
-      "SWAPS 1-5: 4-5 swaps, each 'Instead of \"…\", say \"…\".' (both phrases in quotes), then a micro-why or what your child hears, in at most 2 more lines.",
+      "SWAPS 1-4: 4 swaps (never more than 5), each 'Instead of \"…\", say \"…\".' (both phrases in quotes), then a micro-why or what your child hears in ONE short line.",
       "RE-HOOK after swap 2 or 3 ('But this next one sounds kind, and it backfires…'), in fresh words.",
       "IF THEY STILL PUSH BACK: one or two lines on what to do when the new words don't land at first.",
       "BONUS: one tiny bonus tip, or the reason all the swaps work.",

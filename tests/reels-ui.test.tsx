@@ -87,7 +87,7 @@ describe("reelProgress / reelSteps", () => {
   });
 
   it("estimates the spoken length from the words", () => {
-    expect(clock(estimateSeconds(380))).toBe("1:40");
+    expect(clock(estimateSeconds(267))).toBe("1:40");   // 2.67 words/s: the line-by-line voice (worker 2.6.0)
   });
 });
 
@@ -142,7 +142,7 @@ describe("ScriptReview", () => {
   it("shows the totals: words and estimated duration", () => {
     render(<ScriptReview reel={reel()} scenes={scenes(2)} />); // 7 words each
     expect(screen.getByTestId("script-totals").textContent).toMatch(/14\s*words/);
-    expect(screen.getByTestId("script-totals").textContent).toMatch(/0:04/);
+    expect(screen.getByTestId("script-totals").textContent).toMatch(/0:05/);
   });
 
   it("the picture idea is editable inside a disclosure", () => {
@@ -230,7 +230,7 @@ describe("ScriptReview", () => {
 
     it("the length hint aims for 60-90 seconds", () => {
       render(<ScriptReview reel={reel()} scenes={scenes(2)} />);
-      expect(screen.getByText(/Aim for 228–342 words \(about 1:00–1:30\)/)).toBeTruthy();
+      expect(screen.getByText(/Aim for 160–240 words \(about 1:00–1:30\)/)).toBeTruthy();
     });
   });
 

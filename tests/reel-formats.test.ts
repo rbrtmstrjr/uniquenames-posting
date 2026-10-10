@@ -17,8 +17,9 @@ describe("REEL_FORMATS / FORMAT_SPECS", () => {
     expect(FORMAT_SPECS.named_method.minQuotes).toBeGreaterThanOrEqual(4);
     expect(FORMAT_SPECS.say_this.minQuotes).toBeGreaterThanOrEqual(4);
     for (const x of ["lola_science", "scene_lesson", "problem_fix"] as const) expect(FORMAT_SPECS[x].minQuotes).toBeGreaterThanOrEqual(2);
-    expect(FORMAT_SPECS.named_method.beats.join(" ")).toMatch(/STEPS 1-5.*4-5 steps/);
-    expect(FORMAT_SPECS.say_this.beats.join(" ")).toMatch(/SWAPS 1-5.*4-5 swaps/);
+    // the calm narrator (2.6.0) fits fewer words: 4 steps / swaps, each in tighter wording
+    expect(FORMAT_SPECS.named_method.beats.join(" ")).toMatch(/STEPS 1-4: 4 steps \(never more than 5\).*ONE short line/);
+    expect(FORMAT_SPECS.say_this.beats.join(" ")).toMatch(/SWAPS 1-4: 4 swaps \(never more than 5\).*ONE short line/);
     expect(FORMAT_SPECS.lola_science.beats.join(" ")).toMatch(/WHY GRANDMA BELIEVED IT/);
     expect(FORMAT_SPECS.lola_science.beats.join(" ")).toMatch(/DO THIS INSTEAD: 3-4/);
     expect(FORMAT_SPECS.scene_lesson.beats.join(" ")).toMatch(/SCENE: 2-3 short lines/);

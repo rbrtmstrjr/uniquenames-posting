@@ -128,6 +128,15 @@ Reels are now useful lessons of 60–90 s (since 2026-10-10; they were 30–45 s
 4. Review page: each reel shows its format; the key lines carry a short on-screen label (like `1/3 · "You're mad. Tower fell down."`) that you can edit or clear. **Settings > Reels > On-screen step labels** turns them off for every reel.
 5. Voice samples were recorded at the old speed, so **Settings > Narrator & music** may show them as out of date: press **Make samples** to record them again.
 
+## House voices and the natural narration (existing install)
+Since worker 2.6.0 (2026-10-10, the voice listening test) the narration is made **line by line**, the way the "retuned Gacrux" test sounded: one Chatterbox call per script line with a livelier delivery (exaggeration 0.6, cfg 0.3, temperature 0.8), the silence at each line's start and end trimmed, a short natural pause between lines (0.4 s, 0.7 s after the hook line) filled with very quiet room tone instead of dead silence, and no pause squeezing. It speaks about 155–160 words a minute, so scripts are now **160–240 words** for 60–90 s (they aim for 175–210 words, about 65–80 s), with the same formats and 4 steps or swaps, said in tighter words. A full 194-word script took about 2 minutes to voice on this PC (the voice model stays loaded for the whole reel and is unloaded before the pictures start).
+Only 4 **house voices** are offered now: **Gacrux** (default), **Sulafat** (Warm), **Vindemiatrix** (Gentle) and **Achernar** (Soft). The other voices stay in the database but are hidden everywhere (Settings, the review page picker, Set up voices and Make samples). No database update is needed.
+1. Restart the worker (Task Scheduler: **End** then **Run**) so it voices line by line (worker 2.6.0). ComfyUI needs no restart.
+2. Push to GitHub so Vercel redeploys the website.
+3. **Settings > Narrator & music**: check that **Gacrux** is the default narrator and press **Save settings** (a default outside the 4 house voices already counts as Gacrux for new reels; saving makes it stick). Speed **1.00×** is the natural pace the owner picked.
+4. Press **Make samples**: the 4 samples were recorded in the old style and show as **Old sample** until they are re-made.
+5. Reels made before this keep working; voicing one again (a new voice or Retry) uses the new line-by-line style.
+
 ## Use Claude instead of Gemini (optional)
 Reel scripts, captions and the name/theme/letter suggestions can be written by Anthropic Claude instead of Gemini. Voices (TTS) and pictures stay as they are, so `GEMINI_API_KEY` is still needed for **Set up voices** and narration.
 1. Create a key at https://platform.claude.com (Settings > API keys) and add prepaid credits (Billing).

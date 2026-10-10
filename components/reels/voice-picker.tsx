@@ -7,14 +7,15 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { callAction } from "@/lib/actions/call";
 import { setReelVoiceAction } from "@/lib/actions/voices";
 import { useSignedUrls } from "@/lib/realtime/signed-urls";
-import { BUILTIN, isSetUp } from "@/lib/reels/voices";
+import { BUILTIN, houseVoices, isHouseVoice, isSetUp } from "@/lib/reels/voices";
 import { PlaySampleButton, useSamplePlayer } from "./voice-sample";
 
 const toneOf = (v: ReelVoiceRow) => (v.id === BUILTIN ? "Chatterbox" : v.tone);
 
 /**
- * The review page's narrator: a Select of the voices with a ready sample (plus the current one) and
- * ▶ to hear it. `value` null = the Settings default. Saved right away (only while in script).
+ * The review page's narrator: a Select of the house voices with a ready sample (plus the current one and the
+ * default) and ▶ to hear it. `value` null = the Settings default. Saved right away (only while in script).
+ * An older reel's own voice outside the house list stays listed (last) so the Select is never blank.
  */
 export function VoicePicker({ reelId, value, defaultId, voices, disabled }: {
   reelId: string; value: string | null; defaultId: string; voices: ReelVoiceRow[]; disabled?: boolean;
@@ -22,8 +23,12 @@ export function VoicePicker({ reelId, value, defaultId, voices, disabled }: {
   const [chosen, setChosen] = useState<string | null>(value);
   const [saving, setSaving] = useState(false);
   const current = chosen ?? defaultId;
-  // Ready voices, plus the current one and the default whatever their state, so the Select is never blank.
-  const list = voices.filter((v) => (isSetUp(v) && v.sample_status === "ready") || v.id === current || v.id === defaultId);
+  // Ready house voices, plus the current one and the default whatever their state, so the Select is never blank.
+  const house = houseVoices(voices);
+  const list = [
+    ...house.filter((v) => (isSetUp(v) && v.sample_status === "ready") || v.id === current || v.id === defaultId),
+    ...voices.filter((v) => v.id === current && !isHouseVoice(v.id)),
+  ];
   const currentRow = voices.find((v) => v.id === current);
   const signed = useSignedUrls([currentRow?.sample_status === "ready" ? currentRow.sample_path : null], "reels");
   const { playing, toggle } = useSamplePlayer();
@@ -41,8 +46,8 @@ export function VoicePicker({ reelId, value, defaultId, voices, disabled }: {
     toast.success(`Narrator: ${voices.find((v) => v.id === id)?.label ?? id}`);
   };
 
-  // No samples yet (voices not set up, or the PC hasn't made them): nothing to choose by ear.
-  if (!voices.some((v) => v.sample_status === "ready")) {
+  // No house samples yet (voices not set up, or the PC hasn't made them): nothing to choose by ear.
+  if (!house.some((v) => v.sample_status === "ready")) {
     return (
       <p className="text-xs text-muted">
         <span className="font-semibold text-ink">Narrator:</span> {currentRow?.label ?? current} (default).{" "}

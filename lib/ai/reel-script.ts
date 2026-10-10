@@ -35,11 +35,13 @@ export const TAG_MAX = 100;
 /**
  * Reel length (owner, 2026-10-10: at least 1 minute when the script keeps hooking; the prompt aims for 65-80 s) and the
  * narrator's pace at 1×. `floor` = the shortest speech ever asked for when few images are allowed.
+ * Pace: the line-by-line voice (worker 2.6.0, retuned Gacrux with 0.4-0.7 s between lines) measured 155-160 words a
+ * minute including the pauses (was 3.8 words/s for the old tightened, chunked voice).
  */
 export const REEL_SECONDS = { lo: 60, hi: 90, floor: 15 } as const;
 /** The part of the 60-90 s range the prompt aims for (65-80 s). */
 const AIM_SECONDS = { lo: 65, hi: 80 } as const;
-export const WORDS_PER_SECOND = 3.8;
+export const WORDS_PER_SECOND = 2.67;
 /** The on-screen label of a line (drawn by the worker while it is spoken): at most this many words / characters. */
 export const ON_SCREEN_MAX_WORDS = 8;
 export const ON_SCREEN_MAX = 80;
@@ -163,11 +165,11 @@ const VETTED_CLAIMS = [
 const oneLine = (s: string) => s.replace(/\s+/g, " ").trim();
 
 /**
- * Spoken-word budget for a 60-90 s reel: seconds × 3.8 words/s × the narration speed (a sped-up voice fits more words),
+ * Spoken-word budget for a 60-90 s reel: seconds × 2.67 words/s × the narration speed (a sped-up voice fits more words),
  * shrunk when few images are allowed (8-12 words a line) but never under 18 s of speech; the prompt aims for the
  * `aimLo`-`aimHi` part (65-80 s). A script is accepted with at least `minScenes` lines and `minWords` (all of `lo`: the
  * owner wants at least a minute) to `maxWords` (110 % of `hi`) words; the prompt asks for `minScenes`-`maxLines` lines.
- * At 1× with 40 images: 228-342 words (aim 247-304), 19-40 lines.
+ * At 1× with 40 images: 160-240 words (aim 173-213), 14-35 lines.
  */
 export function reelWordBudget(maxScenes: number, speed = 1) {
   const x = Number.isFinite(speed) && speed > 0 ? speed : 1;
@@ -277,7 +279,7 @@ export function reelScriptPrompt({ topic, maxScenes, alreadyMade, speed, theme, 
     "",
     `ON-SCREEN LABELS: "on_screen" is an optional short label shown big at the top of the picture while that line is spoken: at most ${ON_SCREEN_MAX_WORDS} words and 60 characters, only on the format's key lines (steps, swaps, the script to say, the verdict), 3-8 lines per reel (pattern for this format: ${LABEL_PATTERN[f.id]}). It complements the spoken line, never repeats it whole. "" on every other line, and ALWAYS "" on line 1 (the hook card owns the first seconds).`,
     "",
-    `LENGTH (CRITICAL): narration for a ${b.secLo}-${b.secHi} second reel at about ${b.wps} words per second = ${b.lo}-${b.hi} words in total; AIM for ${b.aimLo}-${b.aimHi} words (about ${b.secAimLo}-${b.secAimHi} seconds), as ${b.minScenes}-${b.maxLines} lines (never fewer than ${b.minScenes}, never more than ${maxScenes}). Every line is one image on screen for about 1.5-3.5 seconds, so keep the lines short and write more of them. Under ${b.lo} words (under ${b.secLo} seconds) is TOO SHORT and over ${b.hi} words is TOO LONG: both are rejected. BEFORE ANSWERING, COUNT the lines and the words.`,
+    `LENGTH (CRITICAL): narration for a ${b.secLo}-${b.secHi} second reel at about ${b.wps} words per second = ${b.lo}-${b.hi} words in total; AIM for ${b.aimLo}-${b.aimHi} words (about ${b.secAimLo}-${b.secAimHi} seconds), as ${b.minScenes}-${b.maxLines} lines (never fewer than ${b.minScenes}, never more than ${maxScenes}). Every line is one image on screen for about 2-5 seconds, so keep the lines short. CALM PACE: the narrator speaks slowly and warmly, with a short pause after every line, so fewer words fit than you think: keep every beat and step of the format (4 steps or swaps where it asks for them), and say each in fewer, tighter words; cut filler words, never a step. Under ${b.lo} words (under ${b.secLo} seconds) is TOO SHORT and over ${b.hi} words is TOO LONG: both are rejected. BEFORE ANSWERING, COUNT the lines and the words.`,
     "",
     `THE HOOK CARD: "hook_text" is the big title shown on screen over the first 3.5 seconds: at most ${HOOK_TEXT_MAX_WORDS} words, it COMPLEMENTS line 1 and never repeats it word for word — ${HOOK_CARD[f.id]}. Fresh words for this reel, never an example sentence from this brief. Keep it short and big on screen: ideally at most 8 words and 45 characters.`,
     "",
