@@ -1,4 +1,4 @@
-# Reel steps on the PC: voice (Chatterbox in ComfyUI, sped up with atempo) -> timing (faster-whisper) ->
+# Reel steps on the PC: voice (Chatterbox in ComfyUI, line by line, 2.6.0) -> timing (faster-whisper) ->
 # music (ACE-Step in ComfyUI, 006) -> one image per scene (Z-Image in ComfyUI) -> render (reel_render.py).
 # One step per claim_next_reel_step() claim. Voice samples (006): one per claim_next_voice_sample() claim.
 # Theme previews (007): one per claim_next_theme_preview() claim; grayscale themes (sketch) turn every picture grey,
@@ -121,15 +121,18 @@ class ReelRunner:
         settings = self._settings_row()
         ref = self._voice_ref(reel, settings)
         speed = voice.reel_speed(settings)
-        chunks = voice.chunk_lines(lines)
-        wavs = []
-        for i, text in enumerate(chunks):
-            self.log("reel voice %d/%d (%d words)" % (i + 1, len(chunks), len(text.split())))
+        started = time.time()
+
+        def on_line(i, n, text):
+            self.log("reel voice %d/%d (%d words)" % (i + 1, n, len(text.split())))
             self._heartbeat(reel)
-            wavs.append(voice.tighten(voice.synthesize(self.renderer.comfy, text, voice_seed(reel["id"]), ref,
-                                                       self.renderer.timeout)))
-        # tightened chunks (no dead air, 0.10 s apart), then sped up
-        wav = voice.speed_up(voice.concat_wavs(wavs), speed)  # Whisper (timing) then hears the sped-up track
+
+        # one Chatterbox call per line (model kept loaded), edges trimmed, room tone between (2.6.0) ...
+        wav = voice.narrate_lines(self.renderer.comfy, lines, voice_seed(reel["id"]), ref, self.renderer.timeout,
+                                  on_line=on_line)
+        # ... then sped up (nothing to do at 1.0); Whisper (timing) hears this final track
+        wav = voice.speed_up(wav, speed)
+        self.log("reel voice: %d lines, %.1f s of voice in %.0f s" % (len(lines), voice_seconds(wav), time.time() - started))
         path = "%s/voice-v%d.wav" % (reel["id"], int(reel["version"]))
         self._net(lambda: self.supa.upload(BUCKET, path, wav, "audio/wav"))
         if not self._save_reel(reel, {"voice_path": path, "words": None, "error": None, "claimed_at": None}):
@@ -271,7 +274,7 @@ class ReelRunner:
 
     # ------------------------------------------------------------ voice samples (006)
     def run_sample(self, job):
-        """Read the sample sentence with one voice at the current calm + speed settings (claim_next_voice_sample)."""
+        """Read the sample sentence with one voice in the reel style at the current speed (claim_next_voice_sample)."""
         row = (job or {}).get("voice") or {}
         vid = str(row.get("id") or "")
         if not VOICE_ID.match(vid):
@@ -288,8 +291,9 @@ class ReelRunner:
                 if not row.get("ref_path"):
                     raise JobError("This voice has no reference clip yet. Press Set up voices.")
                 ref = self._comfy_ref(row["ref_path"], version, "The reference clip is missing from storage. Press Set up voices.")
-            wav = voice.synthesize(self.renderer.comfy, voice.SAMPLE_TEXT, voice.SAMPLE_SEED, ref, self.renderer.timeout)
-            wav = voice.speed_up(voice.tighten(wav), speed)
+            # one line in the reel style (2.6.0): edges trimmed, the model not kept
+            wav = voice.narrate_lines(self.renderer.comfy, [voice.SAMPLE_TEXT], voice.SAMPLE_SEED, ref, self.renderer.timeout)
+            wav = voice.speed_up(wav, speed)
             self._net(lambda: self.supa.upload(BUCKET, path, wav, "audio/wav"))
         except Exception as e:
             if not isinstance(e, JobError):

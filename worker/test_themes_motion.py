@@ -97,18 +97,18 @@ class TightenTest(unittest.TestCase):
             self.assertAlmostEqual(w.getnframes() / float(RATE), 2 * 1.14 + 0.10, delta=0.03)
         self.assertEqual(voice.PAUSE_SECONDS, 0.10)
 
-    def test_the_reel_voice_is_tightened_before_the_speed_up(self):
-        supa = FakeSupa()
+    def test_the_reel_voice_is_edge_trimmed_line_by_line_before_the_speed_up(self):
+        # 2.6.0: no pause tightening any more, only each line's edges (test_line_voice.py has the details)
+        supa = FakeSupa(scenes=[make_scene(1), make_scene(2)])
         rr_ = reels.ReelRunner(supa, FakeRenderer(), log=lambda m: None, sleep=lambda s: None)
-        spoken = voice.pcm_to_wav(silence_pcm(0.5) + tone_pcm(1.0) + silence_pcm(0.5))
+        spoken = voice.pcm_to_wav(silence_pcm(0.5) + tone_pcm(1.0) + silence_pcm(0.6) + tone_pcm(1.0) + silence_pcm(0.5))
         seen = []
         with mock.patch.object(reels.voice, "ensure_node"), \
                 mock.patch.object(reels.voice, "synthesize", return_value=spoken), \
-                mock.patch.object(reels.voice, "chunk_lines", return_value=["one", "two"]), \
                 mock.patch.object(reels.voice, "speed_up", side_effect=lambda w, s: seen.append(w) or w):
             rr_.run_step({"step": "voice", "reel": make_reel(), "scene": None})
-        with wave.open(io.BytesIO(seen[0]), "rb") as w:
-            self.assertAlmostEqual(w.getnframes() / float(RATE), 2 * 1.14 + 0.10, delta=0.03)
+        with wave.open(io.BytesIO(seen[0]), "rb") as w:   # the 0.6 s inner pause stays; 0.7 s after the hook line
+            self.assertAlmostEqual(w.getnframes() / float(RATE), 2 * 2.74 + 0.7, delta=0.04)
 
 
 # ---------------------------------------------------------------- themes

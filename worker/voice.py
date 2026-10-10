@@ -1,6 +1,10 @@
-# A reel's narration in Chatterbox (ComfyUI custom node FL_ChatterboxTTS, MIT). Chatterbox speaks at most
-# about 40 s per generation, so the narration is voiced in chunks of whole lines (<= ~25 s each) that are
-# joined with a short natural pause. ComfyUI saves FLAC only; ffmpeg (imageio-ffmpeg) turns it into PCM.
+# A reel's narration in Chatterbox (ComfyUI custom node FL_ChatterboxTTS, MIT). Since 2.6.0 the narration is voiced
+# LINE BY LINE, exactly like "2 - retuned (Gacrux)", the owner's pick in the 2026-10-10 listening test: one Chatterbox
+# call per script line (exaggeration 0.6, cfg_weight 0.3, temperature 0.8), the silence before and after each line
+# trimmed (EDGE_PAD kept, a 4 ms fade at both cuts), then 0.7 s of room tone after the hook line and 0.4 s between the
+# others (very quiet noise, ~-60 dBFS, never digital silence). Inner pauses are left as Chatterbox spoke them. The model
+# stays loaded across a reel's lines (keep_model_loaded) and is unloaded after the last one, so Z-Image gets the VRAM.
+# ComfyUI saves FLAC only; ffmpeg (imageio-ffmpeg) turns it into PCM.
 import io
 import json
 import re
@@ -15,36 +19,45 @@ from render import JobError, http_json
 
 NODE = "FL_ChatterboxTTS"
 RATE = 24000                 # Chatterbox output: 24 kHz mono
-WORDS_PER_SECOND = 4.0       # measured in the spike
+WORDS_PER_SECOND = 4.0       # Chatterbox's raw pace (spike): only sizes chunk_lines (not used for reels since 2.6.0)
 CHUNK_SECONDS = 25.0         # well under Chatterbox's ~40 s cap
-PAUSE_SECONDS = 0.10         # between chunks (007: was 0.35): no dead air between sentences
-# Tightening (007), on each chunk before the chunks are joined and sped up: leading/trailing silence is trimmed
-# (EDGE_PAD kept so soft consonants are never clipped) and pauses longer than MAX_PAUSE shrink to SHORT_PAUSE.
+PAUSE_SECONDS = 0.10         # concat_wavs' default gap (the old chunked voice)
+# Silence detection, shared by the edge trim (2.6.0) and the old tightening (007).
 FRAME_SECONDS = 0.01         # silence is judged on 10 ms frames (RMS)
-EDGE_PAD = 0.07             # kept around the speech: breathy onsets ("h") and soft word tails survive
+EDGE_PAD = 0.07              # kept around the speech: breathy onsets ("h") and soft word tails survive
 FADE_SECONDS = 0.004         # a 4 ms fade at every cut, so no cut ever clicks
-MAX_PAUSE = 0.35
+MAX_PAUSE = 0.35             # tighten() only (no longer used for reels)
 SHORT_PAUSE = 0.25
-SILENCE_REL = 0.02           # a frame is silent below 2% (-34 dB) of the chunk's loud speech (95th-percentile RMS) ...
-SILENCE_MIN = 33.0           # ... but never below -60 dBFS (a near-silent chunk) ...
+SILENCE_REL = 0.02           # a frame is silent below 2% (-34 dB) of the clip's loud speech (95th-percentile RMS) ...
+SILENCE_MIN = 33.0           # ... but never below -60 dBFS (a near-silent clip) ...
 SILENCE_MAX = 184.0          # ... nor above -45 dBFS (so a -40 dBFS word tail always counts as speech), 16-bit units
-TIGHTEN_MARK = "g1"          # in sample_key: samples made before tightening get re-made
+# Line-by-line narration (2.6.0)
+LINE_GAP = 0.4               # room tone between two lines ...
+HOOK_GAP = 0.7               # ... and after the first (hook) line
+ROOM_TONE_DBFS = -60.0       # a soft, slightly dark hiss: a real room, not dead digital silence
+ROOM_TONE_SEED = 7
+POLL_SECONDS = 0.5           # how often a voice job is checked (a warm line takes ~4 s)
+UNLOAD_TEXT = "Okay."        # the tiny line that unloads a model left loaded by a reel that stopped part-way
+STYLE_MARK = "l1"            # in sample_key: samples made in an older style (g1 = tightened chunks) get re-made
 NEEDS_RESTART = "Restart ComfyUI so it loads the Chatterbox voice node."
 COMFY_CLOSED = "ComfyUI is closed. Open ComfyUI Desktop on your PC, then press Retry."
-# Calm delivery (006): less acting, steadier pace than Chatterbox's defaults (0.5 / 0.8 / 0.5).
-CALM = {"exaggeration": 0.35, "temperature": 0.7, "cfg_weight": 0.5}
+# The retuned delivery (2026-10-10 listening test): more life than 006's calm 0.35 / 0.7 / 0.5, a steadier pace.
+DELIVERY = {"exaggeration": 0.6, "cfg_weight": 0.3, "temperature": 0.8}
 SPEED_MIN, SPEED_MAX, SPEED_DEFAULT = 1.00, 1.25, 1.12
 SAMPLE_TEXT = "They're only little once. Hold them a little longer tonight, and let the dishes wait."
 SAMPLE_SEED = 42             # every voice reads the sample the same way: only the voice differs
 BUILTIN = "builtin"
+# The house voices (lib/reels/voices.ts HOUSE_VOICES): the only ones the app offers. Gacrux is the default narrator.
+HOUSE_VOICES = ("gacrux", "sulafat", "vindemiatrix", "achernar")
+DEFAULT_VOICE = "gacrux"
 
 
-def chatterbox_graph(text, seed, voice_ref=None):
-    """ComfyUI API graph: text -> Chatterbox -> FLAC. voice_ref = a file in ComfyUI's input folder to clone."""
-    tts = {"text": text, "exaggeration": CALM["exaggeration"], "cfg_weight": CALM["cfg_weight"],
-           "temperature": CALM["temperature"], "seed": int(seed),
-           # off: Z-Image keeps its VRAM between the voice and the images
-           "use_cpu": False, "keep_model_loaded": False}
+def chatterbox_graph(text, seed, voice_ref=None, keep_loaded=False):
+    """ComfyUI API graph: text -> Chatterbox -> FLAC. voice_ref = a file in ComfyUI's input folder to clone.
+    keep_loaded: the node keeps the model for the next line (a reel's last line passes False, which unloads it)."""
+    tts = {"text": text, "exaggeration": DELIVERY["exaggeration"], "cfg_weight": DELIVERY["cfg_weight"],
+           "temperature": DELIVERY["temperature"], "seed": int(seed),
+           "use_cpu": False, "keep_model_loaded": bool(keep_loaded)}
     g = {
         "1": {"class_type": NODE, "inputs": tts},
         "2": {"class_type": "SaveAudioAdvanced", "inputs": {"audio": ["1", 0], "filename_prefix": "unique-names/reel-voice",
@@ -57,8 +70,13 @@ def chatterbox_graph(text, seed, voice_ref=None):
 
 
 def resolve_voice_id(reel, settings):
-    """The reel's own voice, else the Settings default, else Chatterbox's built-in voice."""
-    return ((reel or {}).get("voice_id") or (settings or {}).get("reel_voice_id") or BUILTIN).strip().lower()
+    """The reel's own voice (an older reel keeps whatever it was given), else the Settings default when it is a house
+    voice, else Gacrux (2.6.0: only the house voices are offered)."""
+    own = ((reel or {}).get("voice_id") or "").strip().lower()
+    if own:
+        return own
+    default = ((settings or {}).get("reel_voice_id") or "").strip().lower()
+    return default if default in HOUSE_VOICES else DEFAULT_VOICE
 
 
 def reel_speed(settings):
@@ -83,8 +101,8 @@ def atempo_filter(speed):
 
 def sample_key(speed):
     """What a voice sample was made with (the app re-queues samples whose key differs from the current one)."""
-    return "e%g-t%g-c%g-s%.2f-%s" % (CALM["exaggeration"], CALM["temperature"], CALM["cfg_weight"], float(speed),
-                                     TIGHTEN_MARK)
+    return "e%g-t%g-c%g-s%.2f-%s" % (DELIVERY["exaggeration"], DELIVERY["temperature"], DELIVERY["cfg_weight"],
+                                     float(speed), STYLE_MARK)
 
 
 def speed_up(wav_bytes, speed):
@@ -293,12 +311,12 @@ def concat_wavs(wavs, pause_s=PAUSE_SECONDS):
     return pcm_to_wav(gap.join(wav_pcm(w) for w in wavs))
 
 
-def synthesize(comfy_url, text, seed, voice_ref, timeout):
+def synthesize(comfy_url, text, seed, voice_ref, timeout, keep_loaded=False):
     """One Chatterbox generation (keep it under ~40 s of speech) -> WAV bytes (24 kHz mono 16-bit)."""
     comfy = comfy_url.rstrip("/")
     ensure_node(comfy)
     try:
-        sub = http_json(comfy + "/prompt", {"prompt": chatterbox_graph(text, seed, voice_ref),
+        sub = http_json(comfy + "/prompt", {"prompt": chatterbox_graph(text, seed, voice_ref, keep_loaded),
                                             "client_id": "unique-names-worker"}, timeout=30)
     except urllib.error.HTTPError as e:
         raise JobError("ComfyUI refused the voice job: %s" % e.read().decode("utf-8", "replace")[:300])
@@ -309,7 +327,7 @@ def synthesize(comfy_url, text, seed, voice_ref, timeout):
         raise JobError("ComfyUI did not accept the voice job: %s" % json.dumps(sub)[:300])
     deadline = time.time() + timeout
     while time.time() < deadline:
-        time.sleep(1.5)
+        time.sleep(POLL_SECONDS)
         try:
             entry = http_json(comfy + "/history/" + pid, timeout=15).get(pid)
         except Exception:
@@ -329,3 +347,99 @@ def synthesize(comfy_url, text, seed, voice_ref, timeout):
                 data = r.read()
             return pcm_to_wav(flac_to_pcm(data))
     raise JobError("ComfyUI did not finish the voice within %d seconds." % timeout)
+
+
+# ---------------------------------------------------------------- line by line (2.6.0)
+def _floats(pcm):
+    import numpy as np
+    return np.frombuffer(pcm[: len(pcm) // 2 * 2], dtype="<i2").astype(np.float32)
+
+
+def _voiced(x, rate):
+    """(10 ms frame size, indices of the voiced frames) of float samples."""
+    import numpy as np
+    win = max(1, int(round(rate * FRAME_SECONDS)))
+    n = len(x) // win
+    if n == 0:
+        return win, np.zeros(0, dtype=int)
+    rms = np.sqrt(np.mean(x[: n * win].reshape(n, win) ** 2, axis=1))
+    return win, np.flatnonzero(rms > silence_threshold(rms))
+
+
+def has_speech(pcm, rate=RATE):
+    """True if 16-bit mono PCM holds any voiced 10 ms frame."""
+    return len(_voiced(_floats(pcm), rate)[1]) > 0
+
+
+def trim_edges_pcm(pcm, rate=RATE):
+    """16-bit mono PCM with only the silence before the first and after the last word trimmed (EDGE_PAD kept) and a
+    FADE_SECONDS fade in and out, so lines join without clicks. Inner pauses are untouched. No speech: returned as is."""
+    import numpy as np
+    x = _floats(pcm)
+    win, idx = _voiced(x, rate)
+    if len(idx) == 0:
+        return pcm
+    pad = int(round(rate * EDGE_PAD))
+    seg = x[max(0, idx[0] * win - pad): min(len(x), (idx[-1] + 1) * win + pad)].copy()
+    k = min(max(1, int(round(rate * FADE_SECONDS))), len(seg))
+    seg[:k] *= np.linspace(0.0, 1.0, k, dtype=np.float32)
+    seg[-k:] *= np.linspace(1.0, 0.0, k, dtype=np.float32)
+    return np.clip(np.round(seg), -32768, 32767).astype("<i2").tobytes()
+
+
+def room_tone_pcm(seconds, rate=RATE, dbfs=ROOM_TONE_DBFS):
+    """`seconds` of very quiet, slightly dark noise (RMS at `dbfs`) as 16-bit mono PCM: the pause between two lines
+    sounds like the same room, never like a dropout. The same every time (fixed seed)."""
+    import numpy as np
+    n = int(round(rate * seconds))
+    if n <= 0:
+        return b""
+    w = np.random.default_rng(ROOM_TONE_SEED).standard_normal(n + 64).astype(np.float32)
+    y = np.convolve(w, np.ones(8, dtype=np.float32) / 8, mode="same")[:n]
+    y *= (32768 * 10 ** (dbfs / 20)) / (float(np.sqrt(np.mean(y ** 2))) + 1e-9)
+    return np.clip(np.round(y), -32768, 32767).astype("<i2").tobytes()
+
+
+def join_lines(wavs):
+    """The lines' WAVs (24 kHz mono 16-bit), each edge-trimmed, joined with room tone: HOOK_GAP after the first,
+    LINE_GAP after the others."""
+    parts = []
+    for i, w in enumerate(wavs):
+        if i:
+            parts.append(room_tone_pcm(HOOK_GAP if i == 1 else LINE_GAP))
+        parts.append(trim_edges_pcm(wav_pcm(w)))
+    return pcm_to_wav(b"".join(parts))
+
+
+def unload_model(comfy_url, voice_ref, timeout):
+    """Free the VRAM of a Chatterbox model left loaded by a reel that stopped part-way: one tiny line without
+    keep_model_loaded (the node then drops its cached model). Never raises."""
+    try:
+        synthesize(comfy_url, UNLOAD_TEXT, SAMPLE_SEED, voice_ref, min(int(timeout), 120), keep_loaded=False)
+    except Exception:
+        pass
+
+
+def narrate_lines(comfy_url, lines, seed, voice_ref, timeout, on_line=None):
+    """The narration as one WAV: one Chatterbox call per non-empty line (the same seed), the model kept loaded until
+    the last line (which unloads it), joined by join_lines. on_line(i, n, text) runs before each line (logging, the
+    reel's heartbeat). If anything fails after a line asked to keep the model, the model is unloaded before re-raising."""
+    lines = [ln.strip() for ln in lines if (ln or "").strip()]
+    if not lines:
+        raise JobError("This reel has no narration to voice.")
+    wavs, maybe_loaded = [], False
+    try:
+        for i, text in enumerate(lines):
+            if on_line:
+                on_line(i, len(lines), text)
+            keep = i < len(lines) - 1
+            maybe_loaded = maybe_loaded or keep
+            w = synthesize(comfy_url, text, seed, voice_ref, timeout, keep_loaded=keep)
+            if not has_speech(wav_pcm(w)):
+                raise JobError("Chatterbox gave no speech for line %d. Press Retry." % (i + 1))
+            wavs.append(w)
+        maybe_loaded = False  # the last line ran without keep_model_loaded: the node dropped the model
+    finally:
+        if maybe_loaded:
+            unload_model(comfy_url, voice_ref, timeout)
+    return join_lines(wavs)

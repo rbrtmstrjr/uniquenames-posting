@@ -26,14 +26,18 @@ claims without music (and makes no voice samples) and checks again every 10 minu
 
 Steps, in order: voice → timing → music → images → render.
 
-- **Voice** (`voice.py`): the scene lines are grouped into chunks of whole lines (<= 100 words, ~25 s; Chatterbox
-  stops at ~40 s), each voiced by the `FL_ChatterboxTTS` node in ComfyUI (custom node `ComfyUI_Fill-ChatterBox`,
-  see `docs/reference/reel-pc-spike.md`) with the calm settings (exaggeration 0.35, temperature 0.7, cfg_weight 0.5),
-  tightened (007: silence before the first and after the last word trimmed, 70 ms kept; pauses over 0.35 s cut to
-  0.25 s; 4 ms fade at every cut; judged on 10 ms RMS frames: silent below 2 % of the chunk's loud speech,
-  clamped to -60…-45 dBFS, so a -40 dBFS word tail is speech), joined with a 0.10 s gap, sped up with ffmpeg `atempo=settings.reel_speed` (1.00–1.25, pitch kept; skipped at 1.00)
-  and uploaded as `reels/<id>/voice-v<version>.wav` (Whisper then times the sped-up track).
-  Narrator: `reels.voice_id` → `settings.reel_voice_id` → `builtin` (Chatterbox's own voice). A voice's reference clip
+- **Voice** (`voice.py`, line by line since 2.6.0): one `FL_ChatterboxTTS` call in ComfyUI per scene line (custom node
+  `ComfyUI_Fill-ChatterBox`, see `docs/reference/reel-pc-spike.md`) with the retuned delivery (exaggeration 0.6,
+  cfg_weight 0.3, temperature 0.8) and the reel's seed; `keep_model_loaded` is on for every line but the last, so the
+  model loads once per reel (~4–5 s a line after the first) and the last line unloads it for Z-Image (a reel that stops
+  part-way unloads it with a tiny extra line). Each line keeps its inner pauses; only the silence before the first and
+  after the last word is trimmed (70 ms kept, 4 ms fade in/out; judged on 10 ms RMS frames: silent below 2 % of the
+  line's loud speech, clamped to -60…-45 dBFS). Lines are joined with room tone (seeded quiet noise at -60 dBFS): 0.7 s
+  after the hook line, 0.4 s between the others; a line with no speech fails the step ("Press Retry"). Then sped up
+  with ffmpeg `atempo=settings.reel_speed` (1.00–1.25, pitch kept; skipped at 1.00) and uploaded as
+  `reels/<id>/voice-v<version>.wav` (Whisper then times that track). ~155–160 words a minute at 1.00×.
+  Narrator: `reels.voice_id` → `settings.reel_voice_id` when it is a house voice (gacrux, sulafat, vindemiatrix,
+  achernar) → `gacrux`. A voice's reference clip
   (`reel_voices.ref_path`, `voices/<id>/ref.wav`) is downloaded once and sent to ComfyUI's input folder
   (`unique-names/voices-<id>-ref-v<version>.wav`, cached per path + version, sent again if ComfyUI lost it) for
   `LoadAudio` → `audio_prompt`. A voice without a reference clip yet falls back to `builtin`. Without 006, 005's
@@ -45,8 +49,8 @@ Steps, in order: voice → timing → music → images → render.
   failure sets `music_path = ''` (the reel goes on with the voice only, not retried); ComfyUI closed just hands the
   step back (like images).
 - **Voice samples** (006): only when no reel step can run and ComfyUI is up, `claim_next_voice_sample()` hands out one
-  voice; Chatterbox reads the sample sentence with it (calm + current speed) →
-  `reels/voices/<id>/sample-v<version>.wav`, `sample_status 'ready'`, `sample_key` (e.g. `e0.35-t0.7-c0.5-s1.12-g1`; `-g1` = tightened), saved
+  voice; Chatterbox reads the sample sentence with it as one reel line (retuned delivery, edges trimmed, current speed) →
+  `reels/voices/<id>/sample-v<version>.wav`, `sample_status 'ready'`, `sample_key` (e.g. `e0.6-t0.8-c0.3-s1.00-l1`; `-l1` = line by line, 2.6.0; older `-g1` samples are stale), saved
   only if the row's version still matches; older samples are removed. Failure → `'failed'` + `error`; ComfyUI closed
   → back to `'queued'`.
 - **Theme previews** (007): after voice samples (same conditions), `claim_next_theme_preview()` hands out one theme;

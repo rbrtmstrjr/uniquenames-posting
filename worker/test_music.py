@@ -129,7 +129,7 @@ class VoiceHelpersTest(unittest.TestCase):
     def test_resolution(self):
         self.assertEqual(voice.resolve_voice_id({"voice_id": "kore"}, {"reel_voice_id": "gacrux"}), "kore")
         self.assertEqual(voice.resolve_voice_id({"voice_id": None}, {"reel_voice_id": "gacrux"}), "gacrux")
-        self.assertEqual(voice.resolve_voice_id({}, {}), "builtin")
+        self.assertEqual(voice.resolve_voice_id({}, {}), "gacrux")               # 2.6.0: the house default
         self.assertEqual(voice.resolve_voice_id(None, {"reel_voice_id": "Sulafat "}), "sulafat")
 
     def test_speed(self):
@@ -146,10 +146,10 @@ class VoiceHelpersTest(unittest.TestCase):
         self.assertEqual(voice.atempo_filter(2), "atempo=1.25")
 
     def test_sample_key_and_calm_params(self):
-        self.assertEqual(voice.sample_key(1.12), "e0.35-t0.7-c0.5-s1.12-g1")
-        self.assertEqual(voice.sample_key(1.0), "e0.35-t0.7-c0.5-s1.00-g1")
+        self.assertEqual(voice.sample_key(1.12), "e0.6-t0.8-c0.3-s1.12-l1")
+        self.assertEqual(voice.sample_key(1.0), "e0.6-t0.8-c0.3-s1.00-l1")
         tts = voice.chatterbox_graph("Hi.", 1)["1"]["inputs"]
-        self.assertEqual((tts["exaggeration"], tts["temperature"], tts["cfg_weight"]), (0.35, 0.7, 0.5))
+        self.assertEqual((tts["exaggeration"], tts["temperature"], tts["cfg_weight"]), (0.6, 0.8, 0.3))
 
     def test_older_reference_versions_leave_comfyui_input(self):
         d = tempfile.mkdtemp()
