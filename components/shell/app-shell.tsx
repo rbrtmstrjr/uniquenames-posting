@@ -11,7 +11,7 @@ import { createContext, useContext } from "react";
 import type { WorkerHealth } from "@/lib/status/worker-health";
 import { brand } from "@/packs/shared";
 
-const WorkerCtx = createContext<{ health: WorkerHealth; lastSeen: string; row: WorkerStatusRow | null }>({ health: "unknown", lastSeen: "never", row: null });
+const WorkerCtx = createContext<{ health: WorkerHealth; lastSeen: string; row: WorkerStatusRow | null; busyElsewhere?: boolean }>({ health: "unknown", lastSeen: "never", row: null });
 export const useWorkerContext = () => useContext(WorkerCtx);
 
 export function AppShell({ initialWorker, soundOn, children }: { initialWorker: WorkerStatusRow | null; soundOn: boolean; children: React.ReactNode }) {
@@ -33,7 +33,7 @@ export function AppShell({ initialWorker, soundOn, children }: { initialWorker: 
           <div className="mb-6 px-3 font-display text-xl text-ink"><span className="italic text-accent">{brand().mark}</span> {brand().name}</div>
           <SideNav />
           <div className="mt-auto space-y-3 px-3">
-            <PcStatus health={worker.health} lastSeen={worker.lastSeen} />
+            <PcStatus health={worker.health} lastSeen={worker.lastSeen} busyElsewhere={worker.busyElsewhere} />
             <ThemeToggle />
           </div>
         </aside>
@@ -42,7 +42,7 @@ export function AppShell({ initialWorker, soundOn, children }: { initialWorker: 
             <div className="font-display text-lg text-ink md:hidden"><span className="italic text-accent">{brand().mark}</span> {brand().name}</div>
             <div className="flex items-center gap-3">
               <ActivityPill a={activity} />
-              <div className="md:hidden"><PcStatus health={worker.health} lastSeen={worker.lastSeen} compact /></div>
+              <div className="md:hidden"><PcStatus health={worker.health} lastSeen={worker.lastSeen} busyElsewhere={worker.busyElsewhere} compact /></div>
             </div>
           </header>
           <main className="w-full px-4 pb-28 pt-5 md:px-6 md:pb-12 xl:px-8 2xl:px-10">{children}</main>

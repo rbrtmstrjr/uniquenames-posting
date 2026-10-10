@@ -435,6 +435,96 @@ class TwoPagesEndToEndTest(unittest.TestCase):
         self.assertTrue(os.path.exists(os.path.join(self.root, "cache", "Name Nest", "backup-index.json")))
 
 
+class BusyElsewhereTest(unittest.TestCase):
+    """2.7.1: while the shared PC works for one page, the other pages' status says so (worker_status.message)."""
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.root, True)
+        p = mock.patch("jobs.time.sleep")
+        p.start()
+        self.addCleanup(p.stop)
+
+    def runner(self, page_id, renderer=None):
+        s = FakeSupa()
+        r = jobs.Runner(s, renderer or FakeRenderer(), os.path.join(self.root, page_id), os.path.join(self.root, "cache", page_id),
+                        log=lambda m: None)
+        return s, r
+
+    @staticmethod
+    def message(supa):
+        return [u for u in supa.updates if u[0] == "worker_status"][-1][2]["message"]
+
+    def test_the_other_page_says_busy_while_one_page_works(self):
+        su, ru = self.runner("un")
+        sn, rn = self.runner("nn")
+        pages.MultiRunner([("unique-names", ru), ("name-nest", rn)], poll_seconds=3, log=lambda m: None)
+        ru.busy = True
+        rn.heartbeat_once()
+        ru.heartbeat_once()
+        self.assertEqual(self.message(sn), jobs.BUSY_ELSEWHERE)
+        self.assertEqual(jobs.BUSY_ELSEWHERE, "PC busy with your other page")
+        self.assertIsNone(self.message(su))           # the page being served looks ready, as today
+        ru.busy = False
+        rn.heartbeat_once()
+        self.assertIsNone(self.message(sn))
+
+    def test_busy_is_set_only_while_a_job_runs(self):
+        seen = []
+
+        class Watching(FakeRenderer):
+            def generate_photo(inner, *a):
+                rn.heartbeat_once()
+                seen.append((ru.busy, self.message(sn)))
+                return FakeRenderer.generate_photo(inner, *a)
+
+        su, ru = self.runner("un", Watching())
+        sn, rn = self.runner("nn")
+        m = pages.MultiRunner([("unique-names", ru), ("name-nest", rn)], poll_seconds=3, log=lambda m: None)
+        su.jobs.append(job())
+        self.assertTrue(m.tick())
+        self.assertEqual(seen, [(True, jobs.BUSY_ELSEWHERE)])
+        self.assertFalse(ru.busy)
+        self.assertFalse(m.tick())                    # polling with nothing to do is not "busy"
+        rn.heartbeat_once()
+        self.assertIsNone(self.message(sn))
+
+    def test_reel_steps_count_as_busy(self):
+        seen = []
+        su, ru = self.runner("un")
+        sn, rn = self.runner("nn")
+        pages.MultiRunner([("unique-names", ru), ("name-nest", rn)], poll_seconds=3, log=lambda m: None)
+
+        class Reels:
+            def run_step(self_, step):
+                seen.append(ru.busy)
+
+        ru.reels = Reels()
+        su.rpc = lambda fn, args=None: {"step": "voice", "reel": {"id": "r1", "title": "t"}} if fn == "claim_next_reel_step" else None
+        self.assertTrue(ru.tick())
+        self.assertEqual(seen, [True])
+        self.assertFalse(ru.busy)
+
+    def test_a_comfyui_problem_wins_over_busy(self):
+        su, ru = self.runner("un")
+        sn, rn = self.runner("nn", FakeRenderer(ok=False))
+        pages.MultiRunner([("unique-names", ru), ("name-nest", rn)], poll_seconds=3, log=lambda m: None)
+        ru.busy = True
+        rn.heartbeat_once()
+        self.assertEqual(self.message(sn), "ComfyUI is not reachable")
+
+    def test_one_page_never_says_busy(self):
+        su, ru = self.runner("un")
+        su.jobs.append(job())
+        ru.tick()
+        ru.heartbeat_once()
+        self.assertIsNone(self.message(su))
+        self.assertIsNone(ru.busy_elsewhere)
+
+    def test_version(self):
+        self.assertEqual(jobs.VERSION, "2.7.1")
+
+
 class ReelsFolderTest(unittest.TestCase):
     def test_reels_dir_default_and_override(self):
         self.assertIsNone(reels.ReelRunner(None, None, output_root="C:\\o").reels_dir)

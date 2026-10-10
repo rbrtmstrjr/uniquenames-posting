@@ -29,6 +29,7 @@ With only `worker.env` nothing changes: that is the Unique Names page, same fold
 3. Restart the worker (Task Scheduler: end + run "Unique Names card worker"). The top of `worker.log` lists every page
    it serves (`[name-nest] Name Nest -> https://… , cards in …`) and any pages file it skipped, with the reason.
 4. Open the page's website: its PC status turns "ready" within 15 s (each project gets its own `worker_status` heartbeat).
+   While the PC works for another page, the status reads "PC busy with your other page" (2.7.1; the job waits its turn).
 
 **Rules**
 - `worker.env` is the `unique-names` page unless a pages file has the same `PAGE_ID` or the same `SUPABASE_URL` (then

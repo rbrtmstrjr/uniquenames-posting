@@ -13,6 +13,8 @@
 # reel steps before voice samples and theme previews). A page whose project can't be reached is skipped and tried
 # again after a wait that doubles from POLL_SECONDS up to MAX_BACKOFF; the other pages go on. Every page has its own
 # heartbeat thread (worker_status in its own project) and its own log prefix ("[name-nest] ...").
+# 2.7.1: while one page's job runs, every other page's heartbeat sets worker_status.message to jobs.BUSY_ELSEWHERE,
+# which the website shows as "PC busy with your other page" instead of "PC ready" (one page alone never sets it).
 import glob
 import os
 import re
@@ -129,6 +131,9 @@ class MultiRunner:
     def __init__(self, runners, poll_seconds=3.0, log=print, clock=time.time, max_backoff=MAX_BACKOFF):
         self.poll_seconds = float(poll_seconds)
         self.slots = [_Slot(pid, r, self.poll_seconds) for pid, r in runners]
+        # 2.7.1: each page's heartbeat says "PC busy with your other page" while another page's job runs
+        for slot in self.slots:
+            slot.runner.busy_elsewhere = lambda me=slot: any(getattr(o.runner, "busy", False) for o in self.slots if o is not me)
         self.log = log
         self.clock = clock
         self.max_backoff = float(max_backoff)

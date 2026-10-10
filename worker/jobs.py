@@ -1,5 +1,6 @@
 # The worker's job loop: claim one card at a time from Supabase, make it with
 # ComfyUI + Pillow, upload it, keep a backup copy on the PC, and heartbeat.
+import contextlib
 import datetime
 import io
 import json
@@ -15,13 +16,16 @@ from PIL import Image
 from render import JobError, slugify, text_style
 from supa import SupaError
 
-VERSION = "2.7.0"
+VERSION = "2.7.1"
 BUCKET = "cards"
 COMFY_CLOSED = "ComfyUI is closed. Open ComfyUI Desktop on your PC, then press Retry."
 NO_NET_SAVE = "Couldn't reach the internet to save this card. Press Retry."
 NO_NET_LOAD = "Couldn't reach the internet to load this card's photo. Press Retry."
 NO_NET_SETTINGS = "Couldn't reach the internet to load your settings. Press Retry."
 STALE = "stale result dropped (card changed while it was being made)"
+# worker_status.message of a page while the shared PC works for another page (2.7.1). The website shows it instead
+# of "PC ready" (lib/status/worker-health.ts BUSY_ELSEWHERE: the same words).
+BUSY_ELSEWHERE = "PC busy with your other page"
 
 
 CTA_FILENAME = "99-follow.jpg"  # the closing card's PC backup name (migration 010)
@@ -155,13 +159,26 @@ class Runner:
         self.themes_off_until = 0.0    # claim_next_theme_preview is missing (007 not run): re-check later
         self.themes_state = None       # None = not known yet, True = 007 there, False = 007 missing
         self.next_preview_sweep = 0.0
+        self.busy = False              # a job of this page is running (a card, a reel step, a sample, a preview)
+        self.busy_elsewhere = None     # set by pages.MultiRunner: () -> True while another page's job runs
+
+    @contextlib.contextmanager
+    def _working(self):
+        self.busy = True
+        try:
+            yield
+        finally:
+            self.busy = False
 
     # ------------------------------------------------------------ heartbeat
     def heartbeat_once(self):
         h = self.renderer.health()
+        message = h.get("error")
+        if not message and not self.busy and self.busy_elsewhere and self.busy_elsewhere():
+            message = BUSY_ELSEWHERE
         self.supa.update("worker_status", "id=eq.1", {
             "last_seen": now_iso(), "comfyui_ok": bool(h["ok"]), "gpu": h.get("gpu"),
-            "current_card_id": self.current, "worker_version": VERSION, "message": h.get("error"),
+            "current_card_id": self.current, "worker_version": VERSION, "message": message,
         })
 
     def _heartbeat_loop(self):
@@ -185,6 +202,7 @@ class Runner:
             return self._reel_tick(comfy_ok) if self.reels else False
         card = job["card"]
         self.current = card["id"]
+        self.busy = True
         self.log("%s: %s (%s)" % (job["job"], card["name"], card["id"]))
         try:
             settings = with_post_fonts(self._settings(), job.get("fonts"))
@@ -204,6 +222,7 @@ class Runner:
             self._fail(card, e)
         finally:
             self.current = None
+            self.busy = False
         return True
 
     def _reel_tick(self, comfy_ok):
@@ -230,7 +249,8 @@ class Runner:
         scene = step.get("scene") or {}
         self.log("reel %s: %s%s (%s)" % (step.get("step"), reel.get("title"),
                                          " image %s" % scene.get("position") if scene else "", reel.get("id")))
-        self.reels.run_step(step)
+        with self._working():
+            self.reels.run_step(step)
         return True
 
     def _claim_reel_step(self, comfy_ok):
@@ -273,7 +293,8 @@ class Runner:
         if not isinstance(job, dict) or not job.get("voice"):
             return False
         self.log("voice sample: %s" % (job["voice"].get("id")))
-        self.reels.run_sample(job)
+        with self._working():
+            self.reels.run_sample(job)
         return True
 
     def _preview_tick(self):
@@ -297,7 +318,8 @@ class Runner:
         if not isinstance(job, dict) or not job.get("theme"):
             return False
         self.log("theme preview: %s" % job["theme"].get("id"))
-        self.reels.run_theme_preview(job)
+        with self._working():
+            self.reels.run_theme_preview(job)
         return True
 
     def _settings(self):

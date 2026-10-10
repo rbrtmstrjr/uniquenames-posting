@@ -4,10 +4,10 @@ import { PcStatus, PC_TEXT } from "@/components/shell/pc-status";
 import { useWorkerContext } from "@/components/shell/app-shell";
 
 export function WorkerCard() {
-  const { health, lastSeen, row } = useWorkerContext();
+  const { health, lastSeen, row, busyElsewhere } = useWorkerContext();
   return (
     <Panel title="Your PC">
-      <PcStatus health={health} lastSeen={lastSeen} />
+      <PcStatus health={health} lastSeen={lastSeen} busyElsewhere={busyElsewhere} />
       <dl className="mt-4 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-sm">
         <dt className="text-muted">Last seen</dt><dd className="text-ink">{lastSeen}</dd>
         <dt className="text-muted">GPU</dt><dd className="truncate text-ink">{row?.gpu ?? "—"}</dd>

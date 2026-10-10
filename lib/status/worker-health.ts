@@ -9,6 +9,16 @@ export function workerHealth(w: WorkerStatusRow | null, now: number): WorkerHeal
   return w.comfyui_ok ? "ready" : "comfy-off";
 }
 
+/**
+ * worker_status.message while the shared PC (worker 2.7.1, several pages) works for another page: the same words as
+ * worker/jobs.py BUSY_ELSEWHERE. The PC is still ready (a new job waits its turn), so this is shown, not a lock.
+ */
+export const BUSY_ELSEWHERE = "PC busy with your other page";
+
+/** True while the PC is up but working for the other page (an older worker never says so). */
+export const busyElsewhere = (w: WorkerStatusRow | null, now: number): boolean =>
+  workerHealth(w, now) === "ready" && w?.message === BUSY_ELSEWHERE;
+
 /** Why Generate / New picture / Add a card / Make preview are locked (shown as visible text, not only a tooltip). */
 export const GENERATE_LOCK = {
   offline: "Your PC is offline — turn it on to generate",
