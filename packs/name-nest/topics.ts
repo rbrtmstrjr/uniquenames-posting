@@ -81,7 +81,7 @@ const US_TOPICS: ReelTopic[] = [
       "Put your phone or bag in the back seat, so you always check the back seat before you lock up.",
       "Ask your child care provider to call you if your child is more than 10 minutes late.",
     ],
-    safety: "See a child alone in a hot car? Call 911 right away.",
+    safety: "See a child alone in a hot car? Call 911, then your doctor.",
   }),
   T("road-trip-toddler", "Long car rides with a toddler: a little bag of surprises and a stop-and-stretch rhythm", "problem_fix", false, "toddler"),
   // US holidays
@@ -93,7 +93,7 @@ const US_TOPICS: ReelTopic[] = [
       "Candy wrappers, stickers and small toys can be a choking hazard for little ones.",
       "Bright, reflective costumes and a flashlight help kids be seen after dark.",
     ],
-    safety: "Worried your child choked on something or ate something unsafe? Call your pediatrician, or 911 in an emergency.",
+    safety: "Worried about something your child ate? Call your pediatrician, or 911 in an emergency.",
   }),
   T("thanksgiving-toddler", "Thanksgiving with a toddler: 3 ways to keep the big dinner calm", "named_method", false, "toddler"),
   T("holiday-gifts", "Too many gifts at Christmas? The 4-gift rule for little kids: want, need, wear, read", "named_method", false, "preschooler"),
@@ -105,7 +105,7 @@ const US_TOPICS: ReelTopic[] = [
       "Let little kids wave a flag or a glow stick instead of a sparkler.",
       "Fireworks can be loud enough to hurt young ears, so watch from a good distance.",
     ],
-    safety: "A burn or an eye injury from fireworks? Get medical care right away.",
+    safety: "A burn or eye injury from fireworks? Call your doctor or 911 now.",
   }),
   // Seasons
   T("pool-water-watcher", "Pool days with little kids: the Water Watcher rule", "named_method", true, "toddler", {
@@ -116,7 +116,7 @@ const US_TOPICS: ReelTopic[] = [
       "A home pool should have a fence on all 4 sides, at least 4 feet high.",
       "Children can start swim lessons after their first birthday, when they're ready.",
     ],
-    safety: "A child pulled from the water and not breathing normally? Call 911 right away.",
+    safety: "Child pulled from the water, coughing or not breathing right? Call 911, then your doctor.",
   }),
   T("baby-sun-shade", "Summer sun and babies under 6 months: shade first, then the rest", "problem_fix", true, "baby", {
     facts: [

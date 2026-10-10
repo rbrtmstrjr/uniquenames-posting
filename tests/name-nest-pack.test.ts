@@ -76,7 +76,9 @@ describe("name-nest: reel topic bank", () => {
 
   it("every health topic carries vetted facts and a safety line; US facts use °F / degrees Fahrenheit and feet", () => {
     for (const t of topics.filter((x) => x.health)) {
-      expect([t.id, (t.facts ?? []).length >= 3, !!t.safety]).toEqual([t.id, true, true]);
+      expect([t.id, (t.facts ?? []).length >= 3 && (t.facts ?? []).length <= 5, !!t.safety]).toEqual([t.id, true, true]);
+      // the engine's rule (tests/reel-formats): a short safety line that names the doctor
+      expect([t.id, /\b(doctor|pediatrician)\b/i.test(t.safety!), t.safety!.split(/\s+/).length <= 15]).toEqual([t.id, true, true]);
       for (const f of t.facts ?? []) expect([t.id, /°C|celsius|metres?|meters?|\bkm\b/i.test(f)]).toEqual([t.id, false]);
     }
     expect(topics.find((t) => t.id === "look-before-you-lock")!.facts!.join(" ")).toMatch(/20 degrees Fahrenheit/);
