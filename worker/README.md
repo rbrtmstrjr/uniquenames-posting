@@ -12,7 +12,8 @@ Sends a heartbeat every 15 s so the website can show "PC ready / ComfyUI closed 
 - After upgrading, restart the worker (Task Scheduler: end + run "Unique Names card worker", or reboot) so it loads the new text settings and downloads fonts into `worker/fonts/` (git-ignored). Fonts are cached there and fall back to Poppins.
 - At startup it fetches Poppins (required) and prefetches the other catalog fonts (best effort, 15 s timeout each); a font that failed is not retried for 10 minutes.
 - Text settings (fonts, sizes, position) come from the `settings` row; a post's own fonts (migration 003: `claim_next_card` returns them as `fonts`) win over the settings fonts, per font, when set. The rules and the font list live in `../lib/text/layout.json` and `../lib/fonts/catalog.json`, shared with the website's Settings preview. Fonts download on first use from github.com/google/fonts; if one can't be fetched the card is stamped in Poppins.
-- Needs: Python 3.12 + Pillow, ComfyUI Desktop with `z_image_turbo_bf16`, `qwen_3_4b`, `ae`.
+- Needs: Python 3.12 + Pillow, ComfyUI Desktop with `z_image_turbo_bf16`, `qwen_3_4b_fp8_mixed` (fast fp8 text encoder, run with
+  `fp8_e4m3fn` weights; if the file is missing the worker falls back to `qwen_3_4b` + default weights), `ae`.
 
 ## Reels (voice, timing, images, video)
 

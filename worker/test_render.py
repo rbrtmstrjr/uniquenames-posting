@@ -9,6 +9,7 @@ import threading
 import unittest
 import urllib.request
 from http.server import ThreadingHTTPServer
+from unittest import mock
 
 from PIL import Image, ImageDraw
 
@@ -75,6 +76,124 @@ class Graph(unittest.TestCase):
         self.assertEqual(g["8"]["inputs"]["seed"], 5)
         self.assertEqual(g["2"]["inputs"]["type"], "lumina2")
         self.assertEqual(g["5"]["inputs"]["text"], "p")
+
+    def test_fast_setup_by_default(self):
+        # Setup B (2026-10-10 A/B): fp8 text encoder + fp8 weights, same look, 15-30% faster
+        g = w.comfy_graph("p", 5, 1088, 1920, "x")
+        self.assertEqual(g["2"]["inputs"]["clip_name"], "qwen_3_4b_fp8_mixed.safetensors")
+        self.assertEqual(g["1"]["inputs"]["weight_dtype"], "fp8_e4m3fn")
+        self.assertEqual(g["1"]["inputs"]["unet_name"], "z_image_turbo_bf16.safetensors")
+
+    def test_safe_setup_uses_the_old_files(self):
+        g = w.comfy_graph("p", 5, 1088, 1920, "x", fast=False)
+        self.assertEqual(g["2"]["inputs"]["clip_name"], "qwen_3_4b.safetensors")
+        self.assertEqual(g["1"]["inputs"]["weight_dtype"], "default")
+
+
+def clip_info(*names):
+    return {"CLIPLoader": {"input": {"required": {"clip_name": [list(names)], "type": [["lumina2"]]}}}}
+
+
+class FastSetup(unittest.TestCase):
+    """The fp8 text encoder is used when ComfyUI has it; otherwise (or on 'value not in list') the old files."""
+
+    def setUp(self):
+        self.logs = []
+        self.r = w.ComfyRenderer("http://comfy", 30, log=self.logs.append)
+
+    def test_uses_fp8_when_comfyui_lists_it_and_asks_only_once(self):
+        info = clip_info("qwen_3_4b.safetensors", w.FAST_CLIP)
+        with mock.patch("render.http_json", return_value=info) as h:
+            self.assertTrue(self.r.use_fast())
+            self.assertTrue(self.r.use_fast())
+        self.assertEqual(h.call_count, 1)
+        self.assertIn("/object_info/CLIPLoader", h.call_args[0][0])
+
+    def test_falls_back_when_the_fp8_file_is_missing(self):
+        with mock.patch("render.http_json", return_value=clip_info("qwen_3_4b.safetensors")) as h:
+            self.assertFalse(self.r.use_fast())
+            self.assertFalse(self.r.use_fast())
+        self.assertEqual(h.call_count, 1)
+        self.assertTrue(any("qwen_3_4b.safetensors" in m for m in self.logs))
+
+    def test_unreachable_comfyui_tries_fast_and_asks_again_later(self):
+        with mock.patch("render.http_json", side_effect=OSError("refused")) as h:
+            self.assertTrue(self.r.use_fast())
+            self.assertTrue(self.r.use_fast())
+        self.assertEqual(h.call_count, 2)  # nothing cached: the next picture checks again
+
+    def _comfy(self, refuse_fast):
+        """A fake ComfyUI: /prompt refuses the fp8 encoder (400, 'Value not in list') when refuse_fast."""
+        import io as _io
+        import urllib.error
+        sent = []
+
+        def http(url, body=None, timeout=30):
+            if "/object_info/" in url:
+                return clip_info("qwen_3_4b.safetensors", w.FAST_CLIP)
+            if url.endswith("/prompt"):
+                sent.append(body["prompt"])
+                if refuse_fast and body["prompt"]["2"]["inputs"]["clip_name"] == w.FAST_CLIP:
+                    # shaped like ComfyUI's real answer, with the telling words past the first 300 characters
+                    err = json.dumps({"error": {"type": "prompt_outputs_failed_validation", "message": "x" * 300},
+                                      "node_errors": {"2": {
+                        "errors": [{"type": "value_not_in_list", "message": "Value not in list",
+                                    "details": "clip_name: 'qwen_3_4b_fp8_mixed.safetensors' not in [...]"}]}}})
+                    raise urllib.error.HTTPError(url, 400, "Bad Request", {}, _io.BytesIO(err.encode()))
+                return {"prompt_id": "p%d" % len(sent)}
+            if "/history/" in url:
+                pid = url.rsplit("/", 1)[-1]
+                return {pid: {"status": {"completed": True},
+                              "outputs": {"10": {"images": [{"filename": "a.png", "subfolder": "", "type": "output"}]}}}}
+            raise AssertionError(url)
+
+        png = _io.BytesIO()
+        Image.new("RGB", (64, 64), (10, 20, 30)).save(png, "PNG")
+
+        class Resp(_io.BytesIO):
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        patches = [mock.patch("render.http_json", side_effect=http),
+                   mock.patch("render.urllib.request.urlopen", side_effect=lambda *a, **k: Resp(png.getvalue())),
+                   mock.patch("render.time.sleep")]
+        for p in patches:
+            p.start()
+            self.addCleanup(p.stop)
+        return sent
+
+    def test_value_not_in_list_retries_with_the_old_files_and_remembers(self):
+        sent = self._comfy(refuse_fast=True)
+        img = self.r.generate_photo("p", 1, 64, 64)
+        self.assertEqual(img.size, (64, 64))
+        self.assertEqual([g["2"]["inputs"]["clip_name"] for g in sent], [w.FAST_CLIP, "qwen_3_4b.safetensors"])
+        self.assertEqual(sent[1]["1"]["inputs"]["weight_dtype"], "default")
+        self.r.generate_photo("p", 2, 64, 64)
+        self.assertEqual(sent[2]["2"]["inputs"]["clip_name"], "qwen_3_4b.safetensors")  # no second refusal
+
+    def test_fast_graph_is_sent_when_available(self):
+        sent = self._comfy(refuse_fast=False)
+        self.r.generate_photo("p", 1, 64, 64)
+        self.assertEqual(len(sent), 1)
+        self.assertEqual(sent[0]["1"]["inputs"]["weight_dtype"], "fp8_e4m3fn")
+
+    def test_other_refusals_are_not_retried(self):
+        import io as _io
+        import urllib.error
+
+        def http(url, body=None, timeout=30):
+            if "/object_info/" in url:
+                return clip_info(w.FAST_CLIP)
+            raise urllib.error.HTTPError(url, 400, "Bad Request", {}, _io.BytesIO(b'{"error": "bad seed"}'))
+
+        with mock.patch("render.http_json", side_effect=http) as h:
+            with self.assertRaises(w.JobError) as cm:
+                self.r.generate_photo("p", 1, 64, 64)
+        self.assertIn("bad seed", str(cm.exception))
+        self.assertEqual(sum(1 for c in h.call_args_list if c[0][0].endswith("/prompt")), 1)
 
 
 class Layout(unittest.TestCase):
