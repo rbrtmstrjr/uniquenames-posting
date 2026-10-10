@@ -47,7 +47,7 @@ export async function suggestNamesAction(i: { gender: Gender; style: NameStyle; 
   if (all.error) return fail(all.error);
   const existing = all.rows.filter((n) => n.gender === i.gender && n.style === i.style).map((n) => n.name);
   const ai = await suggestNames({ gender: i.gender, style: i.style, count: i.count, vibe: i.vibe, existing });
-  if (!ai.ok) return fail(`Gemini could not suggest names: ${ai.error}`);
+  if (!ai.ok) return fail(`The AI could not suggest names: ${ai.error}`);
   const { fresh, duplicates, invalid } = filterNameSuggestions(ai.data, all.rows.map((n) => n.name), i.style);
   const rows = fresh.slice(0, i.count).map((n) => ({ name: n.name, meaning: n.meaning, gender: i.gender, style: i.style, status: "pending" as const }));
   if (rows.length) {
@@ -87,13 +87,13 @@ export async function cardNameIdeasAction(cardId: string): Promise<CardNameIdeas
   // A post by letter: the ideas start with its letter too (the hardened letter prompt and checks).
   if (isLetter(letter)) {
     const ai = await suggestForLetter({ gender, style, letter, count: CARD_IDEAS, existing: existing.filter((n) => startsWith(n, letter)), allNames: all.rows.map((n) => n.name) });
-    if (!ai.ok) return fail(`Gemini could not suggest names: ${ai.error}`);
+    if (!ai.ok) return fail(`The AI could not suggest names: ${ai.error}`);
     if (!ai.result.fresh.length) return fail(`Gemini had no new ${letter} names this time. Try again.`);
     return { ok: true, ideas: ai.result.fresh.map((n) => ({ name: n.name, meaning: n.meaning })) };
   }
   const vibe = theme?.title ? `names that suit a "${theme.title}" baby photoshoot`.slice(0, VIBE_MAX) : undefined;
   const ai = await suggestNames({ gender, style, count: CARD_IDEAS, vibe, existing });
-  if (!ai.ok) return fail(`Gemini could not suggest names: ${ai.error}`);
+  if (!ai.ok) return fail(`The AI could not suggest names: ${ai.error}`);
   const { fresh } = filterNameSuggestions(ai.data, all.rows.map((n) => n.name), style);
   if (!fresh.length) return fail("Every idea Gemini had is already one of your names. Try again.");
   return { ok: true, ideas: fresh.slice(0, CARD_IDEAS).map((n) => ({ name: n.name, meaning: n.meaning })) };
@@ -113,7 +113,7 @@ export async function suggestThemesAction(i: { gender: Gender; count: number; vi
   if (all.error) return fail(all.error);
   const existing = all.rows.filter((t) => t.gender === i.gender).map((t) => ({ title: t.title, props: t.props }));
   const ai = await suggestThemes({ gender: i.gender, count: i.count, vibe: i.vibe, existing });
-  if (!ai.ok) return fail(`Gemini could not suggest themes: ${ai.error}`);
+  if (!ai.ok) return fail(`The AI could not suggest themes: ${ai.error}`);
   const { fresh, duplicates, invalid } = filterThemeSuggestions(ai.data, all.rows, i.gender);
   const last = all.rows.reduce((m, t) => Math.max(m, Number(t.sort_order) || 0), 0);
   const rows = fresh.slice(0, i.count).map((t, k) => ({ ...t, status: "pending" as const, sort_order: last + 1 + k }));
@@ -144,7 +144,7 @@ export async function letterNameIdeasAction(i: { gender: Gender; style: NameStyl
   if (all.error) return fail(all.error);
   const existing = all.rows.filter((n) => n.gender === i.gender && n.style === i.style && startsWith(n.name, i.letter)).map((n) => n.name);
   const ai = await suggestForLetter({ gender: i.gender, style: i.style, letter: i.letter, count: i.count, existing, allNames: all.rows.map((n) => n.name) });
-  if (!ai.ok) return fail(`Gemini could not suggest names: ${ai.error}`);
+  if (!ai.ok) return fail(`The AI could not suggest names: ${ai.error}`);
   if (!ai.result.fresh.length) return fail(`Gemini had no new real ${i.letter} names this time. Try again, or add names on the Names page.`);
   return { ok: true, ideas: ai.result.fresh.map((n) => ({ name: n.name, meaning: n.meaning })) };
 }

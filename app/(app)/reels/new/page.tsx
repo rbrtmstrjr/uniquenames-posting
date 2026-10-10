@@ -13,7 +13,7 @@ export default async function NewReelPage() {
   return (
     <>
       <Link href="/reels" className="mb-1 inline-flex min-h-11 items-center gap-1.5 text-sm font-semibold text-muted hover:text-ink"><ArrowLeft className="size-4" /> Reels</Link>
-      <PageHeader title="New reel" subtitle="Gemini writes the script. You check it before anything is made." />
+      <PageHeader title="New reel" subtitle="The AI writes the script. You check it before anything is made." />
       {ready ? <NewReelForm /> : <ReelsSetup />}
     </>
   );

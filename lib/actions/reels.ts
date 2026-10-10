@@ -195,7 +195,7 @@ async function draftScript(sb: SB, topic: string | undefined, reelThemeId?: stri
   const taken = new Set(made.rows.map((m) => titleKey(m.title ?? "")));
   const alreadyMade = made.rows.map((m) => ({ title: m.title, stage: m.stage ?? null }));
   const deadline = Date.now() + SCRIPT_BUDGET_MS;
-  let last = "Gemini did not answer.";
+  let last = "The AI did not answer.";
   for (let i = 0; i < TRIES; i++) {
     const left = deadline - Date.now();
     if (left < CALL_MIN_MS) break;
@@ -206,13 +206,13 @@ async function draftScript(sb: SB, topic: string | undefined, reelThemeId?: stri
     });
     if (!r.ok) { last = r.error; continue; }
     if (taken.has(titleKey(r.script.title))) {
-      last = `Gemini kept picking a title you already made ("${r.script.title}"). Try again, or type a topic.`;
+      last = `The AI kept picking a title you already made ("${r.script.title}"). Try again, or type a topic.`;
       continue;
     }
     // the format asked for is the reel's format (Gemini's own answer never overrides it)
     return { ok: true, script: { ...r.script, format: brief.format }, theme, has007, has014, brief };
   }
-  return fail(last.startsWith("Gemini kept") ? last : `Could not write the script: ${last}`);
+  return fail(last.startsWith("The AI kept") ? last : `Could not write the script: ${last}`);
 }
 
 /**

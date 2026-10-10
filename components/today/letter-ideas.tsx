@@ -79,7 +79,7 @@ export function LetterIdeasDialog({ open, onOpenChange, gender, style, letter, n
         {loading && !ideas.length && (
           <p role="status" className="flex items-start gap-2 rounded-xl bg-accent-soft px-3 py-3 text-sm text-ink">
             <Loader2 className="mt-px size-4 shrink-0 animate-spin text-accent" aria-hidden />
-            <span>Gemini is finding {letter} names and checking them against your list… this can take up to a minute.</span>
+            <span>The AI is finding {letter} names and checking them against your list… this can take up to a minute.</span>
           </p>
         )}
         {ideas.length > 0 && (

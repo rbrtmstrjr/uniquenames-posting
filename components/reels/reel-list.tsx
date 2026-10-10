@@ -89,7 +89,7 @@ export function ReelList({ reels: initial, music = false }: { reels: ReelListIte
 
   if (!reels.length) {
     return <Empty icon={<Clapperboard className="size-6" />} title="No reels yet"
-      text="Write a script with Gemini, check it, and your PC makes the narrated video."
+      text="Write a script with AI, check it, and your PC makes the narrated video."
       action={<Link href="/reels/new" className={newReelLink}><Plus className="size-4" /> New reel</Link>} />;
   }
   return (
