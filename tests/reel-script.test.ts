@@ -28,7 +28,7 @@ const SHOTS = [
 // line 4 carries the exact words to say (a quote may hold "me": the mom says it, not the narrator)
 const QUOTE_LINE = `Say "you are safe with me," then whisper "I'm here."`;
 // every filler line is different (the validator refuses a line that repeats an earlier one): 10 words each
-const NOUNS = ["socks", "spoons", "blankets", "pillows", "crayons", "slippers", "bottles", "buttons", "mangoes", "puzzles", "kites", "jeeps",
+const NOUNS = ["socks", "spoons", "blankets", "pillows", "crayons", "slippers", "bottles", "buttons", "mangoes", "puzzles", "kites", "jars",
   "drums", "bubbles", "teacups", "ribbons", "pebbles", "shells", "lanterns", "marbles", "noodles", "blocks", "boats", "bells", "combs",
   "towels", "stars", "rattles", "baskets", "wagons", "whistles", "candles", "mittens", "feathers", "beads", "cookies", "trumpets", "kettles", "fans", "ducks"];
 const scene = (n: number, narration = n === 0 ? HOOK : n === 3 ? QUOTE_LINE : `Line number ${n} is a short spoken phrase about ${NOUNS[n]}.`) => ({
@@ -50,7 +50,8 @@ describe("reelScriptPrompt", () => {
     expect(prompt).toContain("Topic: teething at night");
     expect(prompt).toContain("19-32 lines");
     expect(prompt).toContain("FORMAT: Problem, why, fix (problem_fix)");
-    expect(system).toMatch(/Filipino moms/);
+    expect(system).toMatch(/moms of babies and young kids \(0-7\) around the world; most are in the Philippines, others in the US, Africa, Australia/);
+    expect(system).not.toMatch(/Filipino moms|loves her 'anak'|local detail|lola wisdom/);
     expect(system).toMatch(/early years/);
     expect(system).toMatch(/teaches ONE thing/);
     expect(system).not.toMatch(/storyteller/);
@@ -157,7 +158,7 @@ describe("reelScriptPrompt", () => {
   it("the pictures act out the advice, with only the parent and the child", () => {
     const { prompt } = reelScriptPrompt({ ...input10, theme: { id: "crayon", faces: true } });
     expect(prompt).toMatch(/PICTURES SHOW THE ADVICE/);
-    expect(prompt).toMatch(/never lola, a sibling/);
+    expect(prompt).toMatch(/never grandma, a sibling/);
   });
 
   it("asks for a varied shot list: sizes, subjects, the mix, adjacency, line 1 face, establishing wide, mirrored end", async () => {
@@ -245,7 +246,7 @@ describe("the value-first validator", () => {
   });
 
   it("first-person narration is refused; the mom's quoted words and 'we all' are fine", () => {
-    for (const fp of ["I tried this with my own son last week.", "We learned this the hard way, mama.", "It works for us every single night.", "My lola always said this to our family."]) {
+    for (const fp of ["I tried this with my own son last week.", "We learned this the hard way, mama.", "It works for us every single night.", "My mom always said this to our family."]) {
       expect(val(withLine(5, fp)), fp).toMatchObject({ ok: false, error: expect.stringMatching(/^Line 6 speaks as I \/ we \("\w+"\): talk to the mom as you\.$/) });
     }
     expect(val(withLine(5, "I tried this with my own son last week."))).toEqual({ ok: false, error: 'Line 6 speaks as I / we ("I"): talk to the mom as you.' });
@@ -330,8 +331,8 @@ describe("the value-first validator", () => {
   });
 
   it("a title written like an id is turned back into words", () => {
-    const r = val(script(10, { title: "lola_science_never_bathe" }));
-    expect(r.ok && r.script.title).toBe("lola science never bathe");
+    const r = val(script(10, { title: "grandma_science_never_bathe" }));
+    expect(r.ok && r.script.title).toBe("grandma science never bathe");
   });
 
   it("the script carries the requested format", () => {
@@ -351,12 +352,12 @@ describe("the value-first validator", () => {
         'Instead of "Stop crying," say "I\'m right here."', "Crying is how small bodies let stress out.",
         'Instead of "You\'re fine," say "That hurt, huh?"', "Feeling believed is what lets them move on.",
         "Bonus: say less, sit closer, and breathe slowly.", "Small words make a big change in your home."],
-      lola_science: ["Lola said never bathe a sick child. Doctors say otherwise.", "Lola wanted to keep you warm and safe.",
+      lola_science: ["Grandma said never bathe a sick child. Doctors say otherwise.", "Grandma wanted to keep you warm and safe.",
         "Today, pediatricians say a lukewarm bath can help a fever.", "It cools the skin gently and helps them rest.",
         'Use lukewarm water and say "Quick bath, then cuddles."', "Dry them fast and dress them in light clothes.",
         'Offer small sips often and say "Sip, then cuddle."', "If you're worried, call your pediatrician right away.",
-        "Keep it or let go? This one: let go, gently.", "Lola's love stays. Only the old rule goes."],
-      scene_lesson: ['Your toddler throws his shoe. You\'re late. Don\'t say "Stop it."', "The jeep is waiting and the shoe is under the sofa.",
+        "Keep it or let go? This one: let go, gently.", "Grandma's love stays. Only the old rule goes."],
+      scene_lesson: ['Your toddler throws his shoe. You\'re late. Don\'t say "Stop it."', "The car seat is waiting and the shoe is under the sofa.",
         "Here's what's really happening right now.", "Switching tasks is hard for a three-year-old brain.",
         "He isn't fighting you. He is stuck in the moment.", 'Try a two-minute warning, then a job: "You carry the keys."',
         "A job gives his hands and his brain somewhere to go.", "Leaving becomes his idea, not your order.",
@@ -624,7 +625,8 @@ describe("Crayon / Red Thread scripts (012): the picture is written to the owner
     expect(c).toMatch(/The LAST line is the warm close/);
     const r = reelScriptPrompt({ ...input10, theme: RED }).prompt;
     expect(r).toMatch(/THIS STYLE \(the owner's Red Thread guide\)/);
-    expect(r).toMatch(/OFW parent/);
+    expect(r).toMatch(/a parent working abroad or far away \(away for work, deployed\)/);
+    expect(r).not.toMatch(/OFW/);
     expect(r).toMatch(/NO colour words at all/);
     expect(r).toMatch(/Keep the wrists in view/);
     expect(r).toMatch(/"thread": .*plain\|tight\|stretched\|tangled\|loose/);
@@ -710,8 +712,8 @@ describe("health accuracy, verified anchors, the scene pivot (review fixes)", ()
   });
 
   it("a verified anchor is offered; without one, a plain anchor and never a coined expert term", () => {
-    expect(reelScriptPrompt({ ...input10, topicAnchor: "labeled praise — Parent-Child Interaction Therapy (PCIT)" }).prompt)
-      .toContain("use this verified term: labeled praise — Parent-Child Interaction Therapy (PCIT)");
+    expect(reelScriptPrompt({ ...input10, topicAnchor: "naming the feeling out loud helps a child calm down — child experts" }).prompt)
+      .toContain("use this checked one, in your own plain words ('Child experts say …'): naming the feeling out loud helps a child calm down — child experts");
     const p = reelScriptPrompt(input10).prompt;
     expect(p).toMatch(/never coin a term and attribute it to experts/);
     expect(p).toMatch(/Your own tip names .* are fine/);
@@ -727,7 +729,8 @@ describe("health accuracy, verified anchors, the scene pivot (review fixes)", ()
 
   it("refuses an expert-attributed term that isn't verified; vetted terms and the topic's anchor are fine", () => {
     expect(val(withLine(5, "Many sleep experts call it a wakeful window."))).toEqual({ ok: false, error: "Line 6 says experts call it something unverified: use a plain anchor." });
-    expect(val(withLine(5, "Psychologists call this labeled praise.")).ok).toBe(true);
+    // a named technique is jargon now (plain lessons, 2026-10-10)
+    expect(val(withLine(5, "Psychologists call this labeled praise."))).toEqual({ ok: false, error: 'Line 6 uses expert jargon ("labeled praise"): say it in plain everyday words.' });
     expect(val(withLine(5, "Pediatricians call it watching together."), PF, { anchor: "watching together — the American Academy of Pediatrics" }).ok).toBe(true);
     // the page's own tip name, not attributed to experts
     expect(val(withLine(5, "It's called the Two-Choice Rule, a tip to try.")).ok).toBe(true);
@@ -753,5 +756,76 @@ describe("health accuracy, verified anchors, the scene pivot (review fixes)", ()
     s.scenes[6] = { ...s.scenes[6], on_screen: "Say: \"Walking feet\"" } as never;
     const r = val(s);
     expect(r.ok && [2, 4, 5, 6].map((i) => r.script.scenes[i].on_screen)).toEqual(["Here is the real reason", "1/3 · Get low", 'Say: "Show mama your truck"', 'Say: "Walking feet"']);
+  });
+});
+
+describe("global audience and plain lessons (owner, 2026-10-10)", () => {
+  const val = (raw: unknown, format: ReelFormat = PF) => validateReelScript(raw, 10, 1, "knitted", { format });
+  const withLine = (i: number, narration: string, over: Record<string, unknown> = {}) => {
+    const s = script(10, over);
+    s.scenes[i] = { ...s.scenes[i], narration };
+    return s;
+  };
+
+  it("the prompt speaks to moms around the world in simple English, with no Filipino guidance left", () => {
+    const { system, prompt } = reelScriptPrompt({ ...input10, theme: { id: "crayon", faces: true } });
+    expect(system).toMatch(/everyday family life anywhere \(home, bedtime, bath time, mealtime, the park, the store, drop-off, a family visit\)/);
+    expect(system).toMatch(/simple, warm English anyone understands/i);
+    expect(system).not.toMatch(/American English|US spelling|car seat|Thanksgiving|dollars/);
+    expect(system).toMatch(/SIMPLE GLOBAL ENGLISH \(CRITICAL\): never a Filipino or Tagalog word or Taglish/);
+    expect(system).toMatch(/Grandparents are Grandma and Grandpa/);
+    for (const x of [system, prompt]) expect(x).not.toMatch(/Filipino moms|lola wisdom|'anak' fiercely|the sala on|a jeepney at|OFW|local detail/);
+    expect(reelScriptPrompt(input10).prompt).toMatch(/'the living room on a rainy afternoon', 'the park at dusk'/);
+    expect(reelScriptPrompt(input10).prompt).not.toMatch(/jeepney|the sala/);
+  });
+
+  it("the prompt asks for plain, simple, practical lessons with good / bad examples", () => {
+    const { system } = reelScriptPrompt(input10);
+    expect(system).toMatch(/PLAIN, SIMPLE LESSONS \(CRITICAL\)/);
+    expect(system).toMatch(/gets it on the first listen/);
+    expect(system).toMatch(/5th-6th grade reading level/);
+    expect(system).toMatch(/one idea per line/);
+    expect(system).toMatch(/Child experts say naming the feeling helps kids calm down/);
+    expect(system).toMatch(/never name a technique, study, therapy/);
+    expect(system).toMatch(/affect labeling, Parent-Child Interaction Therapy, PCIT, serve and return, co-regulation, executive function, amygdala/);
+    expect(system).toMatch(/'the Two-Choice Rule'\) are fine/);
+    expect(system.match(/- Bad: /g)?.length).toBe(2);
+    expect(system.match(/ Good: /g)?.length).toBe(2);
+    expect(system).toMatch(/never deep or abstract/);
+  });
+
+  it("the vetted claims are in plain words: no technique, therapy or study names", async () => {
+    const { jargonWord } = await import("@/lib/ai/plain-words");
+    const anchorLine = reelScriptPrompt(input10).prompt.split("\n").find((l) => l.includes("ONE soft anchor"))!;
+    expect(anchorLine).toMatch(/Facts you may state: /);
+    expect(jargonWord(anchorLine.split("Facts you may state: ")[1])).toBeNull();
+  });
+
+  it("refuses a Filipino / Tagalog word in a line, the hook card, a label or the title, and retries", () => {
+    expect(val(withLine(5, "Your anak is tired, so go slow."))).toEqual({ ok: false, error: 'Line 6 uses a Filipino / Tagalog word ("anak"): write simple English anyone understands.' });
+    expect(val(withLine(5, "It works naman, every single night."))).toEqual({ ok: false, error: 'Line 6 uses a Filipino / Tagalog word ("naman"): write simple English anyone understands.' });
+    expect(val(script(10, { hook_text: "LOLA SAID… SCIENCE SAYS" }))).toEqual({ ok: false, error: 'The hook card uses a Filipino / Tagalog word ("LOLA"): write simple English anyone understands.' });
+    expect(val(script(10, { title: "Merienda time without the fight" }))).toEqual({ ok: false, error: 'The title uses a Filipino / Tagalog word ("Merienda"): write simple English anyone understands.' });
+    const s = script(10);
+    s.scenes[4] = { ...s.scenes[4], on_screen: "Say: \"Salamat, anak\"" } as never;
+    expect(val(s)).toEqual({ ok: false, error: 'Line 5\'s on-screen label uses a Filipino / Tagalog word ("Salamat"): write simple English anyone understands.' });
+    // English words are never mistaken for Tagalog ("ate" / "po" are not on the hard list)
+    expect(val(withLine(5, "She ate her peas, then asked for salad.")).ok).toBe(true);
+    expect(val(withLine(5, "Grandma meant well. Keep the cuddles.")).ok).toBe(true);
+  });
+
+  it("refuses jargon (techniques, therapies, brain words) anywhere; plain words and own tip names pass", () => {
+    expect(val(withLine(5, "Experts say affect labeling calms them down."))).toEqual({ ok: false, error: 'Line 6 uses expert jargon ("affect labeling"): say it in plain everyday words.' });
+    expect(val(withLine(5, "That builds executive function over time."))).toEqual({ ok: false, error: 'Line 6 uses expert jargon ("executive function"): say it in plain everyday words.' });
+    expect(val(withLine(5, "It comes from PCIT, a parenting program."))).toEqual({ ok: false, error: 'Line 6 uses expert jargon ("PCIT"): say it in plain everyday words.' });
+    expect(val(script(10, { hook_text: "SERVE AND RETURN, EXPLAINED" }))).toEqual({ ok: false, error: 'The hook card uses expert jargon ("SERVE AND RETURN"): say it in plain everyday words.' });
+    expect(val(withLine(5, "Child experts say naming the feeling helps kids calm.")).ok).toBe(true);
+    expect(val(withLine(5, "That's the Two-Choice Rule. Two options, every time.")).ok).toBe(true);
+  });
+
+  it("the writer retries a script with a Tagalog word (the action loop re-asks on any validation error)", async () => {
+    generateJson.mockResolvedValueOnce({ ok: true, data: (() => { const s = script(10); s.scenes[3] = { ...s.scenes[3], narration: 'Say "Ingat, anak" softly.' }; return s; })() });
+    const r = await writeReelScript(input10);
+    expect(r).toMatchObject({ ok: false, error: expect.stringMatching(/Filipino \/ Tagalog word/) });
   });
 });

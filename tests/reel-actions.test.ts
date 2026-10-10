@@ -677,7 +677,7 @@ describe("formats + topics + labels (014)", () => {
   });
 
   it("rewrite: the same format and the same bank topic; the labels are replaced", async () => {
-    const t = REEL_TOPICS.find((x) => x.id === "kulob-fever")!;
+    const t = REEL_TOPICS.find((x) => x.id === "sweat-out-fever")!;
     world({ themeId: "crayon", labels: true, reel: reelRow({ theme_id: "crayon", hook_text: "x", format: "lola_science", topic_id: t.id, topic: t.topic }) });
     writeMock.mockResolvedValueOnce(ok(script("Another Title")));
     expect(await A.rewriteReelScriptAction(REEL)).toEqual({ ok: true });

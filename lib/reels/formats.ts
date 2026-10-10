@@ -42,15 +42,17 @@ export const FORMAT_SPECS: Record<ReelFormat, FormatSpec> = {
       "CLOSE: one warm reframe line.",
     ],
   },
+  // Global audience (owner, 2026-10-10): the id stays "lola_science" (the reels.format check constraint); the format is
+  // "Grandma said, science says", with old wives' tales known in many countries.
   lola_science: {
-    id: "lola_science", label: "Lola said, science says", minQuotes: 2,
+    id: "lola_science", label: "Grandma said, science says", minQuotes: 2,
     beats: [
-      "MYTH HOOK (line 1): 'Lola said: [myth]. Here's what doctors say.' (or 'Keep it or let go? [tradition].')",
-      "WHY LOLA BELIEVED IT, in the second person (2-3 lines): where the belief came from and why it made sense back then; your lola wanted to protect you and your child ('Your lola wanted to keep your baby safe.'), never 'our lolas' or 'we all grew up with'. Never mock or ridicule lola.",
-      "THE PLAIN FACT: what is true now, with a soft source ('pediatricians', 'doctors now say').",
+      "MYTH HOOK (line 1): 'Grandma said [old saying]. Here's what doctors say.' (or 'Keep it or let go? [old saying].')",
+      "WHY GRANDMA BELIEVED IT, in the second person (2-3 lines): where the old saying came from and why it made sense back then; your grandma (or your mom) wanted to protect you and your child ('Your grandma wanted to keep your baby safe.'), never 'our grandmas' or 'we all grew up with'. Never mock or ridicule grandma.",
+      "THE PLAIN FACT: what is true now, in everyday words, with a soft source ('pediatricians', 'doctors now say').",
       "RE-HOOK into the practical part ('So what do you do tonight instead? This part matters most.'), in fresh words.",
       "DO THIS INSTEAD: 3-4 concrete comfort-and-care actions, each with a step marker, at least two of them with exact words or a step in quotes (medical claims only from the facts given).",
-      "THE SWEET PART TO KEEP: one line on what you keep from lola's way (the care, the cuddle, the ritual).",
+      "THE SWEET PART TO KEEP: one line on what you keep from grandma's way (the care, the cuddle, the ritual).",
       "SAFETY LINE: one generic line ('If you're worried, call your pediatrician.').",
       "VERDICT + CLOSE: 'Keep it or let go? This one: let go, gently.' (or 'keep the sweet part') and one warm line.",
     ],
@@ -59,7 +61,7 @@ export const FORMAT_SPECS: Record<ReelFormat, FormatSpec> = {
     id: "scene_lesson", label: "Scene, pivot, lesson", minQuotes: 2,
     beats: [
       "HOOK (line 1): second person, in the middle of the moment, and it NAMES the problem or the mistake, never reassurance like 'don't feel bad' ('Your toddler throws his shoe. You're late. Don't say \"Stop it.\"').",
-      "SCENE: 2-3 short lines (lines 2-4), present tense, one sensory detail and at most one local detail (lola's house, the jeep, the sala).",
+      "SCENE: 2-3 short lines (lines 2-4), present tense, one sensory detail and at most one everyday detail (the car seat, daycare pickup, the grocery store checkout).",
       "PIVOT (line 5 at the latest): 'Here's what's really happening.'",
       "WHY: the child's-eye reason (transitions are hard, a tired brain, a big feeling), in 2-3 lines.",
       "RE-HOOK into the fix ('So what do you say instead? This is the part that works.'), in fresh words.",
