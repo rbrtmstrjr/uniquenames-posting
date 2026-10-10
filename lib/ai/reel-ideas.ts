@@ -8,6 +8,7 @@ import {
 import type { GeminiSchema } from "./gemini";
 import { plainWordsProblem } from "./plain-words";
 import { aiJson } from "./provider";
+import { activePack } from "@/packs";
 import { CTA_RE, GREETING_RE, MECHANISM_RE, narratorFirstPerson, OUTRO_RE, REASSURE_RE } from "./reel-script";
 
 /** The owner waits on this with a spinner: Haiku (low effort) answers in about 5-15 seconds. */
@@ -83,20 +84,9 @@ const BANK_METHODS = new Set(REEL_TOPICS.flatMap((t) => methodNames(t.topic)));
 export const reusesBankMethod = (topic: string) => methodNames(topic).some((m) => BANK_METHODS.has(m));
 
 /** One plain line per format, for the AI to place a fresh idea. */
-const FORMAT_HINT: Record<ReelFormat, string> = {
-  named_method: "a catchy named method with 3-4 steps (\"The 2-Choice Rule\")",
-  say_this: "phrases to stop saying and what to say instead",
-  lola_science: "an old wives' tale or old rule known in many countries, and what doctors or experts say now",
-  scene_lesson: "a real everyday moment, what is really going on, and the words that help",
-  problem_fix: "one specific problem, the child's-eye reason, and simple fixes",
-};
+const FORMAT_HINT: Record<ReelFormat, string> = activePack().reels.formatHints;
 
-export const IDEAS_SYSTEM = [
-  "You suggest topic ideas for short narrated reels on a Facebook page for moms of babies and young kids, around the world (most are in the Philippines, others in the US, Africa, Australia and beyond). Each reel teaches ONE useful thing a busy mom can use tonight, with the exact words to say, spoken straight to her as 'you'.",
-  "SIMPLE GLOBAL ENGLISH: everyday words, about a 5th-6th grade level. Never a Filipino or Tagalog word or Taglish (no anak, lola, lolo, nanay, tatay, kuya, bunso, po, opo, salamat, naman, talaga, kasi, lang, merienda, sala, jeepney), nothing tied to one country (no holidays, store names, money amounts or local customs). Grandparents are Grandma and Grandpa.",
-  "NO JARGON: never name a technique, study, therapy or brain part (no co-regulation, self-regulation, executive function, amygdala, prefrontal cortex, cortisol, dopamine, attachment theory, nervous system, serve and return, affect labeling, Harvard). Your own catchy tip names ('the Two-Choice Rule') are fine.",
-  "AGES: newborns, babies, toddlers and children up to 5 only. Warm and practical, never fear, guilt or shame. No emojis, no hashtags.",
-].join("\n");
+export const IDEAS_SYSTEM = activePack().reels.ideasSystem;
 
 export interface IdeasPromptInput {
   /** The bank ideas to write hooks for (shown + backups). */

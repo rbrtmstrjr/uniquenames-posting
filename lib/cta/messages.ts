@@ -1,20 +1,15 @@
 import type { Gender } from "@/lib/db/types";
+import { sharedPack } from "@/packs/shared";
 
 // The closing "follow" card at the end of every post (migration 010). Its message rotates
 // (Meta penalises repetitive content): one per line in Settings, "/" = a line break on the
 // card, {gender} = boy or girl. The chosen text is stored on the card (cards.name).
 
-/** The column default of settings.cta_messages (supabase/migrations/010_cta_card.sql). Keep the two in sync. */
-export const CTA_MESSAGES_DEFAULT = [
-  "Follow for more / baby name ideas.",
-  "Follow us for a new / name list every day.",
-  "Still searching? Follow for / more unique names.",
-  "Save this post and follow / for more name ideas.",
-  "More {gender} names tomorrow. / Follow so you don't miss them.",
-  "Found a favorite? / Follow for more like it.",
-  "Follow for a fresh list / of unique {gender} names.",
-  "New names every day. / Follow along!",
-].join("\n");
+/**
+ * The active pack's messages, used when Settings has none. For unique-names they are the column default of
+ * settings.cta_messages (supabase/migrations/010_cta_card.sql): keep the two in sync.
+ */
+export const CTA_MESSAGES_DEFAULT = sharedPack().ctaMessages;
 
 export const CTA_MAX_LINES = 3;
 export const CTA_MESSAGE_MAX = 90;

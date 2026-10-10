@@ -2,6 +2,7 @@ import type { Gender, ThemeRow } from "@/lib/db/types";
 import { hashSeed, seededRandom } from "./random";
 import { isPropsOnly, sessionFor, shotSpec, type Session, type TextSpace } from "./shots";
 import type { SubjectAge } from "./age";
+import { activePack } from "@/packs";
 
 export type ThemePromptFields = Pick<ThemeRow, "backdrop" | "outfit" | "props" | "lighting" | "palette">;
 
@@ -12,26 +13,12 @@ export type ThemePromptFields = Pick<ThemeRow, "backdrop" | "outfit" | "props" |
  */
 export interface Subject { session: Session; look: string; age?: SubjectAge; varied?: boolean }
 
-// Looks written for the page's audience; one is picked per child and repeated word for word.
-export const LOOKS = [
-  "soft wispy dark hair, warm light-tan skin and big brown eyes",
-  "short fine black hair, fair skin and round chubby cheeks",
-  "a little tuft of dark brown hair, warm medium skin and dark eyes",
-  "soft light brown hair, fair rosy skin and bright eyes",
-  "thick soft black hair, warm tan skin and long eyelashes",
-  "very fine short hair, light skin and big curious eyes",
-];
-// The same six looks for children of 2 and up, whose hair has grown in (same index = same family look).
-// No "rosy": on older children the model paints it as round red blush spots.
-export const CHILD_LOOKS = [
-  "soft dark hair, warm light-tan skin and big brown eyes",
-  "straight black hair, fair skin and a sweet round face",
-  "dark brown hair, warm medium skin and dark eyes",
-  "light brown hair, fair skin with natural freckles and bright eyes",
-  "thick black hair, warm tan skin and long eyelashes",
-  "fine light brown hair, light skin and big curious eyes",
-];
-const NEWBORN_SHARE = 0.35;
+// The children's looks are the active niche pack's (packs/<id>/cards.ts): one is picked per child and repeated word for
+// word; CHILD_LOOKS are the same looks for children of 2 and up (same index = same family look).
+const CARDS = activePack().cards;
+export const LOOKS = CARDS.looks;
+export const CHILD_LOOKS = CARDS.childLooks;
+const NEWBORN_SHARE = CARDS.newbornShare;
 
 const looksFor = (age: SubjectAge) => (age === "newborn" || age === "1" ? LOOKS : CHILD_LOOKS);
 const lookAt = (age: SubjectAge, r: number) => { const l = looksFor(age); return l[Math.floor(r * l.length)]; };
@@ -168,14 +155,8 @@ export const CTA_SHOT_PREFIX = "closing card";
 export const isCtaShot = (shot: string) => shot.startsWith(`${CTA_SHOT_PREFIX}:`);
 
 // The child (or the sleeping newborn) and the props low in the frame, so the upper half stays
-// open backdrop for the follow message the worker stamps there. Same optics words as the wide
-// frames of the session.
-const CTA_MOMENT: Record<Session, string> = {
-  newborn: "the newborn sleeping peacefully, curled up in the main prop low in the frame, the small props arranged around",
-  sitter: "the baby crawling happily across the blanket toward the viewer beside the main prop, low in the frame",
-  toddler: "the toddler sitting on the blanket beside the main prop, low in the frame, smiling at the viewer",
-  kid: "the child sitting cross-legged on the blanket beside the main prop, low in the frame, smiling at the viewer",
-};
+// open backdrop for the follow message the worker stamps there (the pack's wording per session).
+const CTA_MOMENT: Record<Session, string> = CARDS.ctaMoment;
 const CTA_OPTICS = "eye level, wide shot, 35mm lens, f/2.0, soft background falloff";
 
 /** The stored shot of a closing card for a child of this session. */

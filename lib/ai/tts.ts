@@ -1,10 +1,11 @@
 import "server-only";
+import { activePack } from "@/packs";
 import { geminiHttpError } from "@/lib/ai/gemini";
 
 /** Newest GA Gemini TTS model (spike 2026-10-06); it answers with a complete WAV file. */
 export const TTS_MODEL = "gemini-3.8-flash-tts";
-/** The ~10 s reference clip Chatterbox clones each Gemini voice from (spec). */
-export const REF_TEXT = "Hello, mama. Every little moment with your baby matters. Let's take a deep breath, slow down, and enjoy it together.";
+/** The ~10 s reference clip Chatterbox clones each Gemini voice from (spec): the active pack's line. */
+export const REF_TEXT = activePack().reels.voiceRefText;
 const endpoint = (model: string) => `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
 
 const RETRY_DELAY_MS = 600;
