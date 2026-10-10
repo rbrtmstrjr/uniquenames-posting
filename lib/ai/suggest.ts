@@ -1,6 +1,7 @@
 import "server-only";
 import type { Gender, NameStyle } from "@/lib/db/types";
-import { generateJson, type GeminiSchema, type GenerateJsonResult } from "./gemini";
+import type { GeminiSchema, GenerateJsonResult } from "./gemini";
+import { aiJson } from "./provider";
 import { MEANING_MAX_WORDS, MEANING_MIN_WORDS, VIBE_MAX, filterLetterSuggestions, sampleForPrompt, type LetterCandidate, type LetterFilterResult, type NameSuggestion, type ThemeFields } from "./suggest-filter";
 
 /** The owner waits on this with a spinner; a long list can take Gemini a while. */
@@ -121,15 +122,15 @@ const arrayOf = <T>(key: string) => (raw: unknown): T[] | null => {
 
 /** Gemini's name ideas (unfiltered: run filterNameSuggestions on them). Never throws. */
 export function suggestNames(i: SuggestNamesInput): Promise<GenerateJsonResult<NameSuggestion[]>> {
-  return generateJson<NameSuggestion[]>({
-    system: NAMES_SYSTEM, prompt: namesPrompt(i), schema: NAMES_SCHEMA, temperature: 1, timeoutMs: SUGGEST_TIMEOUT_MS, parse: arrayOf<NameSuggestion>("names"),
+  return aiJson<NameSuggestion[]>({
+    task: "small", system: NAMES_SYSTEM, prompt: namesPrompt(i), schema: NAMES_SCHEMA, temperature: 1, timeoutMs: SUGGEST_TIMEOUT_MS, parse: arrayOf<NameSuggestion>("names"),
   });
 }
 
 /** Gemini's theme ideas (unfiltered: run filterThemeSuggestions on them). Never throws. */
 export function suggestThemes(i: SuggestThemesInput): Promise<GenerateJsonResult<ThemeFields[]>> {
-  return generateJson<ThemeFields[]>({
-    system: THEMES_SYSTEM, prompt: themesPrompt(i), schema: THEMES_SCHEMA, temperature: 1, timeoutMs: SUGGEST_TIMEOUT_MS, parse: arrayOf<ThemeFields>("themes"),
+  return aiJson<ThemeFields[]>({
+    task: "small", system: THEMES_SYSTEM, prompt: themesPrompt(i), schema: THEMES_SCHEMA, temperature: 1, timeoutMs: SUGGEST_TIMEOUT_MS, parse: arrayOf<ThemeFields>("themes"),
   });
 }
 
@@ -203,7 +204,8 @@ export function letterPrompt(i: SuggestLetterInput, rng?: () => number): string 
 
 /** Gemini's names for one letter (unfiltered). Never throws. */
 export function suggestLetterNames(i: SuggestLetterInput): Promise<GenerateJsonResult<LetterCandidate[]>> {
-  return generateJson<LetterCandidate[]>({
+  return aiJson<LetterCandidate[]>({
+    task: "small",
     // Low temperature + some thinking: real names and true meanings matter more than variety here.
     system: LETTER_SYSTEM, prompt: letterPrompt(i), schema: LETTER_SCHEMA, temperature: 0.4, thinkingBudget: 2048,
     timeoutMs: SUGGEST_TIMEOUT_MS, parse: arrayOf<LetterCandidate>("names"),
