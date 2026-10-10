@@ -3,6 +3,7 @@ import { hashSeed, seededRandom } from "./random";
 import { isPropsOnly, sessionFor, shotSpec, type Session, type TextSpace } from "./shots";
 import type { SubjectAge } from "./age";
 import { activePack } from "@/packs";
+import { NO_TEXT } from "./no-text";
 
 export type ThemePromptFields = Pick<ThemeRow, "backdrop" | "outfit" | "props" | "lighting" | "palette">;
 
@@ -38,10 +39,9 @@ export function pickSubject(key: string, age?: SubjectAge): Subject {
 /** Random age: one card's own child at the age it was dealt. */
 export const randomSubject = (age: SubjectAge, rng: () => number): Subject => ({ session: sessionFor(age), age, look: lookAt(age, rng()), varied: true });
 
-// Z-Image runs without a negative prompt (cfg 1): naming an unwanted object (a camera, a
-// stand, a paper roll) can summon it, so prompts only describe what should be there.
-// "No text" is the one exception and has proven safe.
-export const NO_TEXT = "No text, no letters, no words, no logo, no watermark anywhere.";
+// Z-Image runs without a negative prompt (cfg 1): prompts only describe what should be there; NO_TEXT (lib/planner/no-text)
+// is the one exception.
+export { NO_TEXT };
 
 const space = (where: TextSpace) => where === "top"
   ? "keep the upper third of the frame calm and empty: smooth, softly lit backdrop only"
