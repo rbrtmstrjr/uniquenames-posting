@@ -22,6 +22,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { AZ_LETTERS, letterOf } from "@/lib/series/az";
 
 import type { NamesFilter } from "@/lib/names/filter";
+import { nameDetail } from "@/lib/names/detail";
 
 const STATUS_TONE: Record<NameStatus, "ok" | "accent" | "muted" | "warn"> = { available: "ok", reserved: "accent", used: "muted", skip: "warn", pending: "accent" };
 const STATUS_TEXT: Record<NameStatus, string> = { available: "Available", reserved: "In a post", used: "Used", skip: "Skip", pending: "Pending" };
@@ -142,6 +143,7 @@ export function NamesTable({ names: serverNames, initial = {} }: { names: NameRo
               <div className="min-w-0 basis-full sm:basis-0 sm:flex-1">
                 <div className="break-words font-semibold text-ink">{n.name}</div>
                 <div className="break-words text-sm text-muted">{n.meaning}</div>
+                {nameDetail(n) && <div className="text-xs text-muted">{nameDetail(n)}</div>}
               </div>
               <Badge tone="muted">{n.gender === "boy" ? "Boy" : "Girl"} · {n.style}</Badge>
               <Badge tone={STATUS_TONE[n.status]}>{STATUS_TEXT[n.status]}</Badge>
