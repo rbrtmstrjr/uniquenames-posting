@@ -52,6 +52,15 @@ export const STYLE_GUIDE: Record<CaptionStyle, (g: Gender) => string> = activePa
 
 const t = (s: string) => s.replace(/\s+/g, " ").trim();
 
+/** " (origin: Latin; #3 in the US)" when a name has an origin or a US rank (Name Nest); "" otherwise (Unique Names). */
+function nameFacts(n: CaptionName): string {
+  const facts = [
+    n.origin && t(n.origin) ? `origin: ${t(n.origin)}` : "",
+    typeof n.usRank === "number" && n.usRank > 0 ? `#${n.usRank} in the US` : "",
+  ].filter(Boolean);
+  return facts.length ? ` (${facts.join("; ")})` : "";
+}
+
 export function captionPrompt(input: CaptionInput): string {
   const { theme, gender, style, captionStyle } = input;
   const lines = [
@@ -66,7 +75,7 @@ export function captionPrompt(input: CaptionInput): string {
   ];
   const names = (input.names ?? []).filter((n) => n.name.trim() && n.meaning.trim()).slice(0, NAMES_SHOWN);
   if (NAME_STYLES.includes(captionStyle) && names.length) {
-    lines.push("", "Names in this post with their real meanings (use only these, spelled exactly):", ...names.map((n) => `- ${t(n.name)}: ${t(n.meaning)}`));
+    lines.push("", "Names in this post with their real meanings (use only these, spelled exactly):", ...names.map((n) => `- ${t(n.name)}: ${t(n.meaning)}${nameFacts(n)}`));
   }
   if (input.series) {
     const { part } = input.series;

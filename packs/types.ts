@@ -1,4 +1,4 @@
-import type { Gender } from "@/lib/db/types";
+import type { CardLayout, Gender } from "@/lib/db/types";
 import type { Session, ShotSpec } from "@/lib/planner/shots";
 import type { CaptionStyle } from "@/lib/captions/styles";
 import type { ReelFormat } from "@/lib/reels/formats";
@@ -35,6 +35,8 @@ export interface PackBrand {
   /** Public paths of the app icon and the login backdrop photos (wide = landscape screens, tall = portrait phones). */
   assets: {
     icon: string;
+    /** The page's logo mark, an image without words (login card and sidebar, instead of the `mark` glyph); none = the glyph. */
+    logo?: string;
     login: { lightWide: string; lightTall: string; darkWide: string; darkTall: string };
     /** Shown while the login photo loads. */
     loginColor: { light: string; dark: string };
@@ -57,6 +59,8 @@ export interface PackShared {
   ctaMessages: string;
   /** The narrators offered (house voices, in order) and the default one. */
   voices: { house: readonly HouseVoice[]; default: string };
+  /** The card fonts (catalog ids) and the card layout a new project starts with (settings, migration 015). */
+  cardText: { titleFont: string; meaningFont: string; markFont: string; layout: CardLayout };
 }
 
 /** Name cards: the children's looks, the photoshoot shot lists and the closing card's moment. */
@@ -116,6 +120,8 @@ export interface PackReels {
   topics: ReelTopic[];
   /** What a new narrator voice says in its reference clip (Set up voices). */
   voiceRefText: string;
+  /** Red Thread's "stretched" thread: the distance stories it stands for (none = the engine's wording). */
+  threadDistance?: string;
 }
 
 export interface NichePack extends PackShared {

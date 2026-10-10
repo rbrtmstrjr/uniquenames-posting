@@ -76,7 +76,12 @@ export async function createPostAction(input: {
     });
     if (!plan.ok) return fail(plan.reason);
     const theme = themeRows.find((t) => t.id === plan.theme_id);
-    const postNames: CaptionName[] = plan.cards.map((c) => ({ name: c.name, meaning: c.meaning }));
+    // Name Nest (015): the name's origin and US rank go to the caption as facts; Unique Names has none (no change).
+    const rowById = new Map(((names ?? []) as NameRow[]).map((n) => [n.id, n]));
+    const postNames: CaptionName[] = plan.cards.map((c) => {
+      const row = c.name_id ? rowById.get(c.name_id) : undefined;
+      return row?.origin || row?.us_rank ? { name: c.name, meaning: c.meaning, origin: row.origin ?? null, usRank: row.us_rank ?? null } : { name: c.name, meaning: c.meaning };
+    });
     // One style per action: the previous post's style is never repeated, the least recently used preferred.
     captionStyle ??= pickStyle(h.styles, postNames);
     const aiOn = captionAiOn(s);

@@ -6,7 +6,8 @@
 export const CAPTION_STYLES = ["story", "spotlight", "question", "choice", "fact", "compliment"] as const;
 export type CaptionStyle = (typeof CAPTION_STYLES)[number];
 
-export interface CaptionName { name: string; meaning: string }
+/** origin / usRank (Name Nest, migration 015): the name's origin and US SSA rank, when known; given to the caption as facts. */
+export interface CaptionName { name: string; meaning: string; origin?: string | null; usRank?: number | null }
 
 export const isCaptionStyle = (s: unknown): s is CaptionStyle => (CAPTION_STYLES as readonly unknown[]).includes(s);
 

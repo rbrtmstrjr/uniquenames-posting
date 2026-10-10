@@ -13,5 +13,9 @@ export function settingsSeed(p: PackShared) {
     hashtag_pool: p.hashtags.pool,
     cta_messages: p.ctaMessages,
     reel_voice_id: p.voices.default,
+    title_font: p.cardText.titleFont,
+    meaning_font: p.cardText.meaningFont,
+    mark_font: p.cardText.markFont,
+    card_layout: p.cardText.layout,
   };
 }

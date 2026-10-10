@@ -24,7 +24,10 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
       <div className="relative w-full max-w-sm animate-pop">
         <div className="rounded-[28px] border border-white/50 bg-surface/80 p-6 shadow-[0_24px_60px_-20px_rgba(60,35,15,.45)] backdrop-blur-xl sm:p-7 dark:border-white/10 dark:bg-surface/75">
           <div className="mb-6 text-center">
-            <div className="mx-auto grid size-12 place-items-center rounded-2xl bg-accent-soft font-display text-2xl italic text-accent" aria-hidden>{b.mark}</div>
+            {b.assets.logo
+              // eslint-disable-next-line @next/next/no-img-element -- a tiny static SVG from public/
+              ? <img src={b.assets.logo} alt="" aria-hidden className="mx-auto h-16 w-auto" />
+              : <div className="mx-auto grid size-12 place-items-center rounded-2xl bg-accent-soft font-display text-2xl italic text-accent" aria-hidden>{b.mark}</div>}
             <h1 className="mt-3 font-display text-3xl text-ink">{b.name}</h1>
             <p className="mt-1 text-sm text-muted">{b.loginTagline}</p>
           </div>
