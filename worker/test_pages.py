@@ -82,10 +82,16 @@ class DiscoveryTest(unittest.TestCase):
         self.assertEqual([(p.id, p.url) for p in found], [("unique-names", "https://other.supabase.co")])
         self.assertEqual(found[0].cache_dir, os.path.join(self.here, "cache"))  # unique-names keeps the old cache
 
-    def test_page_file_with_the_same_project_covers_worker_env(self):
+    def test_page_file_pointing_at_worker_env_project_never_takes_it_over(self):
+        # A pages file aimed at the live (worker.env) project under another id must not rename the live page
+        # (its ComfyUI namespace, cache / backup index and output folder would change): worker.env keeps it.
         self.pages_file("main.env", "PAGE_ID=main\nSUPABASE_URL=https://UN.supabase.co/\nSUPABASE_SERVICE_ROLE_KEY=k2\n")
-        found, _ = pages.discover_pages(self.here, dict(BASE))
-        self.assertEqual([p.id for p in found], ["main"])                      # never two loops on one project
+        found, problems = pages.discover_pages(self.here, dict(BASE))
+        self.assertEqual([p.id for p in found], ["unique-names"])              # never two loops on one project
+        self.assertEqual(found[0].cache_dir, os.path.join(self.here, "cache"))
+        self.assertEqual(len(problems), 1)
+        self.assertIn("pages/main.env skipped", problems[0].replace("\\", "/"))
+        self.assertIn("worker.env", problems[0])
 
     def test_worker_env_without_keys_but_page_files(self):
         self.pages_file("name-nest.env", NEST)

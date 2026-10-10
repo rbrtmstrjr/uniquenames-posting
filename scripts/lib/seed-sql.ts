@@ -16,6 +16,18 @@ export function seedSql(o: { pack: string; settings: Record<string, string>; the
     ...(o.note ? [`-- ${o.note}`] : []),
     "begin;",
     "",
+    ...(o.settings.handle
+      ? [
+          "-- Guard: never seed a database that already holds another page's work (e.g. the live Unique Names project).",
+          "do $$ begin",
+          `  if (exists (select 1 from public.names) or exists (select 1 from public.posts))`,
+          `     and not exists (select 1 from public.settings where id = 1 and handle = ${lit(o.settings.handle)}) then`,
+          `    raise exception 'STOP: this database already has names or posts and is not ${o.pack}. Run this seed only in the new ${o.pack} project.';`,
+          "  end if;",
+          "end $$;",
+          "",
+        ]
+      : []),
     "-- settings: the page's handle, caption template, hashtags, closing-card messages, narrator, card fonts and layout",
     `update public.settings set ${Object.entries(o.settings).map(([k, v]) => `${k} = ${lit(v)}`).join(", ")}, updated_at = now() where id = 1;`,
     "",

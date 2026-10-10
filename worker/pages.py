@@ -94,7 +94,13 @@ def discover_pages(here, base_cfg):
         if not PAGE_ID.match(base_id):
             problems.append("worker.env: PAGE_ID %r is not valid, using %s" % (base_id, DEFAULT_PAGE))
             base_id = DEFAULT_PAGE
-        covered = any(p.id == base_id or _same_project(p.url, base_cfg["SUPABASE_URL"]) for p in found)
+        # A pages file aimed at worker.env's project under another id must never take the live page over (its
+        # ComfyUI namespace, cache / backup index and output folder would change): worker.env keeps that project.
+        for p in [p for p in found if p.id != base_id and _same_project(p.url, base_cfg["SUPABASE_URL"])]:
+            found.remove(p)
+            problems.append("%s skipped: its SUPABASE_URL is worker.env's project, which stays page %s (worker.env)"
+                            % (p.source, base_id))
+        covered = any(p.id == base_id for p in found)
         if not covered:
             found.insert(0, _page(base_cfg, base_id, here, "worker.env"))
     return found, problems

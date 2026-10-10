@@ -97,6 +97,16 @@ describe("the seed SQL for the new project", () => {
       .toEqual({ gender: "girl", us_rank: olivia.us_rank, us_year: ssa.year, has_origin: true });
   });
 
+  it("refuses to run on a database that already has names or posts and is not this page (e.g. live Unique Names)", async () => {
+    const db = await freshDb();
+    await db.exec(`insert into names (name, meaning, gender, style) values ('Amara', 'grace', 'girl', 'single')`);
+    const sql = read("supabase", "seed", "name-nest.sql");
+    await expect(db.exec(sql)).rejects.toThrow(/STOP/);
+    await db.exec("rollback");   // the SQL editor rolls the failed transaction back by itself
+    expect(await one(db, `select handle from settings`)).toEqual({ handle: "@unique_names" });   // nothing changed
+    expect(await one(db, `select count(*)::int n from themes`)).toEqual({ n: 0 });
+  });
+
   it("escapes quotes, backslashes and line breaks", async () => {
     const db = await freshDb();
     await db.exec(seedSql({ pack: "Test", settings: { caption_template: "it's a {gender}\\n" }, themes: [], names: [] }).replace("values\n\non conflict", "values ('x','boy','b','o','p','l','c',1) on conflict"));

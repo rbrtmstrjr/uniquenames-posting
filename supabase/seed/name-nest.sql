@@ -2,6 +2,14 @@
 -- Names: SSA 2025, top 500 girl + top 500 boy names (public domain); 945 with an AI meaning + origin, 55 still without one (left out).
 begin;
 
+-- Guard: never seed a database that already holds another page's work (e.g. the live Unique Names project).
+do $$ begin
+  if (exists (select 1 from public.names) or exists (select 1 from public.posts))
+     and not exists (select 1 from public.settings where id = 1 and handle = E'@namenest') then
+    raise exception 'STOP: this database already has names or posts and is not Name Nest. Run this seed only in the new Name Nest project.';
+  end if;
+end $$;
+
 -- settings: the page's handle, caption template, hashtags, closing-card messages, narrator, card fonts and layout
 update public.settings set caption_template = E'Sweet baby {gender} names for your short list. 🍓', handle = E'@namenest', hashtags_always = E'#namenest', hashtag_pool = E'#babynameideas #babynamesearch #namemeaning #girlnames #boynames #momtobe #expectingmom #firsttimemom #newmom #momlife #parentingtips #toddlermom', cta_messages = E'Still making your list? / Follow along for more.\nFollow Name Nest / for names with meaning.\nYour short list starts here. / Follow for more picks.\nFresh {gender} names / land in the nest tomorrow.\nFound the one? / Follow for more sweet picks.\nNames, meanings and mom tips. / Follow the nest.\nPull up a chair, mama. / Follow for daily name ideas.\nMore {gender} names are on the way. / Follow so you catch them.', reel_voice_id = E'sulafat', title_font = E'dmserif', meaning_font = E'nunito', mark_font = E'nunito', card_layout = E'name-nest', updated_at = now() where id = 1;
 
