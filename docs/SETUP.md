@@ -128,6 +128,14 @@ Reels are now short, useful lessons (30–45 s) instead of slow stories. Each ne
 4. Review page: each reel shows its format; the key lines carry a short on-screen label (like `1/3 · "You're mad. Tower fell down."`) that you can edit or clear. **Settings > Reels > On-screen step labels** turns them off for every reel.
 5. Voice samples were recorded at the old speed, so **Settings > Narrator & music** may show them as out of date: press **Make samples** to record them again.
 
+## Use Claude instead of Gemini (optional)
+Reel scripts, captions and the name/theme/letter suggestions can be written by Anthropic Claude instead of Gemini. Voices (TTS) and pictures stay as they are, so `GEMINI_API_KEY` is still needed for **Set up voices** and narration.
+1. Create a key at https://platform.claude.com (Settings > API keys) and add prepaid credits (Billing).
+2. `.env.local` on your PC: add `ANTHROPIC_API_KEY=...` and `AI_PROVIDER=claude`. Optional: `AI_SCRIPT_MODEL=sonnet` for reel scripts on Claude Sonnet 5.5 (stronger, about 20× the price); the default is Claude Haiku 5.5. Captions and suggestions always use Haiku.
+3. Vercel > Settings > Environment Variables: add `ANTHROPIC_API_KEY` (tick **Sensitive**, Production and Preview), `AI_PROVIDER` = `claude` and, if you want it, `AI_SCRIPT_MODEL` = `sonnet`. Redeploy.
+
+`ANTHROPIC_API_KEY` is a server-only secret like the Gemini key: never name it `NEXT_PUBLIC_...`. To go back to Gemini, remove `AI_PROVIDER` (or set it to `gemini`) and redeploy. When the Claude balance is empty, the AI buttons say "Your Claude credits have run out".
+
 ## When something is wrong
 - Header dot red, "PC offline": turn on the PC. The worker starts at login. **Generate** is disabled (the button says why) until the PC is back.
 - Amber dot, "ComfyUI closed": open ComfyUI Desktop. **Generate** stays disabled until then; text edits and Re-stamp still work.
