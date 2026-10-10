@@ -137,6 +137,7 @@ afterEach(() => vi.useRealTimers());
 describe("every action: owner first, then the id", () => {
   const calls: [string, () => Promise<unknown>][] = [
     ["write", () => A.writeReelScriptAction({})],
+    ["suggest topics", () => A.suggestReelTopicsAction()],
     ["rewrite", () => A.rewriteReelScriptAction(REEL)],
     ["save", () => A.saveReelScriptAction(REEL, { title: "T", lines: [] })],
     ["approve", () => A.approveReelAction(REEL)],
@@ -732,6 +733,82 @@ describe("formats + topics + labels (014)", () => {
       expect(await A.saveReelScriptAction(REEL, { title: "Old Title", lines: [{ id: S2, narration: "narration 2", idea: "idea 2", on_screen: "" }] })).toEqual({ ok: true });
       expect(fake.queries.filter((q) => q.table === "reel_scenes" && isUpdate(q))).toHaveLength(0);
     });
+  });
+});
+
+describe("Suggest topics: the ideas and the picked card", () => {
+  const ROW = { title: "Old Title", stage: "toddler" };
+  const fresh = (o: Record<string, unknown> = {}) => ({ topic: "Your toddler bites at daycare: what to say right away", format: "problem_fix", hook: "Your toddler bites at daycare? Here's what to say.", why: "Two calm steps that help biting stop", health: false, ...o });
+
+  it("5 ideas from one AI call: bank ideas not used lately (the rotated format first) + 2 fresh; nothing is written", async () => {
+    const recent = REEL_TOPICS.slice(0, 3);
+    world({ themeId: "crayon", labels: true, made: recent.map((t, i) => ({ ...ROW, title: `Reel ${i}`, format: i === 0 ? "named_method" : null, topic_id: t.id, topic: t.topic })) });
+    generateJson.mockResolvedValueOnce({ ok: true, data: { bank: [], fresh: [fresh(), fresh({ topic: "The Goodbye Hug Rule for drop-off tears", format: "named_method", hook: "Drop-off tears every morning? Try the Goodbye Hug Rule." })] } });
+    const r = await A.suggestReelTopicsAction();
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(generateJson).toHaveBeenCalledTimes(1);
+    expect(generateJson.mock.calls[0][0].prompt).toContain("- Reel 0");
+    expect(r.ideas).toHaveLength(5);
+    expect(r.ideas.map((i) => i.source)).toEqual(["bank", "fresh", "bank", "fresh", "bank"]);
+    expect(r.ideas[0].format).toBe("say_this");
+    for (const i of r.ideas) if (i.topicId) expect(recent.map((t) => t.id)).not.toContain(i.topicId);
+    expect(qs("reels", "insert")).toHaveLength(0);
+    expect(writeMock).not.toHaveBeenCalled();
+  });
+
+  it("More ideas: shown topics are excluded and sent to the AI; a failed AI still gives 5 bank ideas", async () => {
+    const shown = REEL_TOPICS.slice(10, 40).map((t) => t.topic);
+    generateJson.mockResolvedValueOnce({ ok: false, error: "Claude timed out." });
+    const r = await A.suggestReelTopicsAction({ exclude: shown });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.ideas).toHaveLength(5);
+    for (const i of r.ideas) { expect(i.source).toBe("bank"); expect(shown).not.toContain(i.topic); }
+    expect(generateJson.mock.calls[0][0].prompt).toContain(`- ${shown[0]}`);
+  });
+
+  it("a bad exclude list is refused before any AI call", async () => {
+    expect((await A.suggestReelTopicsAction({ exclude: "x" as unknown as string[] })).ok).toBe(false);
+    expect((await A.suggestReelTopicsAction({ exclude: [1 as unknown as string] })).ok).toBe(false);
+    expect(generateJson).not.toHaveBeenCalled();
+  });
+
+  it("write a picked bank card: THAT format (not the rotation), the bank's vetted facts, the hook as a suggested line 1", async () => {
+    const t = REEL_TOPICS.find((x) => x.id === "sweat-out-fever")!;
+    world({ themeId: "crayon", labels: true, made: [{ ...ROW, format: "lola_science" }] });
+    writeMock.mockResolvedValueOnce(ok(script()));
+    const hook = "Your grandma said sweat out a fever. Doctors disagree.";
+    expect(await A.writeReelScriptAction({ topic: t.topic, topicId: t.id, format: "lola_science", hook })).toEqual({ ok: true, reelId: NEW });
+    expect(writeMock.mock.calls[0][0]).toMatchObject({ topic: t.topic, format: "lola_science", topicHealth: true, topicFacts: t.facts, topicSafety: t.safety, hookHint: hook });
+    expect(rowsOf(qs("reels", "insert")[0])).toMatchObject({ topic: t.topic, topic_id: t.id, format: "lola_science" });
+  });
+
+  it("write a picked fresh card: its format and health flag; no topic id", async () => {
+    world({ themeId: "crayon", labels: true, made: [{ ...ROW, format: "named_method" }] });
+    writeMock.mockResolvedValueOnce(ok(script()));
+    await A.writeReelScriptAction({ topic: "Sleepy but wired at 7 p.m.: the wind-down walk", format: "scene_lesson", hook: "Wired at bedtime? Try the wind-down walk.", health: true });
+    expect(writeMock.mock.calls[0][0]).toMatchObject({ format: "scene_lesson", topicHealth: true, hookHint: "Wired at bedtime? Try the wind-down walk." });
+    expect(writeMock.mock.calls[0][0].topicFacts).toBeUndefined();
+    expect(rowsOf(qs("reels", "insert")[0])).toMatchObject({ topic_id: null, format: "scene_lesson" });
+  });
+
+  it("a bank id whose topic was edited is dropped (typed topic in the card's format); a typed topic alone keeps the rotation and no hook", async () => {
+    const t = REEL_TOPICS.find((x) => x.id === "two-choice-rule")!;
+    world({ themeId: "crayon", labels: true, made: [{ ...ROW, format: "named_method" }] });
+    writeMock.mockResolvedValue(ok(script()));
+    await A.writeReelScriptAction({ topic: "Two choices at bath time", topicId: t.id, format: "named_method" });
+    expect(writeMock.mock.calls[0][0]).toMatchObject({ topic: "Two choices at bath time", format: "named_method" });
+    expect(rowsOf(qs("reels", "insert")[0])).toMatchObject({ topic_id: null });
+    world({ themeId: "crayon", labels: true, made: [{ ...ROW, format: "named_method" }] });
+    await A.writeReelScriptAction({ topic: "Two choices at bath time" });
+    expect(writeMock.mock.calls[1][0].format).toBe("say_this");
+    expect(writeMock.mock.calls[1][0].hookHint).toBeUndefined();
+  });
+
+  it("an unknown format is refused before the AI", async () => {
+    expect(await A.writeReelScriptAction({ topic: "x", format: "storytime" })).toEqual({ ok: false, error: expect.stringMatching(/format/) });
+    expect(writeMock).not.toHaveBeenCalled();
   });
 });
 

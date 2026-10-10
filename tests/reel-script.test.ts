@@ -45,6 +45,13 @@ const input10 = { maxScenes: 10, alreadyMade: [], theme: KNITTED, format: PF };
 const input30 = { maxScenes: 30, alreadyMade: [], theme: KNITTED, format: PF };
 
 describe("reelScriptPrompt", () => {
+  it("a picked topic card's hook is suggested as line 1 (never without a topic)", () => {
+    const { prompt } = reelScriptPrompt({ topic: "The 2-Choice Rule", maxScenes: 40, alreadyMade: [], format: "named_method", hookHint: 'Stop the fight: try "red cup or blue cup?"' });
+    expect(prompt).toContain(`Suggested hook: "Stop the fight: try 'red cup or blue cup?'". Open with this hook or a stronger version of it`);
+    expect(reelScriptPrompt({ topic: "The 2-Choice Rule", maxScenes: 40, alreadyMade: [], format: "named_method" }).prompt).not.toContain("Suggested hook");
+    expect(reelScriptPrompt({ maxScenes: 40, alreadyMade: [], format: "named_method", hookHint: "x y z" }).prompt).not.toContain("Suggested hook");
+  });
+
   it("carries the topic, the format and the line range", () => {
     const { system, prompt } = reelScriptPrompt({ topic: "teething at night", maxScenes: 32, alreadyMade: [], format: PF });
     expect(prompt).toContain("Topic: teething at night");
