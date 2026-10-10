@@ -15,7 +15,7 @@ import { createClient } from "@/lib/supabase/client";
 import { useRealtimeRows } from "@/lib/realtime/use-table";
 import { useSignedUrls } from "@/lib/realtime/signed-urls";
 import {
-  BUILTIN, byVoiceOrder, isStale, needsRef, needsSample, roundSpeed, SAMPLE_LABEL, sampleKey, speedLabel,
+  byVoiceOrder, houseVoices, isStale, needsRef, needsSample, roundSpeed, SAMPLE_LABEL, sampleKey, speedLabel,
   SPEED_MAX, SPEED_MIN, SPEED_STEP, VOLUME_MAX, VOLUME_MIN,
 } from "@/lib/reels/voices";
 import { cn } from "@/lib/utils/cn";
@@ -28,6 +28,7 @@ const SETUP_MAX_CALLS = 12;
 /**
  * Settings → Narrator & music. Before migration 006 (`voices` or `value` missing) it only explains
  * the database update. The voice rows stay live (realtime), so samples appear as the PC makes them.
+ * Only the 4 house voices are shown (worker 2.6.0); the other rows stay in the database, hidden.
  */
 export function NarratorMusic({ voices, value, savedSpeed, onChange }: {
   voices: ReelVoiceRow[] | null; value: NarratorValue | null; savedSpeed: number; onChange: (p: Partial<NarratorValue>) => void;
@@ -50,15 +51,15 @@ function NarratorMusicReady({ initial, value, savedSpeed, onChange }: {
     const { data, error } = await createClient().from("reel_voices").select("*");
     return error ? null : ((data ?? []) as ReelVoiceRow[]);
   }, []);
-  const [voices] = useRealtimeRows<ReelVoiceRow>("reel_voices", initial, { key: "settings-voices", sort: byVoiceOrder, refetch });
+  const [rows] = useRealtimeRows<ReelVoiceRow>("reel_voices", initial, { key: "settings-voices", sort: byVoiceOrder, refetch });
+  const voices = useMemo(() => houseVoices(rows), [rows]);
   const signed = useSignedUrls(voices.map((v) => (v.sample_status === "ready" ? v.sample_path : null)), "reels");
   const { playing, toggle } = useSamplePlayer();
   const [busy, setBusy] = useState<null | "setup" | "samples">(null);
   const [confirm, setConfirm] = useState(false);
 
   const key = sampleKey(savedSpeed);
-  const gemini = voices.filter((v) => v.id !== BUILTIN);
-  const missingRefs = gemini.filter(needsRef).length;
+  const missingRefs = voices.filter(needsRef).length;
   const toSample = voices.filter((v) => needsSample(v, key)).length;
   const stale = voices.filter((v) => isStale(v, key)).length;
   const ready = voices.filter((v) => v.sample_status === "ready").length;
@@ -95,7 +96,7 @@ function NarratorMusicReady({ initial, value, savedSpeed, onChange }: {
           </div>
           <Slider aria-label="Narration speed" min={SPEED_MIN} max={SPEED_MAX} step={SPEED_STEP} value={[value.reel_speed]}
             onValueChange={([v]) => onChange({ reel_speed: roundSpeed(v) })} className="mt-1" />
-          <p className="mt-1.5 text-xs text-muted">Faster keeps the pitch. Scripts get a few more words so a reel stays 1:30–2:00.</p>
+          <p className="mt-1.5 text-xs text-muted">Faster keeps the pitch. Scripts get a few more words so a reel stays 1:00–1:30. 1.00× is the natural pace.</p>
         </div>
         <div>
           <div className="flex items-center justify-between gap-2">
@@ -117,11 +118,11 @@ function NarratorMusicReady({ initial, value, savedSpeed, onChange }: {
           <div className="min-w-0">
             <h3 className="text-sm font-semibold text-ink">Default narrator{current ? <span className="font-normal text-muted"> · {current.label}</span> : null}</h3>
             <p className="text-xs text-muted" data-testid="voice-summary">
-              {ready} of {voices.length} samples ready{making ? ` · ${making} being made` : ""}{stale ? ` · ${stale} made at another speed` : ""}.
+              {ready} of {voices.length} samples ready{making ? ` · ${making} being made` : ""}{stale ? ` · ${stale} made with older settings` : ""}.
               {" "}Each reel can use another voice on its review page.
             </p>
           </div>
-          {toSample > 0 && missingRefs < gemini.length && (
+          {toSample > 0 && missingRefs < voices.length && (
             <Button variant="subtle" size="sm" loading={busy === "samples"} disabled={!!busy || speedDirty} onClick={() => void makeSamples()}>
               {busy !== "samples" && <Wand2 className="size-4" aria-hidden />} Make samples ({toSample})
             </Button>
@@ -133,8 +134,8 @@ function NarratorMusicReady({ initial, value, savedSpeed, onChange }: {
           <div className="mb-3 flex flex-col gap-3 rounded-xl border border-accent/30 bg-accent-soft/50 p-3 sm:flex-row sm:items-center">
             <p className="min-w-0 flex-1 text-sm text-ink">
               {busy === "setup"
-                ? <span role="status">Making reference clips… <span className="font-semibold tabular-nums">{gemini.length - missingRefs} of {gemini.length}</span></span>
-                : <>{missingRefs === gemini.length ? "One-time setup:" : `${missingRefs} voices still need setup:`} Gemini records a short clip of each voice, then your PC copies it for reels.</>}
+                ? <span role="status">Making reference clips… <span className="font-semibold tabular-nums">{voices.length - missingRefs} of {voices.length}</span></span>
+                : <>{missingRefs === voices.length ? "One-time setup:" : `${missingRefs} voices still need setup:`} Gemini records a short clip of each voice, then your PC copies it for reels.</>}
             </p>
             <Button size="sm" loading={busy === "setup"} disabled={!!busy} onClick={() => setConfirm(true)}>
               {busy !== "setup" && <Sparkles className="size-4" aria-hidden />} Set up voices
@@ -146,7 +147,7 @@ function NarratorMusicReady({ initial, value, savedSpeed, onChange }: {
           {voices.map((v) => {
             const selected = v.id === value.reel_voice_id;
             const off = needsRef(v);
-            const s = isStale(v, key) ? { label: "Old speed", tone: "muted" as const } : SAMPLE_LABEL[v.sample_status];
+            const s = isStale(v, key) ? { label: "Old sample", tone: "muted" as const } : SAMPLE_LABEL[v.sample_status];
             const url = v.sample_status === "ready" ? signed(v.sample_path) : undefined;
             return (
               <div key={v.id} data-testid={`voice-${v.id}`}
@@ -158,9 +159,9 @@ function NarratorMusicReady({ initial, value, savedSpeed, onChange }: {
                     {selected && <Check className="size-3.5 shrink-0 text-accent" aria-hidden />}
                     <span className="truncate text-sm font-semibold text-ink">{v.label}</span>
                   </span>
-                  <span className="w-full truncate text-xs text-muted">{v.id === BUILTIN ? "Chatterbox" : v.tone}</span>
+                  <span className="w-full truncate text-xs text-muted">{v.tone}</span>
                   {off ? <Badge className="mt-1 whitespace-nowrap px-1.5 py-0 text-[11px]">Not set up</Badge>
-                    : v.sample_status !== "ready" || s.label === "Old speed"
+                    : v.sample_status !== "ready" || s.label === "Old sample"
                       ? <Badge tone={s.tone} pulse={v.sample_status === "making"} className="mt-1 whitespace-nowrap px-1.5 py-0 text-[11px]">{s.label}</Badge>
                       : null}
                   {v.sample_status === "failed" && v.error && <span className="sr-only">Sample failed: {v.error}</span>}
@@ -170,7 +171,7 @@ function NarratorMusicReady({ initial, value, savedSpeed, onChange }: {
             );
           })}
         </div>
-        <p className="mt-2 flex items-center gap-1.5 text-xs text-muted"><Mic className="size-3.5" aria-hidden /> Samples are made by your PC with the reel voice, at the saved speed.</p>
+        <p className="mt-2 flex items-center gap-1.5 text-xs text-muted"><Mic className="size-3.5" aria-hidden /> Samples are made by your PC in the reel style (line by line, natural pauses), at the saved speed.</p>
       </div>
 
       <Dialog open={confirm} onOpenChange={setConfirm} title="Set up the voices?"

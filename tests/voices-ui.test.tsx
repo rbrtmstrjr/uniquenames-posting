@@ -54,38 +54,40 @@ describe("NarratorMusic (Settings)", () => {
     expect(screen.queryByRole("slider")).toBeNull();
   });
 
-  it("voice grid: label, tone, status badges, the default checked; picking another changes the default", () => {
+  it("voice grid: only the 4 house voices (Gacrux first), tone, status badges, the default checked; picking another changes the default", () => {
     const onChange = vi.fn();
-    const voices = [voice("builtin"), readyVoice("gacrux", { tone: "Mature" }), voice("kore", { sample_status: "queued" }),
-      voice("puck", { sample_status: "making" }), voice("zephyr", { sample_status: "failed", error: "boom" }), readyVoice("leda", { sample_key: sampleKey(1) })];
+    const voices = [voice("builtin"), readyVoice("achernar", { sample_key: sampleKey(1) }), voice("kore", { sample_status: "queued" }),
+      voice("vindemiatrix", { sample_status: "failed", error: "boom" }), readyVoice("gacrux", { tone: "Mature" }),
+      voice("sulafat", { sample_status: "making" }), readyVoice("leda")];
     render(<NarratorMusic voices={voices} value={value} savedSpeed={1.12} onChange={onChange} />);
     const group = screen.getByRole("radiogroup", { name: "Default narrator" });
     const radios = within(group).getAllByRole("radio");
-    expect(radios).toHaveLength(6);
+    expect(radios.map((r) => r.textContent)).toEqual([
+      expect.stringMatching(/^Gacrux/), expect.stringMatching(/^Sulafat/), expect.stringMatching(/^Vindemiatrix/), expect.stringMatching(/^Achernar/),
+    ]);
+    for (const hidden of ["builtin", "kore", "leda"]) expect(screen.queryByTestId(`voice-${hidden}`)).toBeNull();
     expect(within(group).getByRole("radio", { name: /Gacrux/ }).getAttribute("aria-checked")).toBe("true");
     expect(within(screen.getByTestId("voice-gacrux")).getByText("Mature")).toBeTruthy();
-    expect(within(screen.getByTestId("voice-builtin")).getByText("No sample")).toBeTruthy();
-    expect(within(screen.getByTestId("voice-kore")).getByText("In line")).toBeTruthy();
-    expect(within(screen.getByTestId("voice-puck")).getByText("Making…")).toBeTruthy();
-    expect(within(screen.getByTestId("voice-zephyr")).getByText("Failed")).toBeTruthy();
-    expect(within(screen.getByTestId("voice-leda")).getByText("Old speed")).toBeTruthy();
-    fireEvent.click(within(group).getByRole("radio", { name: /Kore/ }));
-    expect(onChange).toHaveBeenCalledWith({ reel_voice_id: "kore" });
-    expect(screen.getByTestId("voice-summary").textContent).toMatch(/2 of 6 samples ready · 2 being made · 1 made at another speed/);
+    expect(within(screen.getByTestId("voice-sulafat")).getByText("Making…")).toBeTruthy();
+    expect(within(screen.getByTestId("voice-vindemiatrix")).getByText("Failed")).toBeTruthy();
+    expect(within(screen.getByTestId("voice-achernar")).getByText("Old sample")).toBeTruthy();
+    fireEvent.click(within(group).getByRole("radio", { name: /Sulafat/ }));
+    expect(onChange).toHaveBeenCalledWith({ reel_voice_id: "sulafat" });
+    expect(screen.getByTestId("voice-summary").textContent).toMatch(/2 of 4 samples ready · 1 being made · 1 made with older settings/);
   });
 
   it("▶ plays a ready sample through its signed URL (one at a time); no sample = disabled", async () => {
-    render(<NarratorMusic voices={[readyVoice("gacrux"), readyVoice("kore"), voice("puck")]} value={value} savedSpeed={1.12} onChange={() => {}} />);
-    expect((screen.getByRole("button", { name: "Play Puck sample" }) as HTMLButtonElement).disabled).toBe(true);
+    render(<NarratorMusic voices={[readyVoice("gacrux"), readyVoice("sulafat"), voice("achernar")]} value={value} savedSpeed={1.12} onChange={() => {}} />);
+    expect((screen.getByRole("button", { name: "Play Achernar sample" }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(screen.getByRole("button", { name: "Play Gacrux sample" }));
     expect(play).toHaveBeenCalledTimes(1);
     expect(screen.getByRole("button", { name: "Stop Gacrux sample" }).getAttribute("aria-pressed")).toBe("true");
-    fireEvent.click(screen.getByRole("button", { name: "Play Kore sample" }));
+    fireEvent.click(screen.getByRole("button", { name: "Play Sulafat sample" }));
     expect(play).toHaveBeenCalledTimes(2);
     expect(screen.getByRole("button", { name: "Play Gacrux sample" })).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Stop Kore sample" }));
+    fireEvent.click(screen.getByRole("button", { name: "Stop Sulafat sample" }));
     expect(pause).toHaveBeenCalled();
-    expect(screen.getByRole("button", { name: "Play Kore sample" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Play Sulafat sample" })).toBeTruthy();
   });
 
   it("an interrupted play() (AbortError) is not an error; a real failure is", async () => {
@@ -121,10 +123,10 @@ describe("NarratorMusic (Settings)", () => {
     voiceActions.setUpVoicesAction
       .mockResolvedValueOnce({ ok: true, made: 1, skipped: 0, remaining: 1, failed: 0 })
       .mockResolvedValueOnce({ ok: true, made: 1, skipped: 1, remaining: 0, failed: 0 });
-    render(<NarratorMusic voices={[voice("builtin"), voice("gacrux", { ref_path: null }), voice("kore", { ref_path: null })]} value={value} savedSpeed={1.12} onChange={() => {}} />);
+    render(<NarratorMusic voices={[voice("builtin"), voice("gacrux", { ref_path: null }), voice("sulafat", { ref_path: null }), voice("kore", { ref_path: null })]} value={value} savedSpeed={1.12} onChange={() => {}} />);
     expect(screen.getByText(/One-time setup/)).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Make samples/ })).toBeNull(); // nothing set up yet
-    expect((screen.getByRole("radio", { name: /Kore/ }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("radio", { name: /Sulafat/ }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(screen.getByRole("button", { name: /Set up voices/ }));
     const dialog = await screen.findByRole("dialog");
     expect(dialog.textContent).toMatch(/2 voices/);
@@ -135,16 +137,17 @@ describe("NarratorMusic (Settings)", () => {
 
   it("Set up voices stops when a call makes nothing and says why", async () => {
     voiceActions.setUpVoicesAction.mockResolvedValue({ ok: true, made: 0, skipped: 0, remaining: 2, failed: 2, lastError: "Gacrux: Gemini error 429" });
-    render(<NarratorMusic voices={[voice("gacrux", { ref_path: null }), voice("kore", { ref_path: null })]} value={value} savedSpeed={1.12} onChange={() => {}} />);
+    render(<NarratorMusic voices={[voice("gacrux", { ref_path: null }), voice("sulafat", { ref_path: null })]} value={value} savedSpeed={1.12} onChange={() => {}} />);
     fireEvent.click(screen.getByRole("button", { name: /Set up voices/ }));
     fireEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: /Set up voices/ }));
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith(expect.stringMatching(/2 voices could not be set up.*429/)));
     expect(voiceActions.setUpVoicesAction).toHaveBeenCalledTimes(1);
   });
 
-  it("Make samples counts missing/failed/stale, queues them, and waits for a saved speed", async () => {
+  it("Make samples counts the house voices' missing/failed/stale (old style) samples, queues them, and waits for a saved speed", async () => {
     voiceActions.queueVoiceSamplesAction.mockResolvedValue({ ok: true, queued: 3, notSetUp: 0 });
-    const voices = [voice("builtin"), readyVoice("gacrux"), voice("kore", { sample_status: "failed" }), readyVoice("leda", { sample_key: sampleKey(1) })];
+    const voices = [voice("builtin"), readyVoice("gacrux"), voice("sulafat", { sample_status: "failed" }), readyVoice("achernar", { sample_key: sampleKey(1) }),
+      readyVoice("vindemiatrix", { sample_key: "e0.35-t0.7-c0.5-s1.12-g1" }), voice("kore", { sample_status: "failed" })];
     const { rerender } = render(<NarratorMusic voices={voices} value={value} savedSpeed={1.12} onChange={() => {}} />);
     fireEvent.click(screen.getByRole("button", { name: "Make samples (3)" }));
     await waitFor(() => expect(voiceActions.queueVoiceSamplesAction).toHaveBeenCalledTimes(1));
@@ -157,9 +160,10 @@ describe("NarratorMusic (Settings)", () => {
   it("samples appear live (realtime rows)", () => {
     const { rerender } = render(<NarratorMusic voices={[voice("gacrux", { sample_status: "making" })]} value={value} savedSpeed={1.12} onChange={() => {}} />);
     expect((screen.getByRole("button", { name: "Play Gacrux sample" }) as HTMLButtonElement).disabled).toBe(true);
-    live = [readyVoice("gacrux")];
+    live = [readyVoice("gacrux"), readyVoice("kore")];
     rerender(<NarratorMusic voices={[voice("gacrux", { sample_status: "making" })]} value={value} savedSpeed={1.12} onChange={() => {}} />);
     expect((screen.getByRole("button", { name: "Play Gacrux sample" }) as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.queryByTestId("voice-kore")).toBeNull();                       // a live row outside the house list stays hidden
   });
 });
 
@@ -179,20 +183,30 @@ describe("SettingsForm + Narrator & music", () => {
 
   it("after 006: the chosen default, speed, music and volume are saved with the rest", async () => {
     render(<SettingsForm initial={{ ...base, reel_voice_id: "gacrux", reel_speed: 1.12, reel_music: true, reel_music_volume: 18 }}
-      voices={[readyVoice("gacrux"), readyVoice("kore")]} />);
-    fireEvent.click(screen.getByRole("radio", { name: /Kore/ }));
+      voices={[readyVoice("gacrux"), readyVoice("sulafat")]} />);
+    fireEvent.click(screen.getByRole("radio", { name: /Sulafat/ }));
     fireEvent.click(screen.getByRole("switch", { name: /Background music/ }));
     fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
     await waitFor(() => expect(saveSettingsAction).toHaveBeenCalledTimes(1));
-    expect(saveSettingsAction.mock.calls[0][0]).toMatchObject({ reel_voice_id: "kore", reel_speed: 1.12, reel_music: false, reel_music_volume: 18 });
+    expect(saveSettingsAction.mock.calls[0][0]).toMatchObject({ reel_voice_id: "sulafat", reel_speed: 1.12, reel_music: false, reel_music_volume: 18 });
+  });
+
+  it("a saved narrator outside the house voices shows (and saves) Gacrux", async () => {
+    render(<SettingsForm initial={{ ...base, reel_voice_id: "despina", reel_speed: 1, reel_music: true, reel_music_volume: 18 }}
+      voices={[readyVoice("gacrux"), readyVoice("despina"), readyVoice("sulafat")]} />);
+    expect(screen.queryByRole("radio", { name: /Despina/ })).toBeNull();
+    expect(screen.getByRole("radio", { name: /Gacrux/ }).getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+    await waitFor(() => expect(saveSettingsAction).toHaveBeenCalledTimes(1));
+    expect(saveSettingsAction.mock.calls[0][0]).toMatchObject({ reel_voice_id: "gacrux" });
   });
 });
 
 describe("VoicePicker (review page)", () => {
   const RID = "11111111-1111-4111-8111-111111111111";
-  const voices = [voice("builtin"), readyVoice("gacrux", { tone: "Mature" }), readyVoice("kore", { tone: "Firm" }), voice("puck")];
+  const voices = [voice("builtin"), readyVoice("sulafat", { tone: "Warm" }), readyVoice("gacrux", { tone: "Mature" }), readyVoice("kore", { tone: "Firm" }), voice("achernar")];
 
-  it("lists ready voices, shows the Settings default, plays it, and saves a new pick (null = back to the default)", async () => {
+  it("lists the ready house voices, shows the Settings default, plays it, and saves a new pick (null = back to the default)", async () => {
     voiceActions.setReelVoiceAction.mockResolvedValue({ ok: true });
     render(<VoicePicker reelId={RID} value={null} defaultId="gacrux" voices={voices} />);
     const trigger = screen.getByRole("combobox", { name: "Narrator" });
@@ -201,10 +215,11 @@ describe("VoicePicker (review page)", () => {
     expect(play).toHaveBeenCalledTimes(1);
     fireEvent.click(trigger);
     const options = await screen.findAllByRole("option");
-    expect(options.map((o) => o.textContent)).toEqual([expect.stringMatching(/^Gacrux/), expect.stringMatching(/^Kore/)]); // no un-sampled voices
+    // house order, no un-sampled voices, nothing outside the house list (Kore, the built-in voice)
+    expect(options.map((o) => o.textContent)).toEqual([expect.stringMatching(/^Gacrux/), expect.stringMatching(/^Sulafat/)]);
     fireEvent.click(options[1]);
-    await waitFor(() => expect(voiceActions.setReelVoiceAction).toHaveBeenCalledWith(RID, "kore"));
-    expect(screen.getByRole("combobox", { name: "Narrator" }).textContent).toMatch(/Kore/);
+    await waitFor(() => expect(voiceActions.setReelVoiceAction).toHaveBeenCalledWith(RID, "sulafat"));
+    expect(screen.getByRole("combobox", { name: "Narrator" }).textContent).toMatch(/Sulafat/);
     fireEvent.click(screen.getByRole("combobox", { name: "Narrator" }));
     fireEvent.click((await screen.findAllByRole("option"))[0]);
     await waitFor(() => expect(voiceActions.setReelVoiceAction).toHaveBeenLastCalledWith(RID, null));
@@ -212,25 +227,34 @@ describe("VoicePicker (review page)", () => {
 
   it("a refused change rolls back with the reason", async () => {
     voiceActions.setReelVoiceAction.mockResolvedValue({ ok: false, error: "The narrator can only be changed before you approve the script." });
-    render(<VoicePicker reelId={RID} value="kore" defaultId="gacrux" voices={voices} />);
+    render(<VoicePicker reelId={RID} value="sulafat" defaultId="gacrux" voices={voices} />);
     fireEvent.click(screen.getByRole("combobox", { name: "Narrator" }));
     fireEvent.click((await screen.findAllByRole("option"))[0]);
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith(expect.stringMatching(/before you approve/)));
-    expect(screen.getByRole("combobox", { name: "Narrator" }).textContent).toMatch(/Kore/);
+    expect(screen.getByRole("combobox", { name: "Narrator" }).textContent).toMatch(/Sulafat/);
   });
 
   it("the current and default voices are always listed (never a blank Select), not-set-up ones marked and disabled", async () => {
-    render(<VoicePicker reelId={RID} value="puck" defaultId="gacrux" voices={[readyVoice("kore"), voice("gacrux", { ref_path: null }), voice("puck")]} />);
+    render(<VoicePicker reelId={RID} value="achernar" defaultId="gacrux" voices={[readyVoice("sulafat"), voice("gacrux", { ref_path: null }), voice("achernar")]} />);
     const trigger = screen.getByRole("combobox", { name: "Narrator" });
-    expect(trigger.textContent).toMatch(/Puck/);
+    expect(trigger.textContent).toMatch(/Achernar/);
     fireEvent.click(trigger);
     const options = await screen.findAllByRole("option");
-    expect(options.map((o) => o.textContent)).toEqual([expect.stringMatching(/^Kore/), expect.stringMatching(/^Gacrux.*default.*\(not set up\)/), expect.stringMatching(/^Puck/)]);
-    expect(options[1].getAttribute("aria-disabled")).toBe("true");
+    expect(options.map((o) => o.textContent)).toEqual([expect.stringMatching(/^Gacrux.*default.*\(not set up\)/), expect.stringMatching(/^Sulafat/), expect.stringMatching(/^Achernar/)]);
+    expect(options[0].getAttribute("aria-disabled")).toBe("true");
+  });
+
+  it("an older reel's own voice outside the house list stays shown (last) so the Select is never blank", async () => {
+    render(<VoicePicker reelId={RID} value="kore" defaultId="gacrux" voices={voices} />);
+    const trigger = screen.getByRole("combobox", { name: "Narrator" });
+    expect(trigger.textContent).toMatch(/Kore/);
+    fireEvent.click(trigger);
+    const options = await screen.findAllByRole("option");
+    expect(options.map((o) => o.textContent)).toEqual([expect.stringMatching(/^Gacrux/), expect.stringMatching(/^Sulafat/), expect.stringMatching(/^Kore/)]);
   });
 
   it("no samples yet: says the default and links to Settings", () => {
-    render(<VoicePicker reelId={RID} value={null} defaultId="gacrux" voices={[voice("gacrux"), voice("builtin")]} />);
+    render(<VoicePicker reelId={RID} value={null} defaultId="gacrux" voices={[voice("gacrux"), voice("builtin"), readyVoice("kore")]} />);
     expect(screen.queryByRole("combobox")).toBeNull();
     expect(screen.getByText(/Gacrux/).textContent).toMatch(/Gacrux \(default\)/);
     expect(screen.getByRole("link", { name: /Set up voices in Settings/ }).getAttribute("href")).toBe("/settings");
@@ -251,11 +275,11 @@ describe("review page length + status label", () => {
       version: 1, claimed_at: null, created_at: "", updated_at: "",
     }));
     render(<ScriptReview reel={reel()} scenes={scenes} narrator={{ voices: [readyVoice("gacrux")], defaultId: "gacrux", speed: 1.12 }} />);
-    expect(screen.getByText(/Aim for 255–383 words/)).toBeTruthy();
+    expect(screen.getByText(/Aim for 179–269 words/)).toBeTruthy();
     expect(within(screen.getByTestId("narrator")).getByRole("combobox", { name: "Narrator" })).toBeTruthy();
     cleanup();
     render(<ScriptReview reel={reel()} scenes={scenes} />);
-    expect(screen.getByText(/Aim for 228–342 words/)).toBeTruthy();
+    expect(screen.getByText(/Aim for 160–240 words/)).toBeTruthy();
     expect(screen.queryByTestId("narrator")).toBeNull();
   });
 

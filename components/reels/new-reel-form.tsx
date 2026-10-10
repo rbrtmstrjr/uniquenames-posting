@@ -96,7 +96,7 @@ export function NewReelForm() {
       <Panel title="How it works" className="lg:sticky lg:top-20">
         <ol className="space-y-3 text-sm text-ink">
           {[
-            ["Write", "The AI writes a 60–90 second lesson: about 25–35 short lines, one picture each, with a fresh hook every few seconds."],
+            ["Write", "The AI writes a 60–90 second lesson: about 20–30 short lines, one picture each, with a fresh hook every few seconds."],
             ["Check", "Read the lines, fix any words, then approve."],
             ["Make", "Your PC records the voice, makes the pictures in your style (Crayon or Red Thread) and the captioned video."],
             ["Save", "The full video lands in Pictures › Unique Names › Reels; a preview plays here."],

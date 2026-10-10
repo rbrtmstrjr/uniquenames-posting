@@ -21,7 +21,7 @@ import { CardTextSettings, type PreviewSample } from "./card-text";
 import { NarratorMusic, type NarratorValue } from "./narrator-music";
 import { ThemeGrid } from "./theme-grid";
 import { DEFAULT_THEME_ID, isThemeId } from "@/lib/reels/themes";
-import { MUSIC_DEFAULT, speedOf, VOICE_DEFAULT, VOLUME_DEFAULT } from "@/lib/reels/voices";
+import { houseDefault, MUSIC_DEFAULT, speedOf, VOLUME_DEFAULT } from "@/lib/reels/voices";
 import { CTA_MAX_LINES, CTA_MESSAGES_DEFAULT } from "@/lib/cta/messages";
 
 // Card counts are picked on sliders, so a value is always a whole number in range;
@@ -37,7 +37,7 @@ const textOf = (row: Partial<SettingsRow>): TextSettings =>
 
 /** The narrator + music settings; null until migration 006 runs (the form then never sends them). */
 const narratorOf = (row: Partial<SettingsRow>): NarratorValue | null => row.reel_voice_id === undefined ? null : {
-  reel_voice_id: row.reel_voice_id || VOICE_DEFAULT, reel_speed: speedOf(row.reel_speed),
+  reel_voice_id: houseDefault(row.reel_voice_id), reel_speed: speedOf(row.reel_speed),
   reel_music: row.reel_music ?? MUSIC_DEFAULT, reel_music_volume: row.reel_music_volume ?? VOLUME_DEFAULT,
 };
 

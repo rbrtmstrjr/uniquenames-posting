@@ -7,7 +7,7 @@ const { generateJson } = vi.hoisted(() => ({ generateJson: vi.fn() }));
 vi.mock("@/lib/ai/gemini", () => ({ generateJson }));
 const {
   reelScriptPrompt, writeReelScript, reelWordBudget, validateReelScript, REEL_SCRIPT_MODEL, REEL_SCRIPT_TIMEOUT_MS, ALREADY_MADE_CAP, LINE_MAX_WORDS,
-  REEL_SECONDS, OUTRO_RE, quoteCount,
+  REEL_SECONDS, OUTRO_RE, quoteCount, WORDS_PER_SECOND,
 } = await import("@/lib/ai/reel-script");
 
 beforeEach(() => generateJson.mockReset());
@@ -48,7 +48,7 @@ describe("reelScriptPrompt", () => {
   it("carries the topic, the format and the line range", () => {
     const { system, prompt } = reelScriptPrompt({ topic: "teething at night", maxScenes: 32, alreadyMade: [], format: PF });
     expect(prompt).toContain("Topic: teething at night");
-    expect(prompt).toContain("19-32 lines");
+    expect(prompt).toContain("14-32 lines");
     expect(prompt).toContain("FORMAT: Problem, why, fix (problem_fix)");
     expect(system).toMatch(/moms of babies and young kids \(0-7\) around the world; most are in the Philippines, others in the US, Africa, Australia/);
     expect(system).not.toMatch(/Filipino moms|loves her 'anak'|local detail|lola wisdom/);
@@ -93,11 +93,14 @@ describe("reelScriptPrompt", () => {
   it("the 60-90 s length: word budget, the 65-80 s aim, line count, short lines, never 'camera'", () => {
     expect(REEL_SECONDS).toEqual({ lo: 60, hi: 90, floor: 15 });
     const { prompt } = reelScriptPrompt(input30);
-    expect(prompt).toContain("narration for a 60-90 second reel at about 3.8 words per second = 228-342 words");
-    expect(prompt).toContain("AIM for 247-304 words (about 65-80 seconds)");
-    expect(prompt).toContain("Under 228 words (under 60 seconds) is TOO SHORT");
-    expect(prompt).toContain("19-30 lines");
-    expect(reelScriptPrompt({ ...input30, speed: 1.05 }).prompt).toContain("60-90 second reel at about 4 words per second = 239-359 words");
+    // the calm line-by-line narrator (worker 2.6.0) speaks ~160 words a minute, pauses included
+    expect(prompt).toContain("narration for a 60-90 second reel at about 2.7 words per second = 160-240 words");
+    expect(prompt).toContain("AIM for 173-213 words (about 65-80 seconds)");
+    expect(prompt).toContain("Under 160 words (under 60 seconds) is TOO SHORT");
+    expect(prompt).toContain("14-30 lines");
+    expect(prompt).toMatch(/CALM PACE: .*short pause after every line.*keep every beat and step of the format.*fewer, tighter words/);
+    expect(prompt).toContain("Every line is one image on screen for about 2-5 seconds");
+    expect(reelScriptPrompt({ ...input30, speed: 1.05 }).prompt).toContain("60-90 second reel at about 2.8 words per second = 168-252 words");
     expect(prompt).toMatch(/Sentences of 4-12 words \(never more than 15\)/);
     expect(prompt).toMatch(/BEFORE ANSWERING, COUNT/);
     expect(prompt).not.toMatch(/\bcamera\b/i);
@@ -194,20 +197,22 @@ describe("reelScriptPrompt", () => {
   });
 });
 
-describe("reelWordBudget (60-90 s at 3.8 words/s × speed)", () => {
-  it("1×: 228-342 words (aim 247-304 = 65-80 s); at least 60 s is required; few images shrink it, never under 18 s of speech", () => {
+describe("reelWordBudget (60-90 s at 2.67 words/s × speed: the line-by-line voice, worker 2.6.0)", () => {
+  it("1×: 160-240 words (aim 173-213 = 65-80 s); at least 60 s is required; few images shrink it, never under 18 s of speech", () => {
+    expect(WORDS_PER_SECOND).toBe(2.67);   // retuned Gacrux measured ~155-160 wpm with its pauses
     expect(reelWordBudget(40)).toEqual({
-      lo: 228, hi: 342, aimLo: 247, aimHi: 304, minScenes: 19, maxLines: 40, minWords: 228, maxWords: 376,
-      secLo: 60, secHi: 90, secAimLo: 65, secAimHi: 80, wps: 3.8,
+      lo: 160, hi: 240, aimLo: 173, aimHi: 213, minScenes: 14, maxLines: 35, minWords: 160, maxWords: 264,
+      secLo: 60, secHi: 90, secAimLo: 65, secAimHi: 80, wps: 2.7,
     });
     // 60 s fits the owner's 40 images (and 30) with short lines
-    expect(reelWordBudget(30)).toMatchObject({ lo: 228, hi: 342, minScenes: 19, maxLines: 30, minWords: 228 });
-    expect(228 / 30).toBeLessThan(LINE_MAX_WORDS);
+    expect(reelWordBudget(30)).toMatchObject({ lo: 160, hi: 240, minScenes: 14, maxLines: 30, minWords: 160 });
+    expect(160 / 30).toBeLessThan(LINE_MAX_WORDS);
+    expect(240 / 14).toBeLessThanOrEqual(LINE_MAX_WORDS + 3);   // the fewest lines still read as short lines
     expect(reelWordBudget(10)).toMatchObject({ lo: 80, hi: 120, minScenes: 7, maxLines: 10, minWords: 80, maxWords: 132 });
     const fast = reelWordBudget(10, 1.25);
-    expect(fast.lo).toBe(86);   // 18 s at 4.75 words/s
-    expect(fast.minWords / (3.8 * 1.25)).toBeGreaterThanOrEqual(15);
-    expect(reelWordBudget(40, 1.05)).toMatchObject({ lo: 239, hi: 359, minWords: 239, maxWords: 394, secLo: 60, secHi: 90, secAimLo: 65, secAimHi: 80, wps: 4 });
+    expect(fast.lo).toBe(80);   // 10 images x 8 words (18 s at 3.34 words/s would be only 61)
+    expect(fast.minWords / (2.67 * 1.25)).toBeGreaterThanOrEqual(15);
+    expect(reelWordBudget(40, 1.05)).toMatchObject({ lo: 168, hi: 252, minWords: 168, maxWords: 277, secLo: 60, secHi: 90, secAimLo: 65, secAimHi: 80, wps: 2.8 });
   });
 });
 
@@ -431,11 +436,11 @@ describe("writeReelScript", () => {
     generateJson.mockResolvedValueOnce({ ok: true, data: script(12) });
     const r = await writeReelScript(input10);
     expect(r.ok && r.script.scenes.length).toBe(10);
-    generateJson.mockResolvedValueOnce({ ok: true, data: script(18) });
-    expect(await writeReelScript(input30)).toEqual({ ok: false, error: "Script too short: 18 scenes (needs at least 19)." });
-    // 60 s is the minimum: 22 lines that stop at 218 words (57 s) are refused
-    generateJson.mockResolvedValueOnce({ ok: true, data: script(22) });
-    expect(await writeReelScript(input30)).toEqual({ ok: false, error: "Script too short: 218 words (needs at least 228)." });
+    generateJson.mockResolvedValueOnce({ ok: true, data: script(13) });
+    expect(await writeReelScript(input30)).toEqual({ ok: false, error: "Script too short: 13 scenes (needs at least 14)." });
+    // 60 s is the minimum: 16 lines that stop at 158 words (59 s at the calm pace) are refused
+    generateJson.mockResolvedValueOnce({ ok: true, data: script(16) });
+    expect(await writeReelScript(input30)).toEqual({ ok: false, error: "Script too short: 158 words (needs at least 160)." });
     generateJson.mockResolvedValueOnce({ ok: true, data: script(1) });
     expect(await writeReelScript(input10)).toMatchObject({ ok: false });
   });

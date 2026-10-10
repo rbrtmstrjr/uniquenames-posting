@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { TEXT_SETTINGS_DEFAULTS } from "@/lib/db/types";
 import { validateSettings } from "@/lib/actions/validate";
-import { needsSample, sampleKey, speedLabel, speedOf } from "@/lib/reels/voices";
+import { HOUSE_VOICES, houseDefault, houseVoices, isHouseVoice, needsSample, sampleKey, speedLabel, speedOf, VOICE_DEFAULT } from "@/lib/reels/voices";
 import { fakeSupabase, isUpdate, op, type Query, type Respond } from "./helpers/fake-supabase";
 
 let respond: Respond = () => undefined;
@@ -11,7 +11,7 @@ vi.mock("next/cache", () => ({ revalidatePath: () => {} }));
 const { saveSettingsAction } = await import("@/lib/actions/settings");
 
 const input = { caption_template: "Hi {gender}", hashtags: "#a", handle: "@unique_names", min_images: 9, max_images: 13, sound_on: true, ...TEXT_SETTINGS_DEFAULTS };
-const v6 = { reel_voice_id: "kore", reel_speed: 1.1300000000000001, reel_music: false, reel_music_volume: 25 };
+const v6 = { reel_voice_id: "sulafat", reel_speed: 1.1300000000000001, reel_music: false, reel_music_volume: 25 };
 const settingsUpdates = () => fake.queries.filter((q) => q.table === "settings" && isUpdate(q)).map((q) => op(q, "update")![1] as Record<string, unknown>);
 const failFirst = (error: { message: string; code?: string }) => {
   let first = true;
@@ -21,9 +21,9 @@ const failFirst = (error: { message: string; code?: string }) => {
 beforeEach(() => { fake = fakeSupabase((q) => respond(q)); respond = () => undefined; });
 
 describe("pure voice helpers", () => {
-  it("sample key = calm params + speed (2 decimals)", () => {
-    expect(sampleKey(1.12)).toBe("e0.35-t0.7-c0.5-s1.12-g1");
-    expect(sampleKey(1)).toBe("e0.35-t0.7-c0.5-s1.00-g1");
+  it("sample key = the retuned delivery + speed (2 decimals) + the line-by-line mark (worker 2.6.0)", () => {
+    expect(sampleKey(1.12)).toBe("e0.6-t0.8-c0.3-s1.12-l1");
+    expect(sampleKey(1)).toBe("e0.6-t0.8-c0.3-s1.00-l1");
     expect(sampleKey(1.1300000000000001)).toBe(sampleKey(1.13));
   });
   it("speed: numeric strings, out of range and junk fall back to 1.05 (the default from 014); label shows ×", () => {
@@ -44,6 +44,26 @@ describe("pure voice helpers", () => {
   });
 });
 
+describe("house voices (2.6.0)", () => {
+  it("only Gacrux (the default), Sulafat, Vindemiatrix and Achernar are offered, in that order", () => {
+    expect(HOUSE_VOICES.map((v) => v.id)).toEqual(["gacrux", "sulafat", "vindemiatrix", "achernar"]);
+    expect(HOUSE_VOICES.map((v) => v.tone)).toEqual(["Mature", "Warm", "Gentle", "Soft"]);
+    expect(VOICE_DEFAULT).toBe("gacrux");
+    expect(isHouseVoice("sulafat")).toBe(true);
+    expect(isHouseVoice("kore")).toBe(false);
+    expect(isHouseVoice("builtin")).toBe(false);
+    expect(isHouseVoice(null)).toBe(false);
+  });
+  it("houseVoices keeps the 4 rows in house order; houseDefault maps anything else to Gacrux", () => {
+    const rows = ["achernar", "kore", "builtin", "gacrux", "vindemiatrix", "zephyr", "sulafat"].map((id) => ({ id, label: id }));
+    expect(houseVoices(rows).map((r) => r.id)).toEqual(["gacrux", "sulafat", "vindemiatrix", "achernar"]);
+    expect(houseDefault("sulafat")).toBe("sulafat");
+    expect(houseDefault("despina")).toBe("gacrux");
+    expect(houseDefault("builtin")).toBe("gacrux");
+    expect(houseDefault(null)).toBe("gacrux");
+  });
+});
+
 describe("validateSettings: narrator + music", () => {
   it("accepts the ranges, refuses outside them", () => {
     expect(validateSettings({ ...input, ...v6 })).toBeNull();
@@ -55,6 +75,8 @@ describe("validateSettings: narrator + music", () => {
     expect(validateSettings({ ...input, reel_music_volume: 41 })).toMatch(/Music volume/);
     expect(validateSettings({ ...input, reel_music_volume: 18.5 })).toMatch(/Music volume/);
     expect(validateSettings({ ...input, reel_voice_id: "Not A Voice" })).toMatch(/narrator voice/);
+    expect(validateSettings({ ...input, reel_voice_id: "kore" })).toMatch(/narrator voice/);      // not a house voice
+    expect(validateSettings({ ...input, reel_voice_id: "achernar" })).toBeNull();
   });
 });
 
@@ -62,7 +84,7 @@ describe("saveSettingsAction: narrator + music", () => {
   it("saves voice, speed (rounded), music and volume with the rest", async () => {
     expect(await saveSettingsAction({ ...input, ...v6 })).toEqual({ ok: true });
     expect(settingsUpdates()).toHaveLength(1);
-    expect(settingsUpdates()[0]).toMatchObject({ reel_voice_id: "kore", reel_speed: 1.13, reel_music: false, reel_music_volume: 25, handle: "@unique_names" });
+    expect(settingsUpdates()[0]).toMatchObject({ reel_voice_id: "sulafat", reel_speed: 1.13, reel_music: false, reel_music_volume: 25, handle: "@unique_names" });
   });
 
   it("a form without them (before 006) writes none of them", async () => {

@@ -3,7 +3,7 @@ import { NAME_RE, normalizeQuotes } from "@/lib/names/bulk-paste";
 import { isFontId } from "@/lib/fonts/catalog";
 import { SIZE_RANGES } from "@/lib/text/layout";
 import { fontsOf } from "@/lib/fonts/post-fonts";
-import { SPEED_MAX, SPEED_MIN, VOICE_ID_RE, VOLUME_MAX, VOLUME_MIN, roundSpeed } from "@/lib/reels/voices";
+import { SPEED_MAX, SPEED_MIN, VOICE_ID_RE, VOLUME_MAX, VOLUME_MIN, isHouseVoice, roundSpeed } from "@/lib/reels/voices";
 import { isThemeId } from "@/lib/reels/themes";
 import { ALWAYS_MAX, POOL_MAX, POOL_MIN, validateTagList } from "@/lib/captions/hashtags";
 import { validateCtaMessages } from "@/lib/cta/messages";
@@ -75,7 +75,7 @@ export function validateSettings(s: SettingsInput): string | null {
   if (s.min_images > s.max_images) return "The min card count cannot be above the max.";
   if (s.reel_max_images !== undefined && (!Number.isInteger(s.reel_max_images) || s.reel_max_images < REEL_IMAGES_MIN || s.reel_max_images > REEL_IMAGES_MAX))
     return `Images per reel must be ${REEL_IMAGES_MIN} to ${REEL_IMAGES_MAX}.`;
-  if (s.reel_voice_id !== undefined && (typeof s.reel_voice_id !== "string" || !VOICE_ID_RE.test(s.reel_voice_id))) return "Pick a narrator voice from the list.";
+  if (s.reel_voice_id !== undefined && (typeof s.reel_voice_id !== "string" || !VOICE_ID_RE.test(s.reel_voice_id) || !isHouseVoice(s.reel_voice_id))) return "Pick a narrator voice from the list.";
   if (s.reel_speed !== undefined && (typeof s.reel_speed !== "number" || !Number.isFinite(s.reel_speed) || roundSpeed(s.reel_speed) < SPEED_MIN || roundSpeed(s.reel_speed) > SPEED_MAX))
     return `Narration speed must be ${SPEED_MIN.toFixed(2)}× to ${SPEED_MAX.toFixed(2)}×.`;
   if (s.reel_music !== undefined && typeof s.reel_music !== "boolean") return "Turn music on or off.";

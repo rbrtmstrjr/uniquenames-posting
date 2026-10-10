@@ -123,19 +123,19 @@ describe("saveSettingsAction: reel_theme_id (migration 007)", () => {
 
   it("pre-007 (PGRST204 naming reel_theme_id): saves everything else, then says the theme didn't stick", async () => {
     failFirst({ message: "Could not find the 'reel_theme_id' column of 'settings' in the schema cache", code: "PGRST204" });
-    const r = await saveSettingsAction({ ...input, reel_voice_id: "kore", reel_theme_id: "clay" });
+    const r = await saveSettingsAction({ ...input, reel_voice_id: "sulafat", reel_theme_id: "clay" });
     expect(r).toMatchObject({ ok: false, error: expect.stringMatching(/except the default theme.*007_reel_themes\.sql/) });
     const [first, second] = settingsUpdates();
     expect(first.reel_theme_id).toBe("clay");
     expect(second).not.toHaveProperty("reel_theme_id");
-    expect(second.reel_voice_id).toBe("kore"); // the 006 group still saved
+    expect(second.reel_voice_id).toBe("sulafat"); // the 006 group still saved
   });
 
   it("a theme id the database doesn't know (foreign key) reads as pick a theme", async () => {
     failFirst({ message: 'insert or update on table "settings" violates foreign key constraint "settings_reel_theme_id_fkey"', code: "23503" });
-    expect(await saveSettingsAction({ ...input, reel_voice_id: "kore", reel_theme_id: "clay" })).toEqual({ ok: false, error: "Pick a theme from the list." });
+    expect(await saveSettingsAction({ ...input, reel_voice_id: "sulafat", reel_theme_id: "clay" })).toEqual({ ok: false, error: "Pick a theme from the list." });
     failFirst({ message: 'insert or update on table "settings" violates foreign key constraint "settings_reel_voice_id_fkey"', code: "23503" });
-    expect(await saveSettingsAction({ ...input, reel_voice_id: "kore", reel_theme_id: "clay" })).toEqual({ ok: false, error: "Pick a narrator voice from the list." });
+    expect(await saveSettingsAction({ ...input, reel_voice_id: "sulafat", reel_theme_id: "clay" })).toEqual({ ok: false, error: "Pick a narrator voice from the list." });
   });
 });
 

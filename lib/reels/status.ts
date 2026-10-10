@@ -8,8 +8,9 @@ export const LINE_MAX_WORDS = 15;
 /** Same limit as the server (lib/ai/reel-script HOOK_TEXT_MAX_WORDS): the hook card. */
 export const HOOK_TEXT_MAX_WORDS = 10;
 export const TITLE_MAX = 80;
-/** Chatterbox speaks about 3.8 words a second (the spike measured ~4). */
-export const WORDS_PER_SECOND = 3.8;
+/** Same pace as the server (lib/ai/reel-script WORDS_PER_SECOND): the line-by-line voice (worker 2.6.0) speaks ~160
+ *  words a minute with its pauses between lines. */
+export const WORDS_PER_SECOND = 2.67;
 /** Tries the PC makes per image before the reel needs attention. */
 export const IMAGE_TRIES = 3;
 
@@ -32,7 +33,7 @@ export function clock(seconds: number): string {
 /** Spoken length of a script, from its word count (the voice is sped up by `speed`). */
 export const estimateSeconds = (words: number, speed = 1) => words / (WORDS_PER_SECOND * (speed > 0 ? speed : 1));
 
-/** The script length the prompt asks for: 60–90 s of speech (228–342 words at 1×), more words when the voice is sped up (lib/ai/reel-script). */
+/** The script length the prompt asks for: 60–90 s of speech (160–240 words at 1×), more words when the voice is sped up (lib/ai/reel-script). */
 export const REEL_SECONDS = { lo: 60, hi: 90 } as const;
 export const wordTarget = (speed = 1) => {
   const x = speed > 0 ? speed : 1;
