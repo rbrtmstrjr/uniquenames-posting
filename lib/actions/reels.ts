@@ -13,6 +13,8 @@ import { DEFAULT_THEME_ID, isThemeId, LEGACY_THEME_ID, staticTheme, THEME_PARTIA
 import { speedOf } from "@/lib/reels/voices";
 import { isReelFormat, nextFormat, type ReelFormat } from "@/lib/reels/formats";
 import { isHealthTopic, pickTopic, REEL_TOPICS, TOPIC_WINDOW, topicById, type ReelTopic } from "@/lib/reels/topics";
+import { EXCLUDE_MAX, ideaKey, type TopicIdea } from "@/lib/reels/topic-ideas";
+import { suggestTopicIdeas } from "@/lib/ai/reel-ideas";
 import { generateLockReason } from "./generate-guard";
 import { UUID_RE } from "./helpers";
 import { fail, requireOwner, type ActionResult } from "./result";
@@ -25,6 +27,8 @@ type DbError = { message: string; code?: string };
 
 // A "use server" file may only export async functions (and types): limits stay local.
 const TOPIC_MAX = 120;
+/** A picked card's hook (≤ 12 words; generous for safety). */
+const HOOK_HINT_MAX = 160;
 /** One budget for Gemini across the first try and up to 2 rewrites (the reels pages allow 300 s). */
 const SCRIPT_BUDGET_MS = 270_000;
 /** One call's cap: a 60-90 s script takes Opus 5.5 about 105-140 s. */
@@ -143,14 +147,15 @@ async function loadTheme(sb: SB, id: string | null | undefined, has007: boolean)
   return themeOf(data, want);
 }
 
-/** The latest reels' formats and topic-bank ids, newest first (select *: before 014 the fields are simply absent). */
-async function recentReels(sb: SB): Promise<{ formats: (string | null)[]; topicIds: string[] }> {
+/** The latest reels' formats, topic-bank ids and titles + topics, newest first (select *: before 014 the fields are simply absent). */
+async function recentReels(sb: SB): Promise<{ formats: (string | null)[]; topicIds: string[]; titles: string[] }> {
   const { data } = await sb.from("reels").select("*").order("created_at", { ascending: false }).limit(TOPIC_WINDOW);
   const rows = (data ?? []) as Partial<ReelRow>[];
   return {
     formats: rows.map((r) => r.format ?? null),
     // a reel from before 014 (or a typed topic equal to a bank one) is matched by its topic text
     topicIds: rows.map((r) => r.topic_id ?? REEL_TOPICS.find((t) => t.topic === r.topic)?.id).filter((x): x is string => !!x),
+    titles: rows.flatMap((r) => [r.title, r.topic]).filter((x): x is string => typeof x === "string" && !!x.trim()),
   };
 }
 
@@ -159,7 +164,11 @@ interface ScriptBrief {
   topic: string | undefined; format: ReelFormat; topicId: string | null; health: boolean;
   /** The bank idea's vetted facts + safety line (health topics) and verified anchor; absent for a typed topic. */
   facts?: string[]; safety?: string; anchor?: string;
+  /** The picked topic card's hook (a suggested line 1). */
+  hook?: string;
 }
+/** What the brief keeps: the reel's format + bank id (New script), or the picked topic card's (+ its hook / health flag). */
+interface Keep { format?: string | null; topicId?: string | null; hook?: string; health?: boolean }
 /** The vetted extras of a bank idea. */
 const vetted = (t: ReelTopic) => ({ ...(t.facts ? { facts: t.facts } : {}), ...(t.safety ? { safety: t.safety } : {}), ...(t.anchor ? { anchor: t.anchor } : {}) });
 
@@ -168,7 +177,12 @@ const vetted = (t: ReelTopic) => ({ ...(t.facts ? { facts: t.facts } : {}), ...(
  * format rotates (never the latest reel's, else the least recently used of the last 5) and a blank topic is picked from
  * the bank (not used by the last 15 reels, preferring the format).
  */
-async function scriptBrief(sb: SB, topic: string | undefined, keep?: { format?: string | null; topicId?: string | null }): Promise<ScriptBrief> {
+async function scriptBrief(sb: SB, topic: string | undefined, keep?: Keep): Promise<ScriptBrief> {
+  const b = await baseBrief(sb, topic, keep);
+  // a picked card: its hook is a suggested line 1; a fresh idea the AI flagged as health gets the health rules
+  return { ...b, ...(keep?.hook ? { hook: keep.hook } : {}), health: b.health || (!b.topicId && keep?.health === true) };
+}
+async function baseBrief(sb: SB, topic: string | undefined, keep?: Keep): Promise<ScriptBrief> {
   // New script of a reel from before 014 whose topic is a bank idea: the same idea
   const bank = topicById(keep?.topicId) ?? (keep && topic ? REEL_TOPICS.find((t) => t.topic === topic) ?? null : null);
   const keptFormat = isReelFormat(keep?.format) ? keep!.format as ReelFormat : null;
@@ -188,7 +202,7 @@ interface Draft { script: ReelScript; theme: ReelTheme; has007: boolean; has014:
  * Gemini writes a script for the reel's theme in its format; a title already made (case/space-insensitive) or a script
  * that fails validation is rewritten, up to 2 times, all within one 270 s budget (each call gets at most 180 s).
  */
-async function draftScript(sb: SB, topic: string | undefined, reelThemeId?: string | null, keep?: { format?: string | null; topicId?: string | null }): Promise<ActionResult<Draft>> {
+async function draftScript(sb: SB, topic: string | undefined, reelThemeId?: string | null, keep?: Keep): Promise<ActionResult<Draft>> {
   const [made, set] = await Promise.all([madeReels(sb), scriptSettings(sb)]);
   if (made.error) return dbFail(made.error);
   const { maxScenes, speed, has007, has014 } = set;
@@ -202,6 +216,7 @@ async function draftScript(sb: SB, topic: string | undefined, reelThemeId?: stri
     if (left < CALL_MIN_MS) break;
     const r = await writeReelScript({
       topic: brief.topic, format: brief.format, topicHealth: brief.health, topicFacts: brief.facts, topicSafety: brief.safety, topicAnchor: brief.anchor,
+      ...(brief.hook ? { hookHint: brief.hook } : {}),
       maxScenes, alreadyMade, speed,
       theme: { id: theme.id, faces: theme.faces }, timeoutMs: Math.min(CALL_MAX_MS, left),
     });
@@ -281,14 +296,48 @@ function captionLater(sb: SB, reel: ReelCaptionSource, replace: boolean) {
   });
 }
 
-/** "Write script": Gemini writes it, then the reel (status script, its theme) and its scenes (pending) are saved. */
-export async function writeReelScriptAction(input: { topic?: string }): Promise<ActionResult<{ reelId: string }>> {
+/**
+ * "Suggest topics": 5 quick ideas before the long script (about 3 from the bank, not used lately, formats spread out,
+ * and about 2 fresh AI ideas), with a suggested hook and what the mom learns. One cheap AI call; if it fails the batch
+ * is bank-only with plain hooks (never an error). `exclude`: the topics already shown ("More ideas").
+ */
+export async function suggestReelTopicsAction(input?: { exclude?: string[] }): Promise<ActionResult<{ ideas: TopicIdea[] }>> {
+  await requireOwner();
+  const ex = input?.exclude;
+  if (ex !== undefined && (!Array.isArray(ex) || ex.some((x) => typeof x !== "string"))) return fail("Could not read the topics shown. Reload the page.");
+  const exclude = (ex ?? []).map((x) => oneLine(x).slice(0, TOPIC_MAX)).filter(Boolean).slice(-EXCLUDE_MAX);
+  const sb = await createClient();
+  const recent = await recentReels(sb);
+  const r = await suggestTopicIdeas({ recentFormats: recent.formats, recentIds: recent.topicIds, recentTitles: recent.titles, exclude });
+  if (r.aiError) console.error("suggest topics: the AI failed, bank ideas only:", r.aiError);
+  return { ok: true, ideas: r.ideas };
+}
+
+/** A picked topic card: its format, bank id, hook and health flag ("Suggest topics"). */
+export interface PickedTopic { topic?: string; topicId?: string; format?: string; hook?: string; health?: boolean }
+
+/**
+ * "Write script": the AI writes it, then the reel (status script, its theme) and its scenes (pending) are saved. A
+ * picked topic card (format, and for a bank idea its id) is written in THAT format with the bank's vetted facts, and
+ * its hook is suggested as line 1; a typed topic keeps the rotation. A bank id whose topic was edited is dropped.
+ */
+export async function writeReelScriptAction(input: PickedTopic): Promise<ActionResult<{ reelId: string }>> {
   await requireOwner();
   if (input?.topic !== undefined && typeof input.topic !== "string") return fail("Type a topic, or leave it blank.");
   const topic = oneLine(input?.topic) || undefined;
   if (topic && topic.length > TOPIC_MAX) return fail(`Keep the topic under ${TOPIC_MAX} characters.`);
+  if (input?.format !== undefined && !isReelFormat(input.format)) return fail("Pick the topic again: its format is unknown.");
+  if ((input?.topicId !== undefined && typeof input.topicId !== "string") || (input?.hook !== undefined && typeof input.hook !== "string")) {
+    return fail("Pick the topic again.");
+  }
+  const bank = topicById(input?.topicId);
+  const keepBank = bank && (!topic || ideaKey(topic) === ideaKey(bank.topic)) ? bank : null;
+  const hook = oneLine(input?.hook).slice(0, HOOK_HINT_MAX) || undefined;
+  const picked = input?.format !== undefined || !!keepBank;
   const sb = await createClient();
-  const d = await draftScript(sb, topic);
+  const d = await draftScript(sb, keepBank ? keepBank.topic : topic, undefined, picked ? {
+    format: input.format ?? keepBank?.format ?? null, topicId: keepBank?.id ?? null, ...(hook ? { hook } : {}), health: input.health === true,
+  } : undefined);
   if (!d.ok) return d;
   const s = d.script;
   // The theme is pinned on the reel: its image prompts are built with it (and the PC reads it, e.g. grayscale). The

@@ -91,6 +91,8 @@ export interface ReelScriptInput {
   topicFacts?: string[]; topicSafety?: string;
   /** A verified term the reel may attribute to experts ("<term> — <who uses it>"). */
   topicAnchor?: string;
+  /** The hook of the topic card the owner picked ("Suggest topics"): a suggested line 1, never forced. */
+  hookHint?: string;
   /** Narration speed (settings.reel_speed, 1.00–1.25; default 1 = unchanged): a faster voice fits more words in the same time. */
   speed?: number;
   /** The reel's visual theme (default Crayon): the cast is written as dolls only for Knitted Doll; Crayon and Red
@@ -236,8 +238,9 @@ function guidePictureRules(red: boolean): string[] {
  * The script prompt (value-first formats, spec 2026-10-09-reel-storylines: the format's beats, the research §10 rules,
  * the on-screen labels + the playbook's varied shot list and the style's picture rules); `alreadyMade` is newest first.
  */
-export function reelScriptPrompt({ topic, maxScenes, alreadyMade, speed, theme, format, topicHealth, topicFacts, topicSafety, topicAnchor }: ReelScriptInput): { system: string; prompt: string } {
+export function reelScriptPrompt({ topic, maxScenes, alreadyMade, speed, theme, format, topicHealth, topicFacts, topicSafety, topicAnchor, hookHint }: ReelScriptInput): { system: string; prompt: string } {
   const t = oneLine(topic ?? "");
+  const hint = t ? oneLine(hookHint ?? "").slice(0, 160) : "";
   const made = alreadyMade
     .map((m) => ({ title: oneLine(m.title ?? ""), stage: oneLine(m.stage ?? "") }))
     .filter((m) => m.title)
@@ -252,6 +255,7 @@ export function reelScriptPrompt({ topic, maxScenes, alreadyMade, speed, theme, 
   const q = f.minQuotes;
   const prompt = [
     t ? `Topic: ${t}` : AUTO_TOPIC,
+    ...(hint ? [`Suggested hook: "${hint.replace(/"/g, "'")}". Open with this hook or a stronger version of it (line 1 still follows every hook rule below).`] : []),
     "",
     `FORMAT: ${f.label} (${f.id}). Write the reel in these beats, in this order (one or more spoken lines per beat):`,
     ...f.beats.map((x, i) => `${i + 1}. ${x}`),
@@ -450,14 +454,14 @@ export function sentenceCase(s: string): string {
 }
 
 /** A body-mechanism claim (temperature going up / down, hormones): never in a reel (health accuracy). */
-const MECHANISM_RE = /\b(?:rais(?:e|es|ing)|lower(?:s|ing)?|bring(?:s|ing)? (?:down|up)|drop(?:s|ping)?|reduc(?:e|es|ing)|pulls? (?:the )?heat) (?:a |the |their |his |her |your |its )?(?:mild |high |body |child's |baby's )*(?:temperature|fever)\b|\bbring(?:s|ing)? (?:a |the |their |his |her |your )?(?:body )?(?:temperature|fever) (?:down|up)\b|\b(?:cortisol|adrenaline|melatonin|hormones?|dopamine|serotonin)\b/i;
+export const MECHANISM_RE = /\b(?:rais(?:e|es|ing)|lower(?:s|ing)?|bring(?:s|ing)? (?:down|up)|drop(?:s|ping)?|reduc(?:e|es|ing)|pulls? (?:the )?heat) (?:a |the |their |his |her |your |its )?(?:mild |high |body |child's |baby's )*(?:temperature|fever)\b|\bbring(?:s|ing)? (?:a |the |their |his |her |your )?(?:body )?(?:temperature|fever) (?:down|up)\b|\b(?:cortisol|adrenaline|melatonin|hormones?|dopamine|serotonin)\b/i;
 /** "Experts call it …": only for a verified term. */
 const EXPERT_RE = /\b(?:experts?|psychologists?|pediatricians?|paediatricians?|doctors?|scientists?|researchers?|therapists?|specialists?)\b/i;
 const CALL_RE = /\b(?:call(?:s|ed)? (?:it|this|that)|(?:it|this|that)(?:'s| is) called|known as)\b/i;
 /** The scene_lesson pivot. */
 const PIVOT_RE = /\b(?:really (?:happening|going on)|here's why|here is why|here's what|here is what)\b/i;
 /** A first line that reassures instead of naming the problem. */
-const REASSURE_RE = /\b(?:don't|do not) (?:feel bad|worry|panic|stress)\b/i;
+export const REASSURE_RE = /\b(?:don't|do not) (?:feel bad|worry|panic|stress)\b/i;
 /** Recap / filler that pads a longer reel instead of adding to it. */
 export const PADDING_RE = /\b(?:as I (?:said|mentioned)|like I (?:said|mentioned)|as (?:we|you) (?:saw|heard|learned)|as mentioned|to (?:sum|wrap) (?:it |this |things )?up|let's recap|to recap|in summary|in conclusion|long story short)\b/i;
 /** Lines of at least this many words are compared for near-duplicates (a short refrain like "Same words. Every time." may return). */

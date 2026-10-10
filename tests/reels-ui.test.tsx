@@ -30,7 +30,7 @@ const ok = async () => ({ ok: true as const });
 const actions = vi.hoisted(() => ({
   saveReelScriptAction: vi.fn(), approveReelAction: vi.fn(), rewriteReelScriptAction: vi.fn(), deleteReelAction: vi.fn(),
   redoReelSceneAction: vi.fn(), skipReelSceneAction: vi.fn(), rerenderReelAction: vi.fn(), retryReelAction: vi.fn(),
-  writeReelScriptAction: vi.fn(),
+  writeReelScriptAction: vi.fn(), suggestReelTopicsAction: vi.fn(),
 }));
 vi.mock("@/lib/actions/reels", () => actions);
 
@@ -379,6 +379,82 @@ describe("list, new reel, setup, nav", () => {
     await act(async () => { fireEvent.click(btn(/Write script/)); });
     expect(actions.writeReelScriptAction).toHaveBeenCalledWith({ topic: "bedtime battles" });
     await waitFor(() => expect(push).toHaveBeenCalledWith(`/reels/${RID}`));
+  });
+
+  describe("new reel: Suggest topics", () => {
+    const IDEAS = [
+      { topic: "The 2-Choice Rule: \"red cup or blue cup?\" ends power struggles", format: "named_method", hook: "Power struggles at every meal? Try the 2-Choice Rule.", why: "How two small choices end the fight", source: "bank", topicId: "two-choice-rule", health: false },
+      { topic: "Your toddler bites at daycare: what to say right away", format: "problem_fix", hook: "Your toddler bites at daycare? Here's what to say.", why: "Two calm steps that help biting stop", source: "fresh", health: false },
+      { topic: "Grandma said: bundle up a fever and sweat it out", format: "lola_science", hook: "Grandma said sweat out a fever. Doctors disagree.", why: "What helps a feverish child feel better", source: "bank", topicId: "sweat-out-fever", health: true },
+      { topic: "A sick toddler who won't drink: gentle comfort ideas", format: "scene_lesson", hook: "Your sick toddler won't drink? Try this tonight.", why: "Small ways to help a sick child sip", source: "fresh", health: true },
+      { topic: "3 phrases to say instead of yelling", format: "say_this", hook: "Stop yelling \"hurry up\". Say this instead.", why: "Three calm phrases for the hardest moments", source: "bank", topicId: "instead-of-yelling", health: false },
+    ];
+    const MORE = IDEAS.map((i, n) => ({ ...i, topic: `${i.topic} (more ${n})`, topicId: i.topicId ? `${i.topicId}-x` : undefined }));
+    const cards = () => within(screen.getByRole("list", { name: "Topic ideas" })).getAllByRole("button");
+
+    it("shows a loading line, then 5 cards: topic, format chip, quoted hook, why, a health badge", async () => {
+      let resolve!: (v: unknown) => void;
+      actions.suggestReelTopicsAction.mockImplementation(() => new Promise((r) => { resolve = r; }));
+      render(<NewReelForm />);
+      await act(async () => { fireEvent.click(btn(/Suggest topics/)); });
+      expect(actions.suggestReelTopicsAction).toHaveBeenCalledWith({ exclude: [] });
+      expect(screen.getByText(/Finding fresh topics… about 10 seconds/)).toBeTruthy();
+      await act(async () => { resolve({ ok: true, ideas: IDEAS }); });
+      expect(cards()).toHaveLength(5);
+      const first = cards()[0];
+      expect(first.getAttribute("aria-pressed")).toBe("false");
+      expect(first.textContent).toContain("Named method");
+      expect(first.textContent).toContain("\u201cPower struggles at every meal? Try the 2-Choice Rule.\u201d");
+      expect(first.textContent).toContain("How two small choices end the fight");
+      expect(cards()[2].textContent).toContain("Health");
+      expect(cards()[0].textContent).not.toContain("Health");
+    });
+
+    it("tap a card: selected, fills the topic box, Write script for this topic sends its format, bank id and hook", async () => {
+      actions.suggestReelTopicsAction.mockResolvedValue({ ok: true, ideas: IDEAS });
+      actions.writeReelScriptAction.mockImplementation(async () => ({ ok: true, reelId: RID }));
+      render(<NewReelForm />);
+      await act(async () => { fireEvent.click(btn(/Suggest topics/)); });
+      fireEvent.click(cards()[2]);
+      expect(cards()[2].getAttribute("aria-pressed")).toBe("true");
+      expect((screen.getByRole("textbox", { name: /Topic/ }) as HTMLInputElement).value).toBe(IDEAS[2].topic);
+      await act(async () => { fireEvent.click(btn("Write script for this topic")); });
+      expect(actions.writeReelScriptAction).toHaveBeenLastCalledWith({ topic: IDEAS[2].topic, format: "lola_science", hook: IDEAS[2].hook, topicId: "sweat-out-fever" });
+    });
+
+    it("a fresh health card sends its health flag and no bank id", async () => {
+      actions.suggestReelTopicsAction.mockResolvedValue({ ok: true, ideas: IDEAS });
+      actions.writeReelScriptAction.mockImplementation(async () => ({ ok: true, reelId: RID }));
+      render(<NewReelForm />);
+      await act(async () => { fireEvent.click(btn(/Suggest topics/)); });
+      fireEvent.click(cards()[3]);
+      await act(async () => { fireEvent.click(btn("Write script for this topic")); });
+      expect(actions.writeReelScriptAction).toHaveBeenLastCalledWith({ topic: IDEAS[3].topic, format: "scene_lesson", hook: IDEAS[3].hook, health: true });
+    });
+
+    it("typing in the box drops the card (rotation again); More ideas excludes every topic shown", async () => {
+      actions.suggestReelTopicsAction.mockResolvedValueOnce({ ok: true, ideas: IDEAS }).mockResolvedValueOnce({ ok: true, ideas: MORE });
+      actions.writeReelScriptAction.mockImplementation(async () => ({ ok: true, reelId: RID }));
+      render(<NewReelForm />);
+      await act(async () => { fireEvent.click(btn(/Suggest topics/)); });
+      fireEvent.click(cards()[0]);
+      expect(btn("Write script for this topic")).toBeTruthy();
+      fireEvent.change(screen.getByRole("textbox", { name: /Topic/ }), { target: { value: "Two choices at bath time" } });
+      expect(cards()[0].getAttribute("aria-pressed")).toBe("false");
+      expect(screen.queryByRole("button", { name: "Write script for this topic" })).toBeNull();
+      await act(async () => { fireEvent.click(btn(/More ideas/)); });
+      expect(actions.suggestReelTopicsAction).toHaveBeenLastCalledWith({ exclude: IDEAS.map((i) => i.topic) });
+      expect(cards().map((c) => c.textContent)).toEqual(expect.arrayContaining([expect.stringContaining("(more 0)")]));
+      await act(async () => { fireEvent.click(btn("Write script")); });
+      expect(actions.writeReelScriptAction).toHaveBeenLastCalledWith({ topic: "Two choices at bath time" });
+    });
+
+    it("a failed suggestion shows inline", async () => {
+      actions.suggestReelTopicsAction.mockResolvedValue({ ok: false, error: "Not signed in." });
+      render(<NewReelForm />);
+      await act(async () => { fireEvent.click(btn(/Suggest topics/)); });
+      expect(screen.getByRole("alert").textContent).toContain("Not signed in.");
+    });
   });
 
   it("new reel: the help says the AI writes a 60–90 second lesson", () => {
