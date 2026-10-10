@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { FORMAT_SPECS, keyPhrase, nextFormat, REEL_FORMATS, isReelFormat } from "@/lib/reels/formats";
 import { isHealthTopic, pickTopic, REEL_TOPICS, topicById } from "@/lib/reels/topics";
+import { filipinoWord, jargonWord } from "@/lib/ai/plain-words";
 
 describe("REEL_FORMATS / FORMAT_SPECS", () => {
   it("five formats, each with a label, its beats and the quotes it needs", () => {
@@ -12,9 +13,29 @@ describe("REEL_FORMATS / FORMAT_SPECS", () => {
       expect(s.beats.length).toBeGreaterThanOrEqual(4);
       expect(s.minQuotes).toBeGreaterThanOrEqual(1);
     }
-    expect(FORMAT_SPECS.named_method.minQuotes).toBeGreaterThanOrEqual(3);
-    expect(FORMAT_SPECS.say_this.minQuotes).toBeGreaterThanOrEqual(3);
-    expect(FORMAT_SPECS.lola_science.beats.join(" ")).toMatch(/lola/i);
+    // 60-90 s reels: more substance per format, so more exact words to say
+    expect(FORMAT_SPECS.named_method.minQuotes).toBeGreaterThanOrEqual(4);
+    expect(FORMAT_SPECS.say_this.minQuotes).toBeGreaterThanOrEqual(4);
+    for (const x of ["lola_science", "scene_lesson", "problem_fix"] as const) expect(FORMAT_SPECS[x].minQuotes).toBeGreaterThanOrEqual(2);
+    expect(FORMAT_SPECS.named_method.beats.join(" ")).toMatch(/STEPS 1-5.*4-5 steps/);
+    expect(FORMAT_SPECS.say_this.beats.join(" ")).toMatch(/SWAPS 1-5.*4-5 swaps/);
+    expect(FORMAT_SPECS.lola_science.beats.join(" ")).toMatch(/WHY GRANDMA BELIEVED IT/);
+    expect(FORMAT_SPECS.lola_science.beats.join(" ")).toMatch(/DO THIS INSTEAD: 3-4/);
+    expect(FORMAT_SPECS.scene_lesson.beats.join(" ")).toMatch(/SCENE: 2-3 short lines/);
+    expect(FORMAT_SPECS.scene_lesson.beats.join(" ")).toMatch(/WHEN IT DOESN'T WORK/);
+    expect(FORMAT_SPECS.problem_fix.beats.join(" ")).toMatch(/FIX 2/);
+    expect(FORMAT_SPECS.problem_fix.beats.join(" ")).toMatch(/IF THAT DOESN'T WORK/);
+    // every format re-hooks the viewer at least once mid-reel
+    for (const x of REEL_FORMATS) expect(FORMAT_SPECS[x].beats.join(" "), x).toMatch(/RE-HOOK/);
+    // global audience (2026-10-10): the id stays (DB check constraint), the format is "Grandma said, science says"
+    expect(FORMAT_SPECS.lola_science.label).toBe("Grandma said, science says");
+    expect(FORMAT_SPECS.lola_science.beats[0]).toMatch(/Grandma said .*Here's what doctors say/);
+    expect(FORMAT_SPECS.lola_science.beats.join(" ")).toMatch(/Never mock or ridicule grandma/);
+    for (const f of REEL_FORMATS) {
+      const all = [FORMAT_SPECS[f].label, ...FORMAT_SPECS[f].beats].join(" ");
+      expect(filipinoWord(all), f).toBeNull();
+      expect(all, f).not.toMatch(/local detail|Filipino/i);
+    }
     expect(isReelFormat("say_this")).toBe(true);
     expect(isReelFormat("pov")).toBe(false);
     expect(isReelFormat(null)).toBe(false);
@@ -71,6 +92,34 @@ describe("REEL_TOPICS", () => {
   });
 });
 
+describe("REEL_TOPICS for a global audience, in plain words (2026-10-10)", () => {
+  it("no topic, fact, safety line or anchor holds a Filipino / Tagalog word or jargon (ids are internal: kept for older reels)", () => {
+    for (const t of REEL_TOPICS) {
+      for (const s of [t.topic, ...(t.facts ?? []), t.safety ?? "", t.anchor ?? ""]) {
+        expect(filipinoWord(s), `${t.id}: ${s}`).toBeNull();
+        expect(jargonWord(s), `${t.id}: ${s}`).toBeNull();
+      }
+      expect(t.topic, t.id).not.toMatch(/OFW|Filipino|beso|mano|ubusin|palo/i);
+    }
+  });
+
+  it("Grandma said: at least 8 old wives' tales known in many countries with vetted facts and a safety line", () => {
+    const myths = REEL_TOPICS.filter((t) => t.format === "lola_science" && t.health && /^Grandma said/.test(t.topic));
+    expect(myths.length).toBeGreaterThanOrEqual(8);
+    for (const id of ["feed-cold-starve-fever", "cereal-in-bottle", "teething-fever", "baby-walkers", "wet-hair-cold", "bottle-in-bed", "honey-for-babies"]) {
+      expect(myths.map((t) => t.id), id).toContain(id);
+    }
+    expect(topicById("honey-for-babies")!.facts!.join(" ")).toMatch(/younger than 1|under 1|before 1/i);
+    expect(topicById("teething-fever")!.facts!.join(" ")).toMatch(/101/);
+  });
+
+  it("a parent far away: working abroad (no OFW acronym), travel, deployment, long-distance co-parent", () => {
+    const far = REEL_TOPICS.filter((t) => t.format === "scene_lesson" && /abroad|travels for work|deploy|long-distance|another city/i.test(t.topic));
+    expect(far.length).toBeGreaterThanOrEqual(4);
+    expect(far.some((t) => /working abroad/.test(t.topic))).toBe(true);
+  });
+});
+
 describe("pickTopic", () => {
   const seq = (...xs: number[]) => { let i = 0; return () => xs[i++ % xs.length]; };
 
@@ -104,7 +153,8 @@ describe("isHealthTopic / topicById", () => {
     for (const t of ["Sharing toys with a cousin", "Bedtime stalling", "", null]) expect(isHealthTopic(t), String(t)).toBe(false);
   });
   it("finds a bank topic by id", () => {
-    expect(topicById("kulob-fever")?.health).toBe(true);
+    expect(topicById("sweat-out-fever")?.health).toBe(true);
+    expect(topicById("kulob-fever")).toBeNull();
     expect(topicById("nope")).toBeNull();
     expect(topicById(null)).toBeNull();
   });
@@ -137,11 +187,14 @@ describe("vetted facts, safety lines and anchors", () => {
     expect(topicById("bathe-sick-child")!.facts!.join(" ")).not.toMatch(/(lower|bring|cool).*(fever|temperature)/i);
   });
 
-  it("anchors are a verified term and who uses it", () => {
+  it("anchors are a plain-language claim and who says it, never a jargon term", () => {
     const anchored = REEL_TOPICS.filter((t) => t.anchor);
     expect(anchored.length).toBeGreaterThan(5);
-    for (const t of anchored) expect(t.anchor, t.id).toMatch(/^.+ — .+$/);
-    expect(topicById("labeled-praise")!.anchor).toMatch(/^labeled praise — Parent-Child Interaction Therapy/);
+    for (const t of anchored) {
+      expect(t.anchor, t.id).toMatch(/^.+ — .+$/);
+      expect(jargonWord(t.anchor), t.id).toBeNull();
+    }
+    expect(topicById("labeled-praise")!.anchor).toMatch(/^praise that names exactly what your child did .* — child psychologists$/);
     expect(topicById("second-wind")!.anchor).toBeUndefined();
   });
 });

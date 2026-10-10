@@ -27,7 +27,8 @@ type DbError = { message: string; code?: string };
 const TOPIC_MAX = 120;
 /** One budget for Gemini across the first try and up to 2 rewrites (the reels pages allow 300 s). */
 const SCRIPT_BUDGET_MS = 270_000;
-const CALL_MAX_MS = 120_000;
+/** One call's cap: a 60-90 s script takes Opus 5.5 about 105-140 s. */
+const CALL_MAX_MS = 180_000;
 /** Below this, another Gemini call cannot finish: stop and show the last error. */
 const CALL_MIN_MS = 10_000;
 const TRIES = 3;
@@ -185,7 +186,7 @@ interface Draft { script: ReelScript; theme: ReelTheme; has007: boolean; has014:
 
 /**
  * Gemini writes a script for the reel's theme in its format; a title already made (case/space-insensitive) or a script
- * that fails validation is rewritten, up to 2 times, all within one 270 s budget (each call gets at most 120 s).
+ * that fails validation is rewritten, up to 2 times, all within one 270 s budget (each call gets at most 180 s).
  */
 async function draftScript(sb: SB, topic: string | undefined, reelThemeId?: string | null, keep?: { format?: string | null; topicId?: string | null }): Promise<ActionResult<Draft>> {
   const [made, set] = await Promise.all([madeReels(sb), scriptSettings(sb)]);

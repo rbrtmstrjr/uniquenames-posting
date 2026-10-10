@@ -26,8 +26,12 @@ const SHOTS = [
   ["detail", "mom"], ["medium", "both"], ["broll", "none"], ["medium", "baby"], ["close", "both"],
 ] as const;
 // line 4 carries the exact words to say (a quote may hold "me": the mom says it, not the narrator)
-const QUOTE_LINE = 'Say "you are safe with me" softly, then hold on.';
-const scene = (n: number, narration = n === 0 ? HOOK : n === 3 ? QUOTE_LINE : `Line number ${n} is a short spoken phrase for mama.`) => ({
+const QUOTE_LINE = `Say "you are safe with me," then whisper "I'm here."`;
+// every filler line is different (the validator refuses a line that repeats an earlier one): 10 words each
+const NOUNS = ["socks", "spoons", "blankets", "pillows", "crayons", "slippers", "bottles", "buttons", "mangoes", "puzzles", "kites", "jars",
+  "drums", "bubbles", "teacups", "ribbons", "pebbles", "shells", "lanterns", "marbles", "noodles", "blocks", "boats", "bells", "combs",
+  "towels", "stars", "rattles", "baskets", "wagons", "whistles", "candles", "mittens", "feathers", "beads", "cookies", "trumpets", "kettles", "fans", "ducks"];
+const scene = (n: number, narration = n === 0 ? HOOK : n === 3 ? QUOTE_LINE : `Line number ${n} is a short spoken phrase about ${NOUNS[n]}.`) => ({
   beat: n === 0 ? "hook" : "build", narration, idea: `The mom doll rocks the baby doll, moment ${n}.`, setting: n === 0 ? "the nursery at 3 a.m." : `the sala, moment ${n}`,
   emotion: "tender", action: "rocks gently, both arms wrapped around the baby doll",
   shot_size: SHOTS[n % 10][0], subject: SHOTS[n % 10][1], punch: "", time_jump: false,
@@ -44,9 +48,10 @@ describe("reelScriptPrompt", () => {
   it("carries the topic, the format and the line range", () => {
     const { system, prompt } = reelScriptPrompt({ topic: "teething at night", maxScenes: 32, alreadyMade: [], format: PF });
     expect(prompt).toContain("Topic: teething at night");
-    expect(prompt).toContain("-25 lines");
+    expect(prompt).toContain("19-32 lines");
     expect(prompt).toContain("FORMAT: Problem, why, fix (problem_fix)");
-    expect(system).toMatch(/Filipino moms/);
+    expect(system).toMatch(/moms of babies and young kids \(0-7\) around the world; most are in the Philippines, others in the US, Africa, Australia/);
+    expect(system).not.toMatch(/Filipino moms|loves her 'anak'|local detail|lola wisdom/);
     expect(system).toMatch(/early years/);
     expect(system).toMatch(/teaches ONE thing/);
     expect(system).not.toMatch(/storyteller/);
@@ -85,12 +90,14 @@ describe("reelScriptPrompt", () => {
     expect(p).not.toContain(`- Reel title ${ALREADY_MADE_CAP}\n`);
   });
 
-  it("the 30-45 s length: word budget, line count, short lines, never 'camera'", () => {
-    expect(REEL_SECONDS).toEqual({ lo: 30, hi: 45, floor: 15 });
+  it("the 60-90 s length: word budget, the 65-80 s aim, line count, short lines, never 'camera'", () => {
+    expect(REEL_SECONDS).toEqual({ lo: 60, hi: 90, floor: 15 });
     const { prompt } = reelScriptPrompt(input30);
-    expect(prompt).toContain("narration for a 30-45 second reel at about 3.8 words per second = 114-171 words");
-    expect(prompt).toContain("12-25 lines");
-    expect(reelScriptPrompt({ ...input30, speed: 1.05 }).prompt).toContain("30-45 second reel at about 4 words per second = 120-180 words");
+    expect(prompt).toContain("narration for a 60-90 second reel at about 3.8 words per second = 228-342 words");
+    expect(prompt).toContain("AIM for 247-304 words (about 65-80 seconds)");
+    expect(prompt).toContain("Under 228 words (under 60 seconds) is TOO SHORT");
+    expect(prompt).toContain("19-30 lines");
+    expect(reelScriptPrompt({ ...input30, speed: 1.05 }).prompt).toContain("60-90 second reel at about 4 words per second = 239-359 words");
     expect(prompt).toMatch(/Sentences of 4-12 words \(never more than 15\)/);
     expect(prompt).toMatch(/BEFORE ANSWERING, COUNT/);
     expect(prompt).not.toMatch(/\bcamera\b/i);
@@ -117,6 +124,21 @@ describe("reelScriptPrompt", () => {
     expect(prompt).not.toMatch(/identity line|EMOTIONAL TURN|loops back to line 1|ONE short STORY/);
   });
 
+  it("retention for the longer reel: open loops, a re-hook every 10-15 s, substance never padding", () => {
+    const { prompt } = reelScriptPrompt(input30);
+    expect(prompt).toMatch(/RETENTION FOR A 60-90 SECOND REEL/);
+    expect(prompt).toMatch(/OPEN LOOP/);
+    expect(prompt).toMatch(/A RE-HOOK every 10-15 seconds \(about every 4-6 lines\)/);
+    expect(prompt).toMatch(/Here's the part nobody tells you/);
+    expect(prompt).toMatch(/MORE SUBSTANCE, NEVER PADDING/);
+    expect(prompt).toMatch(/no recap \('as I said', 'like I said', 'to sum up', 'let's recap'\)/);
+    expect(prompt).toMatch(/SELF-CHECK.*a re-hook every 4-6 lines.*no line repeats an earlier one/s);
+    expect(prompt).not.toMatch(/re-hook every 8-12 seconds/);
+    // scene_lesson: the pivot line is part of the self-check (the validator wants it by line 5)
+    expect(reelScriptPrompt({ ...input30, format: "scene_lesson" }).prompt).toMatch(/SELF-CHECK.*the pivot \('Here's what's really happening\.'\) is line 5 or earlier/s);
+    expect(prompt).not.toMatch(/the pivot \('Here's/);
+  });
+
   it("health topics: soft wording and one generic safety line; other topics never get it", () => {
     const h = reelScriptPrompt({ ...input10, format: "lola_science", topic: "kulob to sweat out a fever", topicHealth: true }).prompt;
     expect(h).toMatch(/HEALTH TOPIC/);
@@ -129,13 +151,14 @@ describe("reelScriptPrompt", () => {
   it("on-screen labels: optional, short, never on line 1", () => {
     const { prompt } = reelScriptPrompt(input10);
     expect(prompt).toMatch(/"on_screen".*at most 8 words/);
+    expect(prompt).toMatch(/"on_screen".*3-8 lines per reel/);
     expect(prompt).toMatch(/ALWAYS "" on line 1/);
   });
 
   it("the pictures act out the advice, with only the parent and the child", () => {
     const { prompt } = reelScriptPrompt({ ...input10, theme: { id: "crayon", faces: true } });
     expect(prompt).toMatch(/PICTURES SHOW THE ADVICE/);
-    expect(prompt).toMatch(/never lola, a sibling/);
+    expect(prompt).toMatch(/never grandma, a sibling/);
   });
 
   it("asks for a varied shot list: sizes, subjects, the mix, adjacency, line 1 face, establishing wide, mirrored end", async () => {
@@ -171,15 +194,20 @@ describe("reelScriptPrompt", () => {
   });
 });
 
-describe("reelWordBudget (30-45 s at 3.8 words/s × speed)", () => {
-  it("1×: 114-171 words; few images shrink it, never under 18 s of speech; accepted within 90-110 %", () => {
-    expect(reelWordBudget(30)).toEqual({ lo: 114, hi: 171, minScenes: 12, maxLines: 25, minWords: 103, maxWords: 188, secLo: 30, secHi: 45, wps: 3.8 });
-    expect(reelWordBudget(40)).toMatchObject({ lo: 114, hi: 171, minScenes: 12 });
-    expect(reelWordBudget(10)).toMatchObject({ lo: 70, hi: 100, minScenes: 7, maxLines: 10, minWords: 63, maxWords: 110 });
+describe("reelWordBudget (60-90 s at 3.8 words/s × speed)", () => {
+  it("1×: 228-342 words (aim 247-304 = 65-80 s); at least 60 s is required; few images shrink it, never under 18 s of speech", () => {
+    expect(reelWordBudget(40)).toEqual({
+      lo: 228, hi: 342, aimLo: 247, aimHi: 304, minScenes: 19, maxLines: 40, minWords: 228, maxWords: 376,
+      secLo: 60, secHi: 90, secAimLo: 65, secAimHi: 80, wps: 3.8,
+    });
+    // 60 s fits the owner's 40 images (and 30) with short lines
+    expect(reelWordBudget(30)).toMatchObject({ lo: 228, hi: 342, minScenes: 19, maxLines: 30, minWords: 228 });
+    expect(228 / 30).toBeLessThan(LINE_MAX_WORDS);
+    expect(reelWordBudget(10)).toMatchObject({ lo: 80, hi: 120, minScenes: 7, maxLines: 10, minWords: 80, maxWords: 132 });
     const fast = reelWordBudget(10, 1.25);
     expect(fast.lo).toBe(86);   // 18 s at 4.75 words/s
     expect(fast.minWords / (3.8 * 1.25)).toBeGreaterThanOrEqual(15);
-    expect(reelWordBudget(40, 1.05)).toMatchObject({ lo: 120, hi: 180, minWords: 108, maxWords: 198, secLo: 30, secHi: 45, wps: 4 });
+    expect(reelWordBudget(40, 1.05)).toMatchObject({ lo: 239, hi: 359, minWords: 239, maxWords: 394, secLo: 60, secHi: 90, secAimLo: 65, secAimHi: 80, wps: 4 });
   });
 });
 
@@ -208,13 +236,17 @@ describe("the value-first validator", () => {
   });
 
   it("calls to action anywhere: like / comment / share / tag / follow / save / vote / watch till the end", () => {
-    for (const cta of ["Watch till the end for the last step.", "Vote below: keep it or let go?", "Like this if it helped your home."]) {
+    for (const cta of ["Watch till the end for the last step.", "Vote below: keep it or let go?", "Like this if it helped your home.", "Tired mama? Like this video and rest."]) {
       expect(val(withLine(6, cta)), cta).toEqual({ ok: false, error: "Line 7 asks viewers to follow, comment, tag or share." });
+    }
+    // "like this" introducing the words to say is no call to action (the longer reels say it often)
+    for (const ok of ['Say it like this: "Bath, then cuddles."', "It sounds like this, every single night.", "It feels like this is never ending."]) {
+      expect(val(withLine(6, ok)).ok, ok).toBe(true);
     }
   });
 
   it("first-person narration is refused; the mom's quoted words and 'we all' are fine", () => {
-    for (const fp of ["I tried this with my own son last week.", "We learned this the hard way, mama.", "It works for us every single night.", "My lola always said this to our family."]) {
+    for (const fp of ["I tried this with my own son last week.", "We learned this the hard way, mama.", "It works for us every single night.", "My mom always said this to our family."]) {
       expect(val(withLine(5, fp)), fp).toMatchObject({ ok: false, error: expect.stringMatching(/^Line 6 speaks as I \/ we \("\w+"\): talk to the mom as you\.$/) });
     }
     expect(val(withLine(5, "I tried this with my own son last week."))).toEqual({ ok: false, error: 'Line 6 speaks as I / we ("I"): talk to the mom as you.' });
@@ -231,8 +263,9 @@ describe("the value-first validator", () => {
   it("fewer quoted phrases than the format needs is refused", () => {
     const none = script(10);
     none.scenes[3] = scene(3, "Line number 3 is a short spoken phrase for mama.");
-    expect(val(none)).toEqual({ ok: false, error: "The script needs the exact words to say in quotes (at least 1, found 0)." });
-    expect(val(script(10), "say_this")).toEqual({ ok: false, error: "The script needs the exact words to say in quotes (at least 3, found 1)." });
+    expect(val(none)).toEqual({ ok: false, error: "The script needs the exact words to say in quotes (at least 2, found 0)." });
+    expect(val(script(10), "say_this")).toEqual({ ok: false, error: "The script needs the exact words to say in quotes (at least 6, found 2)." });
+    expect(val(script(10), "named_method")).toEqual({ ok: false, error: "The script needs the exact words to say in quotes (at least 4, found 2)." });
   });
 
   it("a health topic needs a safety line (doctor / pediatrician)", () => {
@@ -240,10 +273,27 @@ describe("the value-first validator", () => {
     expect(val(withLine(8, "If you're worried, call your pediatrician today."), PF, { health: true }).ok).toBe(true);
   });
 
-  it("too many words for 45 s is refused", () => {
+  it("too many words for 90 s is refused", () => {
     const long = script(10);
-    long.scenes = long.scenes.map((x, i) => (i === 0 || i === 3 ? x : { ...x, narration: "Line number five is a much longer spoken phrase for you, mama." }));
-    expect(val(long)).toEqual({ ok: false, error: "Script too long: 114 words (at most 110)." });
+    long.scenes = long.scenes.map((x, i) => (i === 0 || i === 3 ? x : { ...x, narration: "Line number five is a much longer spoken phrase for you, mama, every single night." }));
+    expect(val(long)).toEqual({ ok: false, error: "Script too long: 138 words (at most 132)." });
+  });
+
+  it("padding is refused: a recap / filler phrase, or a line that repeats an earlier one", () => {
+    for (const pad of ["To sum up, get low and name the feeling.", "Let's recap the three steps one more time.", "Like I said, the words matter most here.", "As we saw, naming it calms the storm."]) {
+      expect(val(withLine(6, pad)), pad).toMatchObject({ ok: false, error: expect.stringMatching(/^Line 7 is filler or a recap/) });
+    }
+    expect(val(withLine(6, "To sum up, get low and name the feeling."))).toEqual({ ok: false, error: 'Line 7 is filler or a recap ("To sum up"): every line must say something new.' });
+    // the same line again, or with one word swapped
+    expect(val(withLine(7, "Line number 2 is a short spoken phrase about blankets."))).toEqual({ ok: false, error: "Line 8 repeats line 3: every line must say something new." });
+    expect(val(withLine(7, "Line number 2 is a short spoken phrase about kittens."))).toEqual({ ok: false, error: "Line 8 repeats line 3: every line must say something new." });
+    // a short refrain ("Same words. Every time.") may come back; parallel steps with their own words are fine
+    const refrain = withLine(5, "Same words. Every time.");
+    refrain.scenes[8] = { ...refrain.scenes[8], narration: "Same words. Every time." };
+    expect(val(refrain).ok).toBe(true);
+    const swaps = withLine(4, 'Instead of "Stop crying," say "You\'re sad."');
+    swaps.scenes[6] = { ...swaps.scenes[6], narration: 'Instead of "Stop hitting," say "Gentle hands."' };
+    expect(val(swaps).ok).toBe(true);
   });
 
   it("on_screen: kept when short; dropped on line 1, when too long or empty; never rejected", () => {
@@ -259,11 +309,11 @@ describe("the value-first validator", () => {
     expect(r.script.scenes.map((x) => x.on_screen)).toEqual([null, null, "1/3 · “You're mad.”", null, null, null, null, null, null, null]);
   });
 
-  it("at most 5 lines keep a label (the first ones)", () => {
+  it("at most 8 lines keep a label (the first ones)", () => {
     const s = script(10);
     s.scenes = s.scenes.map((x, i) => ({ ...x, on_screen: `Step ${i}` })) as never;
     const r = val(s);
-    expect(r.ok && r.script.scenes.map((x) => x.on_screen)).toEqual([null, "Step 1", "Step 2", "Step 3", "Step 4", "Step 5", null, null, null, null]);
+    expect(r.ok && r.script.scenes.map((x) => x.on_screen)).toEqual([null, "Step 1", "Step 2", "Step 3", "Step 4", "Step 5", "Step 6", "Step 7", "Step 8", null]);
   });
 
   it("the hook card names this format's thing, never another format's series name", () => {
@@ -281,8 +331,8 @@ describe("the value-first validator", () => {
   });
 
   it("a title written like an id is turned back into words", () => {
-    const r = val(script(10, { title: "lola_science_never_bathe" }));
-    expect(r.ok && r.script.title).toBe("lola science never bathe");
+    const r = val(script(10, { title: "grandma_science_never_bathe" }));
+    expect(r.ok && r.script.title).toBe("grandma science never bathe");
   });
 
   it("the script carries the requested format", () => {
@@ -302,12 +352,12 @@ describe("the value-first validator", () => {
         'Instead of "Stop crying," say "I\'m right here."', "Crying is how small bodies let stress out.",
         'Instead of "You\'re fine," say "That hurt, huh?"', "Feeling believed is what lets them move on.",
         "Bonus: say less, sit closer, and breathe slowly.", "Small words make a big change in your home."],
-      lola_science: ["Lola said never bathe a sick child. Doctors say otherwise.", "Lola wanted to keep you warm and safe.",
+      lola_science: ["Grandma said never bathe a sick child. Doctors say otherwise.", "Grandma wanted to keep you warm and safe.",
         "Today, pediatricians say a lukewarm bath can help a fever.", "It cools the skin gently and helps them rest.",
         'Use lukewarm water and say "Quick bath, then cuddles."', "Dry them fast and dress them in light clothes.",
-        "Offer small sips of water often through the day.", "If you're worried, call your pediatrician right away.",
-        "Keep it or let go? This one: let go, gently.", "Lola's love stays. Only the old rule goes."],
-      scene_lesson: ['Your toddler throws his shoe. You\'re late. Don\'t say "Stop it."', "The jeep is waiting and the shoe is under the sofa.",
+        'Offer small sips often and say "Sip, then cuddle."', "If you're worried, call your pediatrician right away.",
+        "Keep it or let go? This one: let go, gently.", "Grandma's love stays. Only the old rule goes."],
+      scene_lesson: ['Your toddler throws his shoe. You\'re late. Don\'t say "Stop it."', "The car seat is waiting and the shoe is under the sofa.",
         "Here's what's really happening right now.", "Switching tasks is hard for a three-year-old brain.",
         "He isn't fighting you. He is stuck in the moment.", 'Try a two-minute warning, then a job: "You carry the keys."',
         "A job gives his hands and his brain somewhere to go.", "Leaving becomes his idea, not your order.",
@@ -329,12 +379,12 @@ describe("the value-first validator", () => {
 
 describe("writeReelScript", () => {
   it("uses the script model and returns a typed script with the hook card, tags and the v2 per-line fields", async () => {
-    generateJson.mockResolvedValueOnce({ ok: true, data: script(16) });
+    generateJson.mockResolvedValueOnce({ ok: true, data: script(24) });
     const r = await writeReelScript(input30);
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(r.script).toMatchObject({ title: "The Last Time You Carry Them", stage: "baby", format: PF, hook_text: HOOK_TEXT, cast: { ...cast, child_age: "a baby" } });
-    expect(r.script.scenes).toHaveLength(16);
+    expect(r.script.scenes).toHaveLength(24);
     expect(r.script.scenes[0]).toEqual({
       beat: "hook", narration: HOOK, idea: "The mom doll rocks the baby doll, moment 0 — the nursery at 3 a.m", emotion: "tender",
       action: "rocks gently, both arms wrapped around the baby doll", shot_size: "close", subject: "both", punch: null, time_jump: false, on_screen: null,
@@ -381,12 +431,11 @@ describe("writeReelScript", () => {
     generateJson.mockResolvedValueOnce({ ok: true, data: script(12) });
     const r = await writeReelScript(input10);
     expect(r.ok && r.script.scenes.length).toBe(10);
-    generateJson.mockResolvedValueOnce({ ok: true, data: script(11) });
-    expect(await writeReelScript(input30)).toEqual({ ok: false, error: "Script too short: 11 scenes (needs at least 12)." });
-    const s = script(16);
-    s.scenes = s.scenes.map((x, i) => (i === 0 || i === 3 ? x : { ...x, narration: "You hold them close." }));
-    generateJson.mockResolvedValueOnce({ ok: true, data: s });
-    expect(await writeReelScript(input30)).toEqual({ ok: false, error: "Script too short: 74 words (needs at least 103)." });
+    generateJson.mockResolvedValueOnce({ ok: true, data: script(18) });
+    expect(await writeReelScript(input30)).toEqual({ ok: false, error: "Script too short: 18 scenes (needs at least 19)." });
+    // 60 s is the minimum: 22 lines that stop at 218 words (57 s) are refused
+    generateJson.mockResolvedValueOnce({ ok: true, data: script(22) });
+    expect(await writeReelScript(input30)).toEqual({ ok: false, error: "Script too short: 218 words (needs at least 228)." });
     generateJson.mockResolvedValueOnce({ ok: true, data: script(1) });
     expect(await writeReelScript(input10)).toMatchObject({ ok: false });
   });
@@ -478,7 +527,7 @@ describe("writeReelScript", () => {
 
 describe("the shot list, punches, time jumps and the loop (playbook v2)", () => {
   it("Gemini's drift (every line a medium of mom + baby) is repaired into a list that follows every rule", async () => {
-    const s = script(16);
+    const s = script(24);
     s.scenes = s.scenes.map((x) => ({ ...x, shot_size: "medium", subject: "both" }));
     generateJson.mockResolvedValueOnce({ ok: true, data: s });
     const r = await writeReelScript(input30);
@@ -576,7 +625,8 @@ describe("Crayon / Red Thread scripts (012): the picture is written to the owner
     expect(c).toMatch(/The LAST line is the warm close/);
     const r = reelScriptPrompt({ ...input10, theme: RED }).prompt;
     expect(r).toMatch(/THIS STYLE \(the owner's Red Thread guide\)/);
-    expect(r).toMatch(/OFW parent/);
+    expect(r).toMatch(/a parent working abroad or far away \(away for work, deployed\)/);
+    expect(r).not.toMatch(/OFW/);
     expect(r).toMatch(/NO colour words at all/);
     expect(r).toMatch(/Keep the wrists in view/);
     expect(r).toMatch(/"thread": .*plain\|tight\|stretched\|tangled\|loose/);
@@ -662,8 +712,8 @@ describe("health accuracy, verified anchors, the scene pivot (review fixes)", ()
   });
 
   it("a verified anchor is offered; without one, a plain anchor and never a coined expert term", () => {
-    expect(reelScriptPrompt({ ...input10, topicAnchor: "labeled praise — Parent-Child Interaction Therapy (PCIT)" }).prompt)
-      .toContain("use this verified term: labeled praise — Parent-Child Interaction Therapy (PCIT)");
+    expect(reelScriptPrompt({ ...input10, topicAnchor: "naming the feeling out loud helps a child calm down — child experts" }).prompt)
+      .toContain("use this checked one, in your own plain words ('Child experts say …'): naming the feeling out loud helps a child calm down — child experts");
     const p = reelScriptPrompt(input10).prompt;
     expect(p).toMatch(/never coin a term and attribute it to experts/);
     expect(p).toMatch(/Your own tip names .* are fine/);
@@ -679,20 +729,22 @@ describe("health accuracy, verified anchors, the scene pivot (review fixes)", ()
 
   it("refuses an expert-attributed term that isn't verified; vetted terms and the topic's anchor are fine", () => {
     expect(val(withLine(5, "Many sleep experts call it a wakeful window."))).toEqual({ ok: false, error: "Line 6 says experts call it something unverified: use a plain anchor." });
-    expect(val(withLine(5, "Psychologists call this labeled praise.")).ok).toBe(true);
+    // a named technique is jargon now (plain lessons, 2026-10-10)
+    expect(val(withLine(5, "Psychologists call this labeled praise."))).toEqual({ ok: false, error: 'Line 6 uses expert jargon ("labeled praise"): say it in plain everyday words.' });
     expect(val(withLine(5, "Pediatricians call it watching together."), PF, { anchor: "watching together — the American Academy of Pediatrics" }).ok).toBe(true);
     // the page's own tip name, not attributed to experts
     expect(val(withLine(5, "It's called the Two-Choice Rule, a tip to try.")).ok).toBe(true);
   });
 
-  it("scene_lesson: line 1 names the problem (no reassurance) and the pivot comes by line 4", () => {
+  it("scene_lesson: line 1 names the problem (no reassurance) and the pivot comes by line 5 (the scene may take 2-3 lines)", () => {
     const sl = (lines: Record<number, string>) => {
       const s = script(10, { format: "scene_lesson" });
       for (const [i, n] of Object.entries(lines)) s.scenes[Number(i)] = { ...s.scenes[Number(i)], narration: n };
       return val(s, "scene_lesson");
     };
     expect(sl({ 2: "Here's what's really happening." }).ok).toBe(true);
-    expect(sl({ 4: "Here's what's really happening." })).toEqual({ ok: false, error: "The pivot (\"Here's what's really happening\") must come by line 4." });
+    expect(sl({ 4: "Here's what's really happening." }).ok).toBe(true);
+    expect(sl({ 5: "Here's what's really happening." })).toEqual({ ok: false, error: "The pivot (\"Here's what's really happening\") must come by line 5." });
     expect(sl({ 0: "Your toddler walks away from calls. Don't feel bad.", 2: "Here's why." })).toEqual({ ok: false, error: "Line 1 must name the problem or the mistake, not reassure." });
   });
 
@@ -704,5 +756,76 @@ describe("health accuracy, verified anchors, the scene pivot (review fixes)", ()
     s.scenes[6] = { ...s.scenes[6], on_screen: "Say: \"Walking feet\"" } as never;
     const r = val(s);
     expect(r.ok && [2, 4, 5, 6].map((i) => r.script.scenes[i].on_screen)).toEqual(["Here is the real reason", "1/3 · Get low", 'Say: "Show mama your truck"', 'Say: "Walking feet"']);
+  });
+});
+
+describe("global audience and plain lessons (owner, 2026-10-10)", () => {
+  const val = (raw: unknown, format: ReelFormat = PF) => validateReelScript(raw, 10, 1, "knitted", { format });
+  const withLine = (i: number, narration: string, over: Record<string, unknown> = {}) => {
+    const s = script(10, over);
+    s.scenes[i] = { ...s.scenes[i], narration };
+    return s;
+  };
+
+  it("the prompt speaks to moms around the world in simple English, with no Filipino guidance left", () => {
+    const { system, prompt } = reelScriptPrompt({ ...input10, theme: { id: "crayon", faces: true } });
+    expect(system).toMatch(/everyday family life anywhere \(home, bedtime, bath time, mealtime, the park, the store, drop-off, a family visit\)/);
+    expect(system).toMatch(/simple, warm English anyone understands/i);
+    expect(system).not.toMatch(/American English|US spelling|car seat|Thanksgiving|dollars/);
+    expect(system).toMatch(/SIMPLE GLOBAL ENGLISH \(CRITICAL\): never a Filipino or Tagalog word or Taglish/);
+    expect(system).toMatch(/Grandparents are Grandma and Grandpa/);
+    for (const x of [system, prompt]) expect(x).not.toMatch(/Filipino moms|lola wisdom|'anak' fiercely|the sala on|a jeepney at|OFW|local detail/);
+    expect(reelScriptPrompt(input10).prompt).toMatch(/'the living room on a rainy afternoon', 'the park at dusk'/);
+    expect(reelScriptPrompt(input10).prompt).not.toMatch(/jeepney|the sala/);
+  });
+
+  it("the prompt asks for plain, simple, practical lessons with good / bad examples", () => {
+    const { system } = reelScriptPrompt(input10);
+    expect(system).toMatch(/PLAIN, SIMPLE LESSONS \(CRITICAL\)/);
+    expect(system).toMatch(/gets it on the first listen/);
+    expect(system).toMatch(/5th-6th grade reading level/);
+    expect(system).toMatch(/one idea per line/);
+    expect(system).toMatch(/Child experts say naming the feeling helps kids calm down/);
+    expect(system).toMatch(/never name a technique, study, therapy/);
+    expect(system).toMatch(/affect labeling, Parent-Child Interaction Therapy, PCIT, serve and return, co-regulation, executive function, amygdala/);
+    expect(system).toMatch(/'the Two-Choice Rule'\) are fine/);
+    expect(system.match(/- Bad: /g)?.length).toBe(2);
+    expect(system.match(/ Good: /g)?.length).toBe(2);
+    expect(system).toMatch(/never deep or abstract/);
+  });
+
+  it("the vetted claims are in plain words: no technique, therapy or study names", async () => {
+    const { jargonWord } = await import("@/lib/ai/plain-words");
+    const anchorLine = reelScriptPrompt(input10).prompt.split("\n").find((l) => l.includes("ONE soft anchor"))!;
+    expect(anchorLine).toMatch(/Facts you may state: /);
+    expect(jargonWord(anchorLine.split("Facts you may state: ")[1])).toBeNull();
+  });
+
+  it("refuses a Filipino / Tagalog word in a line, the hook card, a label or the title, and retries", () => {
+    expect(val(withLine(5, "Your anak is tired, so go slow."))).toEqual({ ok: false, error: 'Line 6 uses a Filipino / Tagalog word ("anak"): write simple English anyone understands.' });
+    expect(val(withLine(5, "It works naman, every single night."))).toEqual({ ok: false, error: 'Line 6 uses a Filipino / Tagalog word ("naman"): write simple English anyone understands.' });
+    expect(val(script(10, { hook_text: "LOLA SAID… SCIENCE SAYS" }))).toEqual({ ok: false, error: 'The hook card uses a Filipino / Tagalog word ("LOLA"): write simple English anyone understands.' });
+    expect(val(script(10, { title: "Merienda time without the fight" }))).toEqual({ ok: false, error: 'The title uses a Filipino / Tagalog word ("Merienda"): write simple English anyone understands.' });
+    const s = script(10);
+    s.scenes[4] = { ...s.scenes[4], on_screen: "Say: \"Salamat, anak\"" } as never;
+    expect(val(s)).toEqual({ ok: false, error: 'Line 5\'s on-screen label uses a Filipino / Tagalog word ("Salamat"): write simple English anyone understands.' });
+    // English words are never mistaken for Tagalog ("ate" / "po" are not on the hard list)
+    expect(val(withLine(5, "She ate her peas, then asked for salad.")).ok).toBe(true);
+    expect(val(withLine(5, "Grandma meant well. Keep the cuddles.")).ok).toBe(true);
+  });
+
+  it("refuses jargon (techniques, therapies, brain words) anywhere; plain words and own tip names pass", () => {
+    expect(val(withLine(5, "Experts say affect labeling calms them down."))).toEqual({ ok: false, error: 'Line 6 uses expert jargon ("affect labeling"): say it in plain everyday words.' });
+    expect(val(withLine(5, "That builds executive function over time."))).toEqual({ ok: false, error: 'Line 6 uses expert jargon ("executive function"): say it in plain everyday words.' });
+    expect(val(withLine(5, "It comes from PCIT, a parenting program."))).toEqual({ ok: false, error: 'Line 6 uses expert jargon ("PCIT"): say it in plain everyday words.' });
+    expect(val(script(10, { hook_text: "SERVE AND RETURN, EXPLAINED" }))).toEqual({ ok: false, error: 'The hook card uses expert jargon ("SERVE AND RETURN"): say it in plain everyday words.' });
+    expect(val(withLine(5, "Child experts say naming the feeling helps kids calm.")).ok).toBe(true);
+    expect(val(withLine(5, "That's the Two-Choice Rule. Two options, every time.")).ok).toBe(true);
+  });
+
+  it("the writer retries a script with a Tagalog word (the action loop re-asks on any validation error)", async () => {
+    generateJson.mockResolvedValueOnce({ ok: true, data: (() => { const s = script(10); s.scenes[3] = { ...s.scenes[3], narration: 'Say "Ingat, anak" softly.' }; return s; })() });
+    const r = await writeReelScript(input10);
+    expect(r).toMatchObject({ ok: false, error: expect.stringMatching(/Filipino \/ Tagalog word/) });
   });
 });

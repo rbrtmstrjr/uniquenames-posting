@@ -49,6 +49,7 @@ export const CAPTION_SYSTEM = [
   "Each post is a themed baby photoshoot: a set of photo cards, each showing one baby name and its meaning on the picture.",
   `Write 1 or 2 short, natural sentences (at most ${CAPTION_MAX - 20} characters in total) in the caption style the prompt asks for.`,
   "Sound like a real person who loves baby names talking to parents-to-be: warm, plain everyday words, normal capitalization, not salesy or flowery.",
+  "The readers are parents around the world (most in the Philippines, others in the US, Africa, Australia and beyond): write simple, warm English anyone understands, with no region-specific slang, and never a Filipino or Tagalog word or Taglish (no anak, mahal, ganda, salamat, naman, lang, mga), even next to a Filipino name; a name's meaning is given in plain English.",
   "Every caption must read clearly different from the recent captions in the prompt: a different opening word, a different sentence shape and a different question. Never reuse their phrases.",
   "Avoid stock openers and cliches such as \"Get ready\", \"Look no further\", \"Introducing\", \"These lovely\", \"Calling all\" or \"swoon\".",
   "Say \"baby boy names\" or \"baby girl names\" (or close wording) once so readers know what the post is.",

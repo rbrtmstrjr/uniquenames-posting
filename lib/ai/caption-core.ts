@@ -1,5 +1,6 @@
 import "server-only";
 import type { GeminiSchema } from "./gemini";
+import { plainWordsProblem } from "./plain-words";
 import { aiJson } from "./provider";
 
 /**
@@ -73,7 +74,8 @@ const parse = (x: unknown) => {
 export const RETRY_MIN_MS = 3000;
 
 /**
- * Ask Gemini for {caption, tags}, clean the caption, and check it: bait is never accepted; any
+ * Ask Gemini for {caption, tags}, clean the caption, and check it: bait, a Filipino / Tagalog word and expert jargon
+ * are never accepted; any
  * other `problem` (a repeated opener, …) earns a corrective retry (`attempts` in all, default 2)
  * while time allows, after which the usable caption with the lowest `penalty` is kept (ties: the
  * later one; no penalty = the last usable one). Null on any failure. Never throws.
@@ -100,6 +102,9 @@ export async function askCaption(o: {
     const line = sanitizeText(r.data.caption, o.max, o.min);
     if (!line) { note = "\n\nYour last caption was empty or unusable. Write a new one."; continue; }
     if (hasBait(line)) { note = `\n\nYour last caption ("${line}") used engagement bait. Write a new one with a genuine question and no call to comment, tag, share, like or follow.`; continue; }
+    // simple global English: a Filipino / Tagalog word or expert jargon is never accepted (like bait)
+    const plain = plainWordsProblem(line);
+    if (plain) { note = `\n\nYour last caption ("${line}") ${plain}. Write a new one.`; continue; }
     const result = { line, tags: Array.isArray(r.data.tags) ? r.data.tags : [] };
     const problem = o.problem(line);
     if (!problem) return result;

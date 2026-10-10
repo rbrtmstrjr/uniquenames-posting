@@ -182,7 +182,7 @@ describe("writeReelScriptAction", () => {
     const r = await A.writeReelScriptAction({ topic: "  potty   training " });
     expect(r).toEqual({ ok: true, reelId: NEW });
     expect(writeMock).toHaveBeenCalledTimes(1);
-    expect(writeMock.mock.calls[0][0]).toMatchObject({ topic: "potty training", maxScenes: 30, alreadyMade: [{ title: "Old Title", stage: "toddler" }], timeoutMs: 120_000 });
+    expect(writeMock.mock.calls[0][0]).toMatchObject({ topic: "potty training", maxScenes: 30, alreadyMade: [{ title: "Old Title", stage: "toddler" }], timeoutMs: 180_000 });
     const [reelIns] = qs("reels", "insert");
     expect(rowsOf(reelIns)).toEqual({ title: "The Quiet Hour", topic: "potty training", stage: "toddler", doll_cast: CAST, status: "script" });
     const rows = rowsOf(qs("reel_scenes", "insert")[0]);
@@ -239,14 +239,14 @@ describe("writeReelScriptAction", () => {
     expect(r).toEqual({ ok: false, error: expect.stringMatching(/Line 3 is longer than 15 words/) });
   });
 
-  it("one 270 s budget: each call gets min(120 s, what is left); no call when too little is left", async () => {
+  it("one 270 s budget: each call gets min(180 s, what is left: a 60-90 s Opus script takes ~2 min); no call when too little is left", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-10-05T00:00:00Z"));
     writeMock
       .mockImplementationOnce(async () => { vi.setSystemTime(Date.now() + 200_000); return { ok: false, error: "Gemini timed out." }; })
       .mockImplementationOnce(async () => { vi.setSystemTime(Date.now() + 65_000); return { ok: false, error: "Script too short: 100 words (needs at least 264)." }; });
     const r = await A.writeReelScriptAction({});
-    expect(writeMock.mock.calls.map((c) => c[0].timeoutMs)).toEqual([120_000, 70_000]);
+    expect(writeMock.mock.calls.map((c) => c[0].timeoutMs)).toEqual([180_000, 70_000]);
     expect(r).toEqual({ ok: false, error: expect.stringMatching(/too short/) });
   });
 
@@ -677,7 +677,7 @@ describe("formats + topics + labels (014)", () => {
   });
 
   it("rewrite: the same format and the same bank topic; the labels are replaced", async () => {
-    const t = REEL_TOPICS.find((x) => x.id === "kulob-fever")!;
+    const t = REEL_TOPICS.find((x) => x.id === "sweat-out-fever")!;
     world({ themeId: "crayon", labels: true, reel: reelRow({ theme_id: "crayon", hook_text: "x", format: "lola_science", topic_id: t.id, topic: t.topic }) });
     writeMock.mockResolvedValueOnce(ok(script("Another Title")));
     expect(await A.rewriteReelScriptAction(REEL)).toEqual({ ok: true });

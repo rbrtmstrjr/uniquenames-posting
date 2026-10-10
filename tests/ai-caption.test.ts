@@ -219,3 +219,21 @@ describe("captionProblem for a post by letter", () => {
     expect(ask("Kites and kisses for baby boy names.", "K")).toMatch(/letter K/);
   });
 });
+
+describe("global audience: simple English, no Tagalog (2026-10-10)", () => {
+  const input = { theme, gender: "girl" as const, captionStyle: "story" as const, recent: [] };
+  it("the system prompt asks for simple English anyone understands and no Filipino / Tagalog words", () => {
+    expect(CAPTION_SYSTEM).toMatch(/simple, warm English anyone understands/);
+    expect(CAPTION_SYSTEM).not.toMatch(/American English|US spelling/);
+    expect(CAPTION_SYSTEM).toMatch(/never a Filipino or Tagalog word/);
+    expect(CAPTION_SYSTEM).not.toMatch(/Filipino moms/);
+  });
+  it("a Tagalog word is never accepted: it retries, then falls back", async () => {
+    generateJson.mockResolvedValueOnce(ok("Hay bales and pumpkins for your anak, sweet baby girl names.")).mockResolvedValueOnce(ok("Hay bales and pumpkins frame these baby girl names."));
+    expect((await aiCaptionLine(input))?.line).toBe("Hay bales and pumpkins frame these baby girl names.");
+    expect(generateJson.mock.calls[1][0].prompt).toMatch(/Filipino \/ Tagalog word \("anak"\)/);
+    generateJson.mockReset();
+    generateJson.mockResolvedValue(ok("Mahal na mahal, these baby girl names glow in the golden light."));
+    expect(await aiCaptionLine(input)).toBeNull();
+  });
+});

@@ -133,3 +133,24 @@ describe("writeReelCaption", () => {
     expect(r!.line.length).toBeLessThanOrEqual(REEL_CAPTION_MAX);
   });
 });
+
+describe("global audience and plain words (2026-10-10)", () => {
+  it("the system prompt speaks to moms around the world in simple English, with no jargon and no Tagalog", () => {
+    expect(REEL_CAPTION_SYSTEM).toMatch(/moms of babies and young kids \(0-7\) around the world \(most are in the Philippines/);
+    expect(REEL_CAPTION_SYSTEM).not.toMatch(/mostly Filipino moms/);
+    expect(REEL_CAPTION_SYSTEM).toMatch(/Simple, warm English anyone understands/);
+    expect(REEL_CAPTION_SYSTEM).not.toMatch(/American English|US spelling/);
+    expect(REEL_CAPTION_SYSTEM).toMatch(/never a Filipino or Tagalog word/i);
+    expect(REEL_CAPTION_SYSTEM).toMatch(/no jargon/);
+  });
+  it("a Tagalog word or jargon is never kept: it retries, then gives up", async () => {
+    generateJson.mockResolvedValueOnce(ok("Bedtime is hard, anak. Breathe first. What helps you?"))
+      .mockResolvedValueOnce(ok("Bedtime is hard. Breathe first with your little one. What helps you?"));
+    expect((await writeReelCaption(input))?.line).toBe("Bedtime is hard. Breathe first with your little one. What helps you?");
+    expect(generateJson.mock.calls[1][0].prompt).toMatch(/Filipino \/ Tagalog word \("anak"\)/);
+    generateJson.mockReset();
+    generateJson.mockResolvedValue(ok("Affect labeling calms the amygdala. What helps you?"));
+    expect(await writeReelCaption(input)).toBeNull();
+    expect(generateJson).toHaveBeenCalledTimes(3);
+  });
+});

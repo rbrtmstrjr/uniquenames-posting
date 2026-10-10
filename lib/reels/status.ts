@@ -32,8 +32,8 @@ export function clock(seconds: number): string {
 /** Spoken length of a script, from its word count (the voice is sped up by `speed`). */
 export const estimateSeconds = (words: number, speed = 1) => words / (WORDS_PER_SECOND * (speed > 0 ? speed : 1));
 
-/** The script length the prompt aims for: 30–45 s of speech (114–171 words at 1×), more words when the voice is sped up (lib/ai/reel-script). */
-export const REEL_SECONDS = { lo: 30, hi: 45 } as const;
+/** The script length the prompt asks for: 60–90 s of speech (228–342 words at 1×), more words when the voice is sped up (lib/ai/reel-script). */
+export const REEL_SECONDS = { lo: 60, hi: 90 } as const;
 export const wordTarget = (speed = 1) => {
   const x = speed > 0 ? speed : 1;
   return { lo: Math.round(REEL_SECONDS.lo * WORDS_PER_SECOND * x), hi: Math.round(REEL_SECONDS.hi * WORDS_PER_SECOND * x) };
