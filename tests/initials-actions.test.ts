@@ -118,7 +118,7 @@ describe("planInitialsAction (the preview)", () => {
 
   it("Unique Names: the prompt shows the page's style and its own part meanings; common names are out while uncommon ones suffice", async () => {
     world({ names: [...NAMES(), nm("Rafe", { style: "single", meaning: "wise wolf" }), nm("Silas Wren"), nm("Ezra Vale")] });
-    generateJson.mockResolvedValueOnce(combos(["Aaron Ryan", "lofty king", "lofty", "little king"], ["Anselm Rafe", "divine wise wolf", "divine helmet", "wolf counsel"], ALARIC));
+    generateJson.mockResolvedValueOnce(combos(["Aaron Ryan", "lofty king", "lofty", "little king"], ["Anselm Rafe", "a divine and wise wolf", "divine helmet", "wolf counsel"], ALARIC));
     const r = await planInitialsAction({ ...base, count: 4 });
     const prompt = (generateJson.mock.calls[0][0] as { prompt: string }).prompt;
     expect(prompt).toMatch(/Match the style of the page's own two-word boy names, for example: .*Silas Wren.*Ezra Vale/);
@@ -132,6 +132,19 @@ describe("planInitialsAction (the preview)", () => {
     generateJson.mockResolvedValueOnce(combos(["Aaron Rhett", "lofty advice", "lofty", "advice"]));
     const r = await planInitialsAction({ ...base, count: 3 });
     expect(r.ok && r.names.map((n) => n.name)).toEqual(["Ansel Roan", "Arlo Reed", "Aaron Rhett"]);
+  });
+
+  it("stiff meanings get ONE corrective rewrite call; the rewrite is checked again (grounded + natural)", async () => {
+    generateJson
+      .mockResolvedValueOnce(combos(ALARIC, ["Armand Ravi", "army man sun", "army man", "sun"], ["Aldo Remy", "old wise oarsman", "old and wise", "oarsman"]))
+      .mockResolvedValueOnce({ ok: true, data: [{ name: "Armand Ravi", meaning: "army man of the sun" }, { name: "Aldo Remy", meaning: "a brave old oarsman" }] });
+    const r = await planInitialsAction({ ...base, count: 5 });
+    expect(generateJson).toHaveBeenCalledTimes(2);
+    const fix = (generateJson.mock.calls[1][0] as { prompt: string }).prompt;
+    expect(fix).toContain('- Armand Ravi (army man / sun): "army man sun"');
+    expect(fix).toContain('- Aldo Remy (old and wise / oarsman): "old wise oarsman"');
+    // "brave" is in neither part: the rewrite of Aldo Remy is still refused
+    expect(r.ok && r.names.filter((n) => n.source === "new").map((n) => `${n.name} — ${n.meaning}`)).toEqual(["Alaric Rhys — ardor of the ruler", "Armand Ravi — army man of the sun"]);
   });
 
   it("no AI call when the unused names cover the post", async () => {

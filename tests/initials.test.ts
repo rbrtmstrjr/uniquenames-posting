@@ -115,10 +115,10 @@ describe("filterInitialsCombos", () => {
 
   it("the owner's own meaning of a part wins over the AI's", () => {
     const knownParts = new Map([["rafe", "wise wolf"]]);
-    const ok = cand("Anselm Rafe", "divine wise wolf", "divine helmet", "wolf counsel");
+    const ok = cand("Anselm Rafe", "a divine and wise wolf", "divine helmet", "wolf counsel");
     const bad = cand("Alden Rafe", "old friend of counsel", "old friend", "wolf counsel");
     const r = filterInitialsCombos([ok, bad], [], opts({ knownParts }), "boy");
-    expect(r.fresh).toEqual([{ name: "Anselm Rafe", meaning: "divine wise wolf", parts: ["divine helmet", "wise wolf"] }]);
+    expect(r.fresh).toEqual([{ name: "Anselm Rafe", meaning: "a divine and wise wolf", parts: ["divine helmet", "wise wolf"] }]);
     expect(r.ungrounded).toBe(1);
   });
 
@@ -221,5 +221,39 @@ describe("captions for a post by initials", async () => {
   it("the template names the initials; other posts are unchanged", () => {
     expect(templateLine("boy", "Lovely names.", undefined, null, "AR")).toBe("Baby boy names with the initials A & R. Lovely names.");
     expect(templateLine("boy", "Lovely names.")).toBe("Lovely names.");
+  });
+});
+
+describe("natural card meanings (initials)", async () => {
+  const { stiffProblem } = await import("@/lib/ai/meaning-grounding");
+  const cand = (name: string, meaning: string, p1: string, p2: string) => ({ name, meaning, gender: "boy", part1_meaning: p1, part2_meaning: p2 });
+
+  it("grammar words and light morphology are fine: god's, protection, kingly", () => {
+    expect(groundingProblem("an oarsman under god's protection", "protected by god", "oarsman")).toBeNull();
+    expect(groundingProblem("the fortified hill by the headland", "fortified hill", "headland")).toBeNull();
+    expect(groundingProblem("a prosperous burden bearer", "burden bearer", "prosperous")).toBeNull();
+    expect(groundingProblem("kingly and wise", "king", "wise")).toBeNull();
+    // still no new imagery or adjectives
+    expect(groundingProblem("a sweet oarsman under god's protection", "protected by god", "oarsman")).toMatch(/sweet/);
+  });
+
+  it("a pile of words is stiff; a phrase is not", () => {
+    for (const bad of ["army man sun", "fortified hill headland", "burden bearer prosperous", "protected god oarsman", "the ruler famous wolf king"]) {
+      expect(stiffProblem(bad)).not.toBeNull();
+    }
+    for (const ok of ["majestic and passionate", "blessed with quiet strength", "a prosperous burden bearer", "an oarsman under god's protection", "priceless king", "army man of the sun"]) {
+      expect(stiffProblem(ok)).toBeNull();
+    }
+  });
+
+  it("the filter keeps natural 7-word meanings and sets stiff ones aside for a rewrite", () => {
+    const r = filterInitialsCombos([
+      cand("Arlo Ross", "the fortified hill by the headland", "fortified hill", "headland"),
+      cand("Armand Ravi", "army man sun", "army man", "sun"),
+      cand("Ansel Remy", "an oarsman under the protection of god", "protected by god", "oarsman"),
+    ], [], { initials: "AR", want: 10 }, "boy");
+    expect(r.fresh.map((f) => f.name)).toEqual(["Arlo Ross", "Ansel Remy"]);
+    expect(r.stiff).toBe(1);
+    expect(r.stiffNames).toEqual([{ name: "Armand Ravi", meaning: "army man sun", parts: ["army man", "sun"] }]);
   });
 });

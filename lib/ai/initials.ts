@@ -3,7 +3,7 @@ import type { Gender } from "@/lib/db/types";
 import type { GeminiSchema, GenerateJsonResult } from "./gemini";
 import { aiJson } from "./provider";
 import { activePack } from "@/packs";
-import { MEANING_MAX_WORDS, MEANING_MIN_WORDS, filterInitialsCombos, sampleForPrompt, type InitialsCandidate, type InitialsFilterResult } from "./suggest-filter";
+import { INITIALS_MEANING_MAX_WORDS, MEANING_MIN_WORDS, filterInitialsCombos, sampleForPrompt, type InitialsCandidate, type InitialsFilterResult } from "./suggest-filter";
 import { PROMPT_NAMES_CAP } from "./suggest";
 
 // Fresh two-word names for a post by initials (migration 017): ONE small AI call (Claude Haiku / Gemini, task "small")
@@ -32,7 +32,7 @@ const INITIALS_SCHEMA: GeminiSchema = {
           gender: { type: "STRING", enum: ["boy", "girl", "unisex"], description: "Who the name is given to in real use" },
           part1_meaning: { type: "STRING", description: "The first name's standard meaning, 1-4 plain words" },
           part2_meaning: { type: "STRING", description: "The middle name's standard meaning, 1-4 plain words" },
-          meaning: { type: "STRING", description: `${MEANING_MIN_WORDS}-${MEANING_MAX_WORDS} lowercase words built only from the two part meanings` },
+          meaning: { type: "STRING", description: `A natural phrase of ${MEANING_MIN_WORDS}-${INITIALS_MEANING_MAX_WORDS} lowercase words built only from the two part meanings` },
         },
         required: ["name", "gender", "part1_meaning", "part2_meaning", "meaning"],
       },
@@ -94,6 +94,23 @@ export function partHintsFor(knownParts: Map<string, string> | undefined, initia
   return out;
 }
 
+const REWRITE_SCHEMA: GeminiSchema = {
+  type: "OBJECT",
+  properties: { names: { type: "ARRAY", items: { type: "OBJECT", properties: { name: { type: "STRING" }, meaning: { type: "STRING" } }, required: ["name", "meaning"] } } },
+  required: ["names"],
+};
+
+/** The corrective ask for card meanings that read as a pile of words (one call, all of them at once). */
+export function rewritePrompt(stiff: { name: string; meaning: string; parts: [string, string] }[]): string {
+  return [
+    "These card meanings are true but read as a pile of words. Rewrite each as a warm, natural English phrase of "
+      + `${MEANING_MIN_WORDS} to ${INITIALS_MEANING_MAX_WORDS} lowercase words, using ONLY the words of its two part meanings (a word's other form is fine, like protected → protection or king → kingly), `
+      + "joined with small grammar words (a, an, the, of, and, with, by, from, under, who, in, as, like, one, to). Never add new imagery or adjectives. Keep each name exactly.",
+    "Example: Ansel Remy (protected by god / oarsman): \"protected god oarsman\" → \"an oarsman under god's protection\".",
+    stiff.map((x) => `- ${x.name} (${x.parts[0]} / ${x.parts[1]}): "${x.meaning}"`).join("\n"),
+  ].join("\n\n");
+}
+
 /**
  * Fresh names for a post by initials, without touching the database: the AI's names, filtered (valid two-word names
  * with a 2-6 word kind meaning grounded in the part meanings, the right initials, new against `allNames` = every name
@@ -109,6 +126,19 @@ export async function suggestForInitials(i: {
     partHints: partHintsFor(i.knownParts, i.initials),
   });
   if (!ai.ok) return { ok: false, error: ai.error };
-  return { ok: true, result: filterInitialsCombos(ai.data, [...i.allNames, ...(i.skip ?? [])],
-    { initials: i.initials, want: i.want, need: i.need, unique: INITIALS_UNIQUE, knownParts: i.knownParts }, i.gender) };
+  const filter = (cands: InitialsCandidate[]) => filterInitialsCombos(cands, [...i.allNames, ...(i.skip ?? [])],
+    { initials: i.initials, want: i.want, need: i.need, unique: INITIALS_UNIQUE, knownParts: i.knownParts }, i.gender);
+  const first = filter(ai.data);
+  if (!first.stiffNames.length) return { ok: true, result: first };
+  // One retry for stiff meanings only: the AI rewrites them as natural phrases, then the whole batch is checked again.
+  const fix = await aiJson<{ name: string; meaning: string }[]>({
+    task: "small", system: INITIALS_SYSTEM, prompt: rewritePrompt(first.stiffNames), schema: REWRITE_SCHEMA, temperature: 0.4, timeoutMs: INITIALS_TIMEOUT_MS,
+    parse: (raw) => namesOf(raw) as { name: string; meaning: string }[] | null,
+  });
+  if (!fix.ok) return { ok: true, result: first };
+  const better = new Map(fix.data.filter((f) => typeof f.name === "string" && typeof f.meaning === "string").map((f) => [f.name.trim().toLowerCase(), f.meaning]));
+  return { ok: true, result: filter(ai.data.map((c) => {
+    const m = typeof c.name === "string" ? better.get(c.name.trim().toLowerCase()) : undefined;
+    return m ? { ...c, meaning: m } : c;
+  })) };
 }

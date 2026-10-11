@@ -4,8 +4,13 @@
 // from a part meaning, and each part must give at least one word. "Andrew Russell — brave little fox" fails when Andrew
 // means "manly, strong" and Russell "little red one": "fox" is in neither, "brave" is not "strong". Pure, no I/O.
 
-/** Small joining words a blend may add freely. */
-const FILLER = new Set(["a", "an", "the", "of", "and", "one", "ones", "who", "is", "with", "for", "to", "from", "in", "by", "at", "that", "as", "be", "his", "her", "their", "our", "my"]);
+/** Grammar words a blend may add freely (articles, prepositions, links, pronouns): never imagery or adjectives. */
+const FILLER = new Set([
+  "a", "an", "the", "of", "and", "one", "ones", "who", "whom", "whose", "is", "are", "was", "be", "with", "for", "to", "from", "in", "into", "on",
+  "by", "at", "under", "over", "upon", "as", "like", "that", "this", "his", "her", "their", "our", "my", "its", "so",
+]);
+/** The words that make a phrase read as English rather than a word pile (FILLER minus nothing: every grammar word links). */
+const isLink = (w: string) => FILLER.has(w);
 
 /** Close synonyms the blend may swap in (any word of a group stands for the others). Kept short and literal on purpose. */
 const SYNONYMS: string[][] = [
@@ -54,7 +59,7 @@ const SYNONYMS: string[][] = [
 const GROUPS = new Map<string, number[]>();
 SYNONYMS.forEach((g, i) => g.forEach((w) => GROUPS.set(w, [...(GROUPS.get(w) ?? []), i])));
 
-/** Lowercase letters-only words. */
+/** Lowercase letters-only words ("God's" → "god"). */
 const words = (s: string) => s.toLowerCase().replace(/[’']s\b/g, "").split(/[^a-z]+/).filter(Boolean);
 /** The content words of a meaning (no filler). */
 export const contentWords = (s: string) => words(s).filter((w) => !FILLER.has(w));
@@ -79,6 +84,23 @@ export function sameWord(a: string, b: string): boolean {
   if (short.length >= 4 && long.startsWith(short)) return true;
   const gx = GROUPS.get(x) ?? GROUPS.get(sx), gy = GROUPS.get(y) ?? GROUPS.get(sy);
   return !!gx && !!gy && gx.some((g) => gy.includes(g));
+}
+
+/**
+ * Why the card meaning reads as a word pile instead of English, or null: three or more content words with no grammar
+ * word at all ("army man sun", "fortified hill headland"), or four or more content words in a row anywhere.
+ * "a prosperous burden bearer", "an oarsman under god's protection" and "majestic and passionate" read fine.
+ */
+export function stiffProblem(meaning: string): string | null {
+  const w = words(meaning);
+  const content = w.filter((x) => !isLink(x));
+  if (content.length >= 3 && content.length === w.length) return "reads as a pile of words: join them into a natural phrase (with a, the, of, and, with, by, under...)";
+  let run = 0;
+  for (const x of w) {
+    run = isLink(x) ? 0 : run + 1;
+    if (run >= 4) return "has four or more words in a row with nothing joining them: make it a natural phrase";
+  }
+  return null;
 }
 
 /**

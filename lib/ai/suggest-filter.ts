@@ -7,7 +7,7 @@ import { letterOf } from "@/lib/series/az";
 import { isCommonName, negativeMeaning, notAGivenName, otherGenderName } from "./common-names";
 import { plainWordsProblem } from "./plain-words";
 import { initialsOf } from "@/lib/series/initials";
-import { groundingProblem } from "./meaning-grounding";
+import { groundingProblem, stiffProblem } from "./meaning-grounding";
 
 export interface NameSuggestion { name: string; meaning: string }
 export type ThemeFields = Omit<ThemeInput, "gender">;
@@ -30,7 +30,7 @@ const cleanMeaning = (m: string) => m.replace(/\s+/g, " ").trim().replace(/[.!]+
  * name in the database, any gender or status) nor earlier in the batch. A two-word name may
  * share its first OR second word with another name: only the full name must be new.
  */
-export function filterNameSuggestions(cands: NameSuggestion[], existing: Iterable<string>, style: NameStyle): FilterResult<NameSuggestion> {
+export function filterNameSuggestions(cands: NameSuggestion[], existing: Iterable<string>, style: NameStyle, maxWords: number = MEANING_MAX_WORDS): FilterResult<NameSuggestion> {
   const have = new Set<string>();
   for (const n of existing) have.add(nameKey(n));
   const fresh: NameSuggestion[] = [];
@@ -40,7 +40,7 @@ export function filterNameSuggestions(cands: NameSuggestion[], existing: Iterabl
     const name = normalizeName(typeof c?.name === "string" ? c.name : "");
     const meaning = cleanMeaning(typeof c?.meaning === "string" ? c.meaning : "");
     const words = meaning ? meaning.split(" ").length : 0;
-    if (validateName(name, meaning) || styleOf(name) !== style || name.split(" ").length > 2 || words < MEANING_MIN_WORDS || words > MEANING_MAX_WORDS) {
+    if (validateName(name, meaning) || styleOf(name) !== style || name.split(" ").length > 2 || words < MEANING_MIN_WORDS || words > maxWords) {
       invalid++;
       continue;
     }
@@ -202,7 +202,13 @@ export interface InitialsFilterResult extends FilterResult<InitialsSuggestion> {
   negative: number;
   /** The card meaning adds words that are in neither part's meaning (invented imagery), or a part meaning is missing. */
   ungrounded: number;
+  /** Grounded but stiff (a pile of words, no grammar): sent back once for a natural rewrite (`stiffNames`). */
+  stiff: number;
+  stiffNames: { name: string; meaning: string; parts: [string, string] }[];
 }
+
+/** A card meaning of a post by initials: 2 to 7 words (one more than other cards, for a natural phrase with "of", "the"). */
+export const INITIALS_MEANING_MAX_WORDS = 7;
 
 /** Letters with few real names: on a unique-names page the common-name rule is relaxed for a part with one of these. */
 export const RARE_INITIALS = ["Q", "U", "X", "Y", "Z"] as const;
@@ -233,8 +239,8 @@ export function filterInitialsCombos(cands: InitialsCandidate[], existing: Itera
   const list = Array.isArray(cands) ? cands.filter((c) => c && typeof c === "object") : [];
   const said = new Map(list.map((c) => [typeof c.name === "string" ? nameKey(c.name) : "", c]));
   const other = gender === "boy" ? "girl" : "boy";
-  const { fresh, duplicates, invalid: bad } = filterNameSuggestions(list, existing, "two-word");
-  const r: InitialsFilterResult = { fresh: [], duplicates, invalid: bad, offInitials: 0, blocked: 0, common: 0, wrongGender: 0, negative: 0, ungrounded: 0 };
+  const { fresh, duplicates, invalid: bad } = filterNameSuggestions(list, existing, "two-word", INITIALS_MEANING_MAX_WORDS);
+  const r: InitialsFilterResult = { fresh: [], duplicates, invalid: bad, offInitials: 0, blocked: 0, common: 0, wrongGender: 0, negative: 0, ungrounded: 0, stiff: 0, stiffNames: [] };
   const str = (v: unknown) => (typeof v === "string" ? v.replace(/\s+/g, " ").trim().toLowerCase().replace(/[.!]+$/, "") : "");
   const strictPart = o.initials.split("").map((l) => !!o.unique && !(RARE_INITIALS as readonly string[]).includes(l));
   type Ok = InitialsSuggestion & { commonParts: boolean[] };
@@ -249,6 +255,7 @@ export function filterInitialsCombos(cands: InitialsCandidate[], existing: Itera
     if (negativeMeaning(s.meaning) || parts.some(negativeMeaning)) { r.negative++; continue; }
     if (initialsOf(s.name) !== o.initials) { r.offInitials++; continue; }
     if (parts.some((p) => !p || p.split(" ").length > PART_MEANING_MAX_WORDS + 2) || groundingProblem(s.meaning, parts[0], parts[1])) { r.ungrounded++; continue; }
+    if (stiffProblem(s.meaning)) { r.stiff++; r.stiffNames.push({ name: s.name, meaning: s.meaning, parts }); continue; }
     passed.push({ ...s, parts, commonParts: words.map((w) => isCommonName(w, gender)) });
   }
   const allowed = (x: Ok, relax: boolean[]) => x.commonParts.every((isCommon, i) => !isCommon || !strictPart[i] || relax[i]);
