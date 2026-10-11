@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Empty } from "@/components/ui/empty";
 import { Segmented } from "@/components/ui/segmented";
 import { Input } from "@/components/ui/shadcn/input";
-import { approveNamesAction, deleteNameAction, rejectNamesAction, setSkipAction } from "@/lib/actions/names";
+import { approveNamesAction, deleteNameAction, rejectNamesAction, setNameCategoryAction, setSkipAction } from "@/lib/actions/names";
 import { suggestNamesAction } from "@/lib/actions/suggest";
 import { NAME_COUNT } from "@/lib/ai/suggest-filter";
 import { SuggestDialog } from "@/components/ui/suggest-dialog";
@@ -23,11 +23,31 @@ import { AZ_LETTERS, letterOf } from "@/lib/series/az";
 
 import type { NamesFilter } from "@/lib/names/filter";
 import { nameDetail } from "@/lib/names/detail";
+import { MEANING_CATEGORIES, isMeaningCategory, type MeaningCategory } from "@/lib/names/categories";
+import { sellable } from "@/lib/pdf/plan";
+import { sharedPack } from "@/packs/shared";
 
 const STATUS_TONE: Record<NameStatus, "ok" | "accent" | "muted" | "warn"> = { available: "ok", reserved: "accent", used: "muted", skip: "warn", pending: "accent" };
 const STATUS_TEXT: Record<NameStatus, string> = { available: "Available", reserved: "In a post", used: "Used", skip: "Skip", pending: "Pending" };
 
-export function NamesTable({ names: serverNames, initial = {} }: { names: NameRow[]; initial?: NamesFilter }) {
+/** The names PDF's meaning group of a name (migration 018): a small select; "Not sorted" = the AI sorts it at the next export. */
+function GroupSelect({ n, disabled, onPick }: { n: NameRow; disabled: boolean; onPick: (c: MeaningCategory | null) => void }) {
+  const labels = sharedPack().nameCategories;
+  const value = isMeaningCategory(n.meaning_category) ? n.meaning_category : "none";
+  return (
+    <Select value={value} disabled={disabled} onValueChange={(v) => onPick(v === "none" ? null : (v as MeaningCategory))}>
+      <SelectTrigger aria-label={`Meaning group of ${n.name}`} className="min-h-11 w-auto max-w-56 bg-surface text-xs sm:min-h-9">
+        <SelectValue>{value === "none" ? "Not sorted" : labels[value]}</SelectValue>
+      </SelectTrigger>
+      <SelectContent position="popper" collisionPadding={{ top: 8, bottom: 80 }} className="max-h-[min(20rem,var(--radix-select-content-available-height))]">
+        <SelectItem value="none">Not sorted</SelectItem>
+        {MEANING_CATEGORIES.map((c) => <SelectItem key={c} value={c}>{labels[c]}</SelectItem>)}
+      </SelectContent>
+    </Select>
+  );
+}
+
+export function NamesTable({ names: serverNames, initial = {}, toolbar }: { names: NameRow[]; initial?: NamesFilter; toolbar?: React.ReactNode }) {
   // Local copy for optimistic updates; re-seeded whenever the server sends fresh rows
   // (each action's revalidatePath re-renders this page in the same response).
   const [names, setNames] = useState(serverNames);
@@ -98,6 +118,7 @@ export function NamesTable({ names: serverNames, initial = {} }: { names: NameRo
         <Button onClick={() => setForm({ open: true, editing: null })}><Plus className="size-4" /> Add name</Button>
         <Button variant="subtle" onClick={() => setBulk(true)}><ClipboardPaste className="size-4" /> Paste many</Button>
         <Button variant="subtle" onClick={() => setSuggest(true)}><Sparkles className="size-4" aria-hidden /> Suggest with AI</Button>
+        {toolbar}
       </div>
       {pendingCount > 0 && status !== "pending" && (
         <div role="status" className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-accent/40 bg-accent-soft px-4 py-2">
@@ -147,6 +168,10 @@ export function NamesTable({ names: serverNames, initial = {} }: { names: NameRo
               </div>
               <Badge tone="muted">{n.gender === "boy" ? "Boy" : "Girl"} · {n.style}</Badge>
               <Badge tone={STATUS_TONE[n.status]}>{STATUS_TEXT[n.status]}</Badge>
+              {"meaning_category" in n && sellable(n) && (
+                <GroupSelect n={n} disabled={busy.has(n.id)} onPick={(c) => act(n, { ...n, meaning_category: c }, () => setNameCategoryAction(n.id, c),
+                  c ? `${n.name}: ${sharedPack().nameCategories[c]}` : `${n.name} will be sorted at the next export`)} />
+              )}
               <div className="ml-auto flex gap-1">
                 {n.status === "pending" && (
                   <>

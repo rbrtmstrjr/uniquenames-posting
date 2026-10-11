@@ -234,3 +234,8 @@ export interface WorkerStatusRow {
   id: 1; last_seen: string | null; comfyui_ok: boolean; gpu: string | null; current_card_id: string | null;
   worker_version: string | null; message: string | null; updated_at: string;
 }
+
+/** A names PDF made for a buyer (migration 018, Names > Past exports). The password is read only on demand. */
+export interface ExportLogRow {
+  id: string; created_at: string; buyer: string; gender: "girl" | "boy" | "both"; name_count: number; file_name: string; pack: string;
+}
