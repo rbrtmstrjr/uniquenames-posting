@@ -3,9 +3,8 @@ import { useState } from "react";
 import { Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { Gender, NameStyle } from "@/lib/db/types";
-import { LETTERS } from "@/lib/series/letter";
-import { cn } from "@/lib/utils/cn";
 import { LetterIdeasDialog } from "./letter-ideas";
+import { LetterTiles } from "./letter-tiles";
 
 /**
  * By letter on Today: the 26 letters as buttons, each with how many available names of this gender +
@@ -28,24 +27,7 @@ export function LetterPicker({ gender, style, counts, need, value, onChange }: {
 
   return (
     <div className="space-y-3">
-      <div role="group" aria-label={`Letters for ${gender} ${kind} names`} className="grid grid-cols-7 gap-1.5 @lg:grid-cols-13 @lg:gap-1">
-        {LETTERS.map((l) => {
-          const n = counts[l] ?? 0;
-          const on = value === l;
-          const ok = n >= need;
-          return (
-            <button key={l} type="button" aria-pressed={on} onClick={() => onChange(l)} data-state={ok ? "ok" : "short"}
-              aria-label={`${l}: ${n} available${ok ? "" : `, ${need - n} short`}`}
-              className={cn("flex min-h-11 min-w-0 cursor-pointer flex-col items-center justify-center rounded-lg leading-none transition-colors",
-                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-surface",
-                on ? "bg-accent text-accent-ink shadow-soft"
-                  : ok ? "bg-ok/12 text-ok hover:bg-ok/20" : "bg-warn/15 text-warn-text ring-1 ring-warn/40 hover:bg-warn/25")}>
-              <span className="text-sm font-bold">{l}</span>
-              <span aria-hidden className={cn("mt-0.5 text-[10px] font-semibold tabular-nums", on ? "opacity-90" : "opacity-75")}>{n}</span>
-            </button>
-          );
-        })}
-      </div>
+      <LetterTiles label={`Letters for ${gender} ${kind} names`} counts={counts} need={need} value={value} onChange={onChange} />
       {!value ? (
         <p className="text-xs text-muted">Pick a letter: every name in the post starts with it{style === "two-word" ? " (the first name)" : ""}. Green letters have enough names.</p>
       ) : short > 0 ? (

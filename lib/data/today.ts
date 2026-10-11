@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import type { CardRow, Gender, NameStyle, PostRow, SettingsRow, ThemeRow } from "@/lib/db/types";
 import { letterCounts, letterKey, type LetterStock } from "@/lib/series/letter";
+import { initialsCounts, type InitialsStock } from "@/lib/series/initials";
 
 export const STOCK_KEYS = [
   { gender: "boy", style: "two-word", label: "Boy · two-word" }, { gender: "boy", style: "single", label: "Boy · single" },
@@ -48,5 +49,10 @@ export async function getTodayData() {
   const activePosts = shown.map((post) => ({ post, cards: allCards.filter((c) => c.post_id === post.id) }));
   const letters = Object.fromEntries(STOCK_KEYS.map((k) =>
     [letterKey(k.gender, k.style), letterCounts(available.filter((n) => n.gender === k.gender && n.style === k.style))])) as LetterStock;
-  return { settings: settings as SettingsRow, themes: (themes ?? []) as ThemeRow[], stock, activePosts, letters };
+  // Posts by initials (017): per gender, the available two-word names per pair of initials ("AR": 3).
+  const initials: InitialsStock = {
+    boy: initialsCounts(available.filter((n) => n.gender === "boy" && n.style === "two-word")),
+    girl: initialsCounts(available.filter((n) => n.gender === "girl" && n.style === "two-word")),
+  };
+  return { settings: settings as SettingsRow, themes: (themes ?? []) as ThemeRow[], stock, activePosts, letters, initials };
 }

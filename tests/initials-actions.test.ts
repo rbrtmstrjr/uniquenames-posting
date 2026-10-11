@@ -43,7 +43,7 @@ const MISSING_COL = { message: "Could not find the 'initials' column of 'posts' 
 const MISSING_FN = { message: "Could not find the function public.create_initials_post(p) in the schema cache", code: "PGRST202" };
 
 type World = {
-  names?: NameRow[]; pre017?: boolean; post?: Record<string, unknown> | null; postCards?: Partial<CardRow>[]; card?: Partial<CardRow> | null;
+  names?: NameRow[]; pre017?: boolean; post?: Record<string, unknown> | null; postCards?: Record<string, unknown>[]; card?: Record<string, unknown> | null;
   rpc?: Record<string, { data?: unknown; error?: { message: string; code?: string } }[]>; reusedCards?: { name: string; created_at: string }[];
 };
 function world(w: World = {}) {
