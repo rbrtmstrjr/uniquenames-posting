@@ -3,7 +3,9 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import type { Gender, NameStyle } from "@/lib/db/types";
 import { validateName } from "./validate";
-import { badIds, chunks, dedupeNames, nameKey, normalizeName, styleOf } from "./helpers";
+import { UUID_RE, badIds, chunks, dedupeNames, nameKey, normalizeName, styleOf } from "./helpers";
+import { isMeaningCategory, type MeaningCategory } from "@/lib/names/categories";
+import { missing018 } from "@/lib/pdf/migration";
 import { bulkFail, fail, requireOwner, type ActionResult, type BulkResult } from "./result";
 
 // `style` is accepted for caller convenience but always derived from the name itself.
@@ -105,4 +107,17 @@ export async function approveNamesAction(ids: string[]): Promise<BulkResult> {
 export async function rejectNamesAction(ids: string[]): Promise<BulkResult> {
   await requireOwner();
   return bulkPending(ids, false);
+}
+
+/** Names > a name's meaning group in the PDF (migration 018); null = not sorted (the AI sorts it at the next export). */
+export async function setNameCategoryAction(id: string, category: MeaningCategory | null): Promise<ActionResult> {
+  await requireOwner();
+  if (!UUID_RE.test(id)) return fail("Name not found.");
+  if (category !== null && !isMeaningCategory(category)) return fail("Unknown group.");
+  const sb = await createClient();
+  const { data, error } = await sb.from("names").update({ meaning_category: category }).eq("id", id).select("id");
+  if (error) return fail(missing018(error) ? "Run supabase/migrations/018_names_pdf.sql first." : error.message);
+  if (!data?.length) return fail("Name not found.");
+  revalidatePath("/names");
+  return { ok: true };
 }
