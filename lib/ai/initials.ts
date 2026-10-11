@@ -61,7 +61,7 @@ export function initialsPrompt(i: SuggestInitialsInput, rng?: () => number): str
   const hints = (i.partHints ?? []).slice(0, PART_HINTS * 2);
   return [
     `Suggest ${i.count} two-word baby ${i.gender} names with the initials ${a} and ${b}: the first name starts with ${a} and the middle name starts with ${b}.`,
-    "List the best names first, fewer only if you know no more real ones.",
+    `List the best names first. Aim for all ${i.count}: most pairs of letters have many real names across origins (Latin, Greek, Hebrew, Celtic, Norse, Germanic, French, Italian, Spanish, Arabic, Hawaiian and more); return fewer only if you truly know no more real ones.`,
     `Each first name and each middle name is a real given name used for ${i.gender}s (or a unisex name often given to ${i.gender}s), and the pair sounds good together.`,
     ...(examples.length ? [`Match the style of the page's own two-word ${i.gender} names, for example: ${examples.join(", ")}.`] : []),
     ...(hints.length ? [`If you use one of these names as a part, its part meaning is exactly this (the page's own meaning):\n${hints.map((h) => `${h.name} = ${h.meaning}`).join("\n")}`] : []),
