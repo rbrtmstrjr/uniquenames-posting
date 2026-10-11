@@ -26,7 +26,7 @@ Packs today: `unique-names` (the default, @unique_names) and `name-nest` (Name N
 | `captionTemplate`, `hashtags`, `ctaMessages`, `voices` | yes | a new project's settings and the fallbacks for empty ones; the house voices + default | `lib/captions/hashtags`, `lib/cta/messages`, `lib/reels/voices`, `packs/seed` |
 | `cards` | no | children's looks, shot lists per session, props-only shots, the closing card's moment | `lib/planner/prompt`, `lib/planner/shots` |
 | `captions` | no | post caption system prompt + style guide, reel caption system prompt | `lib/ai/caption`, `lib/ai/reel-caption` |
-| `suggest` | no | name / theme / by-letter suggestion prompts and default wishes | `lib/ai/suggest` |
+| `suggest` | no | name / theme / by-letter / initials (017) suggestion prompts and default wishes | `lib/ai/suggest`, `lib/ai/initials` |
 | `reels` | no | script system prompt (audience, language, ages), auto-topic line, vetted claims, cast rules, style stories, greeting name, topic-ideas prompt + format hints, topic bank, voice reference line, Red Thread distance wording (optional) | `lib/ai/reel-script`, `lib/ai/reel-ideas`, `lib/reels/topics`, `lib/ai/tts` |
 
 These stay in the engine and are the same for every pack: the Crayon / Red Thread guide text (`lib/reels/guide-text.ts`),

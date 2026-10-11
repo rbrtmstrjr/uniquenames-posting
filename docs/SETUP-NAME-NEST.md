@@ -81,6 +81,10 @@ Pro). Vercel Hobby is for non-commercial use; check whether the pages need Pro.
 A project set up from `supabase/schema.sql` before 2026-10-11: in the **SQL Editor** run
 `supabase/migrations/016_swap_card_name.sql` once (safe to run again). It lets the card dialog's **My names** tab put a
 name from the Names page on a card in one safe step. A project set up later already has it.
+Then run `supabase/migrations/017_initials_posts.sql` once (safe to run again) for **Today > Initials** (two-word names
+with two chosen initials, like A·R): it stores the post's **A·R** label and picks unused names first, then new AI names
+(US English), then names used before, in one safe step. Before it runs, initials posts are made without names used before
+and without the label. A project set up from `supabase/schema.sql` after 2026-10-11 already has it.
 
 ## Updating the names later
 When SSA publishes a new year (each May): `npx tsx scripts/import-ssa.ts`, then
