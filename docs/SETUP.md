@@ -176,6 +176,9 @@ Followers ask for names with two initials, like **A** and **R** (Arjay Royce). *
 - No PDF lock is perfect. The buyer's name on every page is what keeps people from sharing it.
 - Unique Names PDFs are A4 size; Name Nest PDFs are US Letter.
 
+### Selling it automatically (shop page + PayMongo)
+Buyers can also pay by GCash / QR Ph on your own `/shop` page and download their PDF without you: see `docs/SHOP.md` (migration 019, PayMongo keys, webhook, **Orders** page).
+
 ## When something is wrong
 - Header dot red, "PC offline": turn on the PC. The worker starts at login. **Generate** is disabled (the button says why) until the PC is back.
 - Amber dot, "ComfyUI closed": open ComfyUI Desktop. **Generate** stays disabled until then; text edits and Re-stamp still work.

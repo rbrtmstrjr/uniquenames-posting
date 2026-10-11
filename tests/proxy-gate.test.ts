@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { gateRedirect, isOwnerEmail, safeNext } from "@/lib/supabase/proxy";
+import { gateRedirect, isOwnerEmail, isPublicPath, safeNext } from "@/lib/supabase/proxy";
 import { config } from "@/proxy";
 
 describe("isOwnerEmail", () => {
@@ -66,5 +66,23 @@ describe("proxy matcher", () => {
   });
   it("skips internals and static images", () => {
     for (const p of ["/_next/static/x.js", "/favicon.ico", "/icon.svg", "/x/photo.jpg"]) expect(re.test(p), p).toBe(false);
+  });
+});
+
+describe("isPublicPath (the names PDF shop)", () => {
+  const T = "a".repeat(96);
+  it("opens exactly the shop pages and endpoints", () => {
+    for (const p of ["/shop", "/shop/thanks", `/shop/download/${T}`, "/api/shop/checkout", "/api/shop/status", "/api/paymongo/webhook"]) {
+      expect(isPublicPath(p), p).toBe(true);
+    }
+  });
+  it("keeps every owner page and anything odd behind the gate", () => {
+    for (const p of [
+      "/", "/names", "/names/export", "/orders", "/settings", "/login", "/shopping", "/shop/", "/shop/orders", "/shop/download/abc",
+      `/shop/download/${T}/x`, `/shop/download/${T.toUpperCase()}`, "/shop/../names", "/shop/%2e%2e/names", "/shop//thanks", "/api/shop",
+      "/api/shop/checkout/x", "/api/paymongo/webhook/../../names", "/api/paymongo", "/shop\..\names",
+    ]) {
+      expect(isPublicPath(p), p).toBe(false);
+    }
   });
 });

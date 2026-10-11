@@ -181,10 +181,65 @@ export interface PackPdf {
   ornament: "sprig" | "berry";
 }
 
+/** What the shop sells: one edition of the names PDF (girl, boy or both). */
+export type ShopProduct = PdfGender;
+
+/**
+ * The public names PDF shop (/shop, migration 019, docs/SHOP.md): on or off for this page, the prices and every text
+ * the buyer reads. Server only (the pages pass what they need to the browser). Prices are in the currency's smallest
+ * unit (centavos: 5000 = ₱50) and are only ever read on the server.
+ */
+export interface PackShop {
+  /** Whether this page sells the PDF at all (the owner also has an on/off switch on the Orders page). */
+  enabled: boolean;
+  /** ISO code; PayMongo takes PHP only. */
+  currency: string;
+  /** Number formatting of prices ("en-PH" shows ₱50). */
+  locale: string;
+  products: Readonly<Record<ShopProduct, { name: string; price: number; blurb: string; badge?: string }>>;
+  /** The order the products are shown in. */
+  productOrder: readonly ShopProduct[];
+  /** PayMongo payment_method_types. Individual accounts: ["qrph"] (GCash, Maya and bank apps scan or upload the QR).
+   *  env SHOP_PAYMENT_METHODS (comma list) overrides it, e.g. "qrph,gcash,paymaya" once the account allows them. */
+  paymentMethods: readonly string[];
+  /** Help for buyers: the page's Messenger link (https://m.me/<page>); null = not set yet (env SHOP_MESSENGER_URL wins). */
+  messenger: string | null;
+  /** Delivery channels. Email = Gmail SMTP (when its env is set). Messenger delivery: a slot for later (the bot is not connected). */
+  delivery: { email: boolean; messenger: false };
+  /** Preview images under public/ (the PDF's cover and a names page, made with the real PDF builder). */
+  previews: { cover: string; page: string } | null;
+  copy: {
+    /** <title> and the share text. */
+    metaTitle: string;
+    metaDescription: string;
+    eyebrow: string;
+    title: string;
+    subtitle: string;
+    insideHeading: string;
+    /** Lines under "What's inside"; {girl} {boy} {single} {combo} = live name counts. */
+    inside: readonly string[];
+    formHeading: string;
+    payButton: string;
+    trust: readonly string[];
+    personalUse: string;
+    faqHeading: string;
+    faq: readonly { q: string; a: string }[];
+    supportLine: string;
+    comingSoon: { title: string; text: string };
+    thanks: {
+      waitingTitle: string; waitingText: string; slowText: string;
+      paidTitle: string; paidText: string; passwordLabel: string; emailedText: string; downloadButton: string;
+      linkNote: string; expiredTitle: string; expiredText: string; notFoundTitle: string; notFoundText: string;
+    };
+    email: { subject: string; greeting: string; intro: string; passwordLabel: string; button: string; note: string; signoff: string };
+  };
+}
+
 export interface NichePack extends PackShared {
   cards: PackCards;
   captions: PackCaptions;
   suggest: PackSuggest;
   reels: PackReels;
   pdf: PackPdf;
+  shop: PackShop;
 }

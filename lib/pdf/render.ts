@@ -46,6 +46,8 @@ export interface RenderInput {
   edition: Date;
   pack: { pdf: PackPdf; name: string; handle: string };
   passwords: PdfPasswords;
+  /** A sample for the shop's preview pictures: no name count and no month on the cover (they would go stale). */
+  sample?: boolean;
 }
 export interface RenderResult { pdf: Buffer; pages: number; trace: TraceItem[]; contents: ContentsRow[] }
 
@@ -240,9 +242,9 @@ function cover(b: Book, total: number) {
   divider(doc, p.ornament, W / 2, y, 170, c, 15);
   y += 26;
   y += b.text("cover", p.subtitle, 110, y, { f: "body", size: 12, color: c.muted, width: W - 220, align: "center", lineGap: 4 }) + 20;
-  const stats = `${total.toLocaleString("en-US")} names · grouped by meaning`;
+  const stats = b.i.sample ? "grouped by meaning" : `${total.toLocaleString("en-US")} names · grouped by meaning`;
   y += b.text("cover", stats.toUpperCase(), 60, y, { f: "bold", size: 9.5, color: c.accent, width: W - 120, align: "center", spacing: 1.6 }) + 6;
-  b.text("cover", editionText(b.i.edition), 60, y, { f: "body", size: 10, color: c.muted, width: W - 120, align: "center" });
+  if (!b.i.sample) b.text("cover", editionText(b.i.edition), 60, y, { f: "body", size: 10, color: c.muted, width: W - 120, align: "center" });
   const by = H - 168;
   heart(doc, W / 2, by - 14, 9, c.accent);
   b.text("cover", "PREPARED FOR", 60, by, { f: "bold", size: 8, color: c.muted, width: W - 120, align: "center", spacing: 2.2 });

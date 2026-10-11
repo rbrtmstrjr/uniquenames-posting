@@ -128,6 +128,7 @@ describe("fresh schema.sql matches v1 + 002..017 (+ 018)", () => {
   it("has the same tables and the same four functions", async () => {
     const migrated = await migratedDb();
     await migrated.exec(stripSupabase(read("supabase", "migrations", "018_names_pdf.sql")));
+    await migrated.exec(stripSupabase(read("supabase", "migrations", "019_shop.sql"))); // 019: settings.shop_enabled
     const want = await shape(migrated);
     expect((want.columns as { column_name: string }[]).map((c) => c.column_name)).toContain("initials");
     expect(want.functions).toHaveLength(4);

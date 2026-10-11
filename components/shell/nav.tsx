@@ -2,24 +2,26 @@
 import Link from "next/link";
 import { useState } from "react";
 import { usePathname } from "next/navigation";
-import { CalendarHeart, Clapperboard, Images, Type, Palette, Settings } from "lucide-react";
+import { CalendarHeart, Clapperboard, Images, Type, Palette, Settings, ShoppingBag } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 
-// Phones keep 5 tabs (the most a bottom bar holds comfortably): Themes moves off the bar and is
-// reached from "More" (Settings shows a Themes link on phones) and from Today's "Manage themes".
+// Phones keep 5 tabs (the most a bottom bar holds comfortably): Themes and Orders move off the bar and are
+// reached from "More" (Settings shows their links on phones); Themes also from Today's "Manage themes".
 export const NAV = [
   { href: "/", label: "Today", short: "Today", icon: CalendarHeart, phone: true },
   { href: "/posts", label: "Posts", short: "Posts", icon: Images, phone: true },
   { href: "/reels", label: "Reels", short: "Reels", icon: Clapperboard, phone: true },
   { href: "/names", label: "Names", short: "Names", icon: Type, phone: true },
   { href: "/themes", label: "Themes", short: "Themes", icon: Palette, phone: false },
+  { href: "/orders", label: "Orders", short: "Orders", icon: ShoppingBag, phone: false },
   { href: "/settings", label: "Settings", short: "More", icon: Settings, phone: true },
 ];
 export const PHONE_NAV = NAV.filter((n) => n.phone);
 
 const isActive = (path: string, href: string) => (href === "/" ? path === "/" : path.startsWith(href));
 /** Phone tabs: "More" also lights up on Themes (it lives under More on phones). */
-const isPhoneActive = (path: string, href: string) => isActive(path, href) || (href === "/settings" && isActive(path, "/themes"));
+const isPhoneActive = (path: string, href: string) =>
+  isActive(path, href) || (href === "/settings" && (isActive(path, "/themes") || isActive(path, "/orders")));
 
 // The tapped tab lights up at once (the URL only changes once the new page arrives);
 // it hands back to the real path as soon as the navigation commits.

@@ -30,6 +30,7 @@ Packs today: `unique-names` (the default, @unique_names) and `name-nest` (Name N
 | `suggest` | no | name / theme / by-letter / initials (017) suggestion prompts and default wishes | `lib/ai/suggest`, `lib/ai/initials` |
 | `reels` | no | script system prompt (audience, language, ages), auto-topic line, vetted claims, cast rules, style stories, greeting name, topic-ideas prompt + format hints, topic bank, voice reference line, Red Thread distance wording (optional) | `lib/ai/reel-script`, `lib/ai/reel-ideas`, `lib/reels/topics`, `lib/ai/tts` |
 | `pdf` | no | the sellable names PDF: page size (A4 / US Letter), collection name, cover titles, welcome / tips / trust texts, copyright line, thank-you page, colours, fonts (OFL files in `lib/pdf/fonts`), logo and ornament (drawn in code) | `lib/pdf/render`, `lib/pdf/export` |
+| `shop` | no | the public names PDF shop (`/shop`, migration 019, `docs/SHOP.md`): on/off per page, product names and prices (centavos), currency, PayMongo payment methods (`["qrph"]`; env `SHOP_PAYMENT_METHODS` overrides), the Messenger help link, delivery channels (email now; a Messenger slot for later), preview images and every shop / thanks / email text | `app/shop/*`, `lib/shop/*` |
 
 These stay in the engine and are the same for every pack: the Crayon / Red Thread guide text (`lib/reels/guide-text.ts`),
 the reel formats and their beats, the health rules, the Filipino / Tagalog and jargon ban lists (`lib/ai/plain-words.ts`),

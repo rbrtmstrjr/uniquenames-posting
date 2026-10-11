@@ -33,11 +33,15 @@ describe("nav instant feedback", () => {
 
   it("sidebar lists every page incl. Reels; the phone bar keeps 5 tabs with Reels, Themes under More", () => {
     render(<SideNav />);
-    expect(screen.getAllByRole("link").map((a) => a.textContent?.trim())).toEqual(["Today", "Posts", "Reels", "Names", "Themes", "Settings"]);
+    expect(screen.getAllByRole("link").map((a) => a.textContent?.trim())).toEqual(["Today", "Posts", "Reels", "Names", "Themes", "Orders", "Settings"]);
     cleanup();
     pathname = "/themes";
     render(<BottomTabs />);
     expect(screen.getAllByRole("link").map((a) => a.textContent?.trim())).toEqual(["Today", "Posts", "Reels", "Names", "More"]);
+    expect(current()).toEqual(["More"]);
+    cleanup();
+    pathname = "/orders";
+    render(<BottomTabs />);
     expect(current()).toEqual(["More"]);
   });
 });

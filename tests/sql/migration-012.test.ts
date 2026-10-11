@@ -26,7 +26,7 @@ const earlier = [
   stripSupabase(read("supabase", "migrations", "011_az_series.sql")),
 ];
 const m012 = stripSupabase(read("supabase", "migrations", "012_two_styles.sql"));
-const later = ["013_letter_posts.sql", "014_reel_formats.sql", "015_name_nest.sql"].map((m) => stripSupabase(read("supabase", "migrations", m)));
+const later = ["013_letter_posts.sql", "014_reel_formats.sql", "015_name_nest.sql", "019_shop.sql"].map((m) => stripSupabase(read("supabase", "migrations", m)));
 
 async function liveDb() {
   const db = new PGlite();
