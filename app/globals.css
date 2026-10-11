@@ -72,3 +72,74 @@ body { font-family: var(--font-sans); -webkit-font-smoothing: antialiased; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
 }
+
+/* Shop (/shop): the moving photo wall (components/shop/shop-gallery.tsx) and the cards that keep every text readable
+   over it. All colours are the pack's tokens, so light, dark and every pack follow. Motion is transform/opacity only. */
+.shop-gallery {
+  position: fixed; inset: 0; z-index: -1; overflow: hidden; pointer-events: none; user-select: none;
+  animation: shop-gallery-in 1.2s ease-out .35s both; /* after the hero has painted */
+}
+.shop-gallery-grid {
+  position: absolute; inset: -8% -10%; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px;
+  transform: rotate(-4deg);
+}
+.shop-gallery-col { min-width: 0; }
+/* depth: the middle columns sit further back (smaller, fainter), the outer ones closer */
+.shop-gallery-col:nth-child(odd) { opacity: .95; }
+.shop-gallery-col:nth-child(even) { opacity: .78; transform: scale(.94); }
+.shop-gallery-col:nth-child(4) { display: none; }
+.shop-gallery-col:nth-child(5) { display: none; }
+@media (min-width: 640px) {
+  .shop-gallery-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
+  .shop-gallery-col:nth-child(4) { display: block; }
+}
+@media (min-width: 1024px) {
+  .shop-gallery-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 20px; inset: -10% -6%; }
+  .shop-gallery-col:nth-child(5) { display: block; }
+}
+.shop-drift { will-change: transform; animation: shop-drift-up var(--drift, 100s) linear infinite; }
+.shop-drift-down { animation-name: shop-drift-down; }
+/* margin (not gap) after every tile, so moving by -50% lands exactly on the second copy */
+.shop-tile {
+  display: block; width: 100%; height: auto; aspect-ratio: 1; object-fit: cover; margin-bottom: 12px;
+  border-radius: 1.25rem; background: var(--surface-2); box-shadow: 0 6px 18px rgba(60, 35, 15, .10);
+}
+@media (min-width: 640px) { .shop-tile { margin-bottom: 16px; border-radius: 1.5rem; } }
+@media (min-width: 1024px) { .shop-tile { margin-bottom: 20px; } }
+/* the cream veil: strongest over the middle where the content is, lighter towards the edges, plus a soft blur */
+.shop-veil {
+  position: absolute; inset: 0;
+  background:
+    radial-gradient(ellipse 58% 70% at 50% 42%, color-mix(in srgb, var(--bg) 88%, transparent) 0%, color-mix(in srgb, var(--bg) 74%, transparent) 55%, color-mix(in srgb, var(--bg) 50%, transparent) 100%),
+    linear-gradient(to bottom, color-mix(in srgb, var(--bg) 40%, transparent), transparent 22%, transparent 78%, color-mix(in srgb, var(--bg) 50%, transparent));
+  -webkit-backdrop-filter: blur(2px) saturate(.92); backdrop-filter: blur(2px) saturate(.92);
+}
+/* phones: the cards cover most of the screen, so the veil is lighter and the photos show in the gaps and on top */
+@media (max-width: 767px) {
+  .shop-veil {
+    background:
+      linear-gradient(to bottom, color-mix(in srgb, var(--bg) 30%, transparent), color-mix(in srgb, var(--bg) 50%, transparent) 18%, color-mix(in srgb, var(--bg) 62%, transparent) 60%, color-mix(in srgb, var(--bg) 70%, transparent));
+  }
+}
+@keyframes shop-drift-up { from { transform: translate3d(0, 0, 0); } to { transform: translate3d(0, -50%, 0); } }
+@keyframes shop-drift-down { from { transform: translate3d(0, -50%, 0); } to { transform: translate3d(0, 0, 0); } }
+@keyframes shop-gallery-in { from { opacity: 0; } to { opacity: 1; } }
+
+/* every block of text on the shop is a card: the page's cream (dark: the raised surface), 96% opaque (no backdrop blur: it would re-blur the moving wall under every card on every frame).
+   In the components layer, so a utility (e.g. border-warn) can still change one. */
+@layer components {
+  .shop-card {
+    --card: var(--bg);
+    background: color-mix(in srgb, var(--card) 96%, transparent);
+    border: 1px solid var(--line); box-shadow: 0 1px 2px rgba(60, 35, 15, .06), 0 12px 32px -8px rgba(60, 35, 15, .14);
+  }
+  .dark .shop-card { --card: var(--surface); box-shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 16px 40px -8px rgba(0, 0, 0, .5); }
+}
+/* entrance: a short rise for the blocks below the hero (the hero only moves, never fades: it paints first) */
+.shop-rise { animation: shop-rise .6s cubic-bezier(.2, .8, .2, 1) both; animation-delay: var(--rise-delay, 0ms); }
+.shop-rise-still { animation: shop-rise-still .5s cubic-bezier(.2, .8, .2, 1) both; }
+@keyframes shop-rise { from { opacity: 0; transform: translate3d(0, 14px, 0); } to { opacity: 1; transform: none; } }
+@keyframes shop-rise-still { from { transform: translate3d(0, 8px, 0); } to { transform: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .shop-drift, .shop-gallery, .shop-rise, .shop-rise-still { animation: none !important; }
+}

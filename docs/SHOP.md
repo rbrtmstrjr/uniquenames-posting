@@ -84,6 +84,18 @@ then the shop stays closed). Then turn the shop **Open** on the Orders page: it 
 nobody can buy until you open it. Do one real **₱50** purchase yourself with GCash (Pay QR > Upload QR), download it,
 open it with the password, and check the email and the Orders page. Refund it from the PayMongo dashboard if you like.
 
+## The photo wall behind the shop
+
+/shop shows a slow-moving wall of the page's own photoshoot photos behind the cards (clean photos, no names on them).
+It is decorative only: screen readers skip it, it stands still for people who turn on "reduce motion", and every text
+sits on a near-opaque cream card, so the photos never make anything hard to read (`tests/shop-contrast.test.ts` checks
+every text colour, light and dark, for every pack).
+
+- The photos: `public/packs/unique-names/shop-gallery/` (28 WebP files, 480 px, each under 40 KB) and its
+  `manifest.json` (file names, sizes, alt text). To change them, replace the files and update the manifest.
+- The switch: `gallery` in `packs/<pack>/shop.ts` (`null` = a plain background; Name Nest has none yet).
+- The look (columns, speed, veil): `components/shop/shop-gallery.tsx` and the `.shop-*` rules in `app/globals.css`.
+
 ## The link to post
 `https://<your site>/shop` (Orders > **Copy shop link**). Put it in your post comments, for example:
 "Get the full list of our unique names in one PDF, with meanings: <link> (₱50 girl / ₱50 boy / ₱100 both)."
