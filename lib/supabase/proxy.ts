@@ -21,9 +21,21 @@ export function safeNext(next?: string): string {
   return out.startsWith("//") || out.startsWith("/\\") ? "/" : out;
 }
 
+// The public names PDF shop (docs/SHOP.md): pages and endpoints anyone may open without signing in. They never use
+// the owner's session: they call migration 019's narrow functions with the anon key. Exact paths only; anything odd
+// (dot segments, doubled slashes, encoded characters) stays behind the owner gate.
+const PUBLIC_EXACT = new Set(["/shop", "/shop/thanks", "/api/shop/checkout", "/api/shop/status", "/api/paymongo/webhook"]);
+export function isPublicPath(path: string): boolean {
+  if (/[%\\]|\/\/|(^|\/)\.{1,2}(\/|$)/.test(path)) return false;
+  if (PUBLIC_EXACT.has(path)) return true;
+  return /^\/shop\/download\/[0-9a-f]{96}$/.test(path);
+}
+
 // Refreshes the session cookie on every request and sends anyone who is not
 // the owner to /login (sign-ups are off; the email check is defense in depth).
+// The public shop paths skip all of it (no Supabase call, no redirect).
 export async function updateSession(request: NextRequest) {
+  if (isPublicPath(request.nextUrl.pathname)) return NextResponse.next({ request });
   let response = NextResponse.next({ request });
   const sb = createServerClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, {
     cookies: {
