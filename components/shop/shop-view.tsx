@@ -2,6 +2,7 @@ import type { CSSProperties } from "react";
 import { ArrowRight, BookHeart, ChevronDown, Download, MessageCircle, ShieldCheck, Sparkles } from "lucide-react";
 import type { PackShop } from "@/packs/types";
 import { OrderForm, type ShopProductOption } from "./order-form";
+import { FbAvatar, VerifiedBadge } from "./fb-avatar";
 import { ShopGallery, type ShopGalleryImage } from "./shop-gallery";
 import { StickyOrderBar } from "./sticky-order-bar";
 
@@ -21,6 +22,8 @@ export interface ShopViewProps {
   previews: PackShop["previews"];
   /** The photo wall behind the page (full public URLs); empty or missing = a plain background. */
   gallery?: readonly ShopGalleryImage[];
+  /** The Facebook page at the top of the hero (avatar in the blue ring, verified badge, followers, tagline). */
+  facebookPage?: PackShop["facebookPage"];
   /** The cheapest edition's price ("₱50"), shown as "from ₱50" next to the order buttons. */
   fromPrice?: string | null;
   messenger: string | null;
@@ -34,16 +37,18 @@ const CARD = "shop-card rounded-[1.75rem] p-5 sm:p-7";
 /** The entrance delay of a block below the hero (.shop-rise). */
 const rise = (ms: number) => ({ "--rise-delay": `${ms}ms` }) as CSSProperties;
 
-export function ShopShell({ brandName, logo, gallery, headerAction, children }: {
-  brandName: string; logo: string | null; gallery?: readonly ShopGalleryImage[]; headerAction?: React.ReactNode; children: React.ReactNode;
+export function ShopShell({ brandName, logo, avatar, gallery, headerAction, children }: {
+  brandName: string; logo: string | null; avatar?: string | null; gallery?: readonly ShopGalleryImage[]; headerAction?: React.ReactNode; children: React.ReactNode;
 }) {
   return (
     <div className="relative isolate min-h-dvh overflow-x-clip bg-bg text-ink">
       {gallery?.length ? <ShopGallery images={gallery} /> : null}
       <header className="mx-auto max-w-5xl px-4 pt-4 sm:px-6 sm:pt-6">
         <div className="shop-card flex min-h-14 items-center gap-2.5 rounded-2xl px-3 py-2 sm:px-4">
-          {/* eslint-disable-next-line @next/next/no-img-element -- a tiny static SVG from public/ */}
-          {logo ? <img src={logo} alt="" width={32} height={32} className="size-8 rounded-lg" /> : <BookHeart className="size-6 text-accent" aria-hidden />}
+          {/* the page's own photo when the pack has one (decorative: the name is right next to it), else the logo */}
+          {avatar ? <FbAvatar src={avatar} alt="" size="sm" />
+            // eslint-disable-next-line @next/next/no-img-element -- a tiny static SVG from public/
+            : logo ? <img src={logo} alt="" width={32} height={32} className="size-8 rounded-lg" /> : <BookHeart className="size-6 text-accent" aria-hidden />}
           <span className="font-display text-lg text-ink">{brandName}</span>
           {headerAction ? <span className="ml-auto">{headerAction}</span> : null}
         </div>
@@ -60,7 +65,7 @@ export function ShopView(p: ShopViewProps) {
   const c = p.copy;
   const from = p.fromPrice ? `from ${p.fromPrice}` : undefined;
   return (
-    <ShopShell brandName={p.brandName} logo={p.logo} gallery={p.gallery}
+    <ShopShell brandName={p.brandName} logo={p.logo} avatar={p.facebookPage?.avatar} gallery={p.gallery}
       headerAction={p.open ? (
         <a href="#order" className="hidden min-h-11 items-center gap-1.5 rounded-xl bg-accent px-4 text-sm font-bold text-accent-ink shadow-soft transition hover:-translate-y-px hover:shadow-md active:translate-y-0 md:inline-flex">
           {c.formHeading} <ArrowRight className="size-4" aria-hidden />
@@ -106,6 +111,7 @@ function ShopHero(p: ShopViewProps & { from?: string }) {
     <section aria-labelledby="shop-title" className={`${CARD} shop-rise-still sm:p-8 md:p-10`}>
       <div className="grid items-center gap-7 md:grid-cols-[1.1fr_1fr] md:gap-10">
         <div>
+          {p.facebookPage && <FacebookPage page={p.facebookPage} name={p.brandName} />}
           <p className="text-xs font-bold uppercase tracking-[.18em] text-accent">{c.eyebrow}</p>
           <h1 id="shop-title" className="mt-2 text-balance font-display text-4xl leading-[1.08] text-ink sm:text-5xl">{c.title}</h1>
           <p className="mt-3 max-w-prose text-pretty text-base leading-relaxed text-muted sm:text-lg">{c.subtitle}</p>
@@ -147,6 +153,24 @@ function ShopHero(p: ShopViewProps & { from?: string }) {
         })}
       </ul>
     </section>
+  );
+}
+
+/** The page as buyers know it from Facebook: photo in the blue ring + verified badge, bold name, followers, tagline. */
+function FacebookPage({ page, name }: { page: NonNullable<PackShop["facebookPage"]>; name: string }) {
+  const meta = [page.verified ? "Verified page" : null, page.followers ? `${page.followers} followers` : null].filter(Boolean).join(" · ");
+  return (
+    <div className="mb-5 flex items-center gap-3.5 md:mb-6 md:gap-4">
+      <FbAvatar src={page.avatar} alt={`${name} Facebook page`} verified={page.verified} />
+      <div className="min-w-0">
+        <p className="flex items-center gap-1 text-lg font-bold leading-tight text-ink md:text-xl">
+          {name}
+          {page.verified && <VerifiedBadge decorative className="size-[18px] shrink-0 md:size-5" />}
+        </p>
+        {meta && <p className="mt-0.5 text-sm font-semibold text-muted">{meta}</p>}
+        {page.tagline && <p className="mt-0.5 text-sm text-muted">{page.tagline}</p>}
+      </div>
+    </div>
   );
 }
 

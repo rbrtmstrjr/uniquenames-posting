@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { PACK_IDS, packById } from "@/packs";
+import { FB_BLUE } from "@/components/shop/fb-avatar";
 
 // /shop's text stays readable over the moving photo wall: every text colour against the background it really sits
 // on (WCAG 2.x contrast), for every pack, light and dark. Cards are the pack's cream (dark: surface) at 96% opacity
@@ -48,6 +49,8 @@ const PAIRS: Pair[] = [
   { where: "form error text (ink on bad/10 over card)", fg: "ink", bg: (t, c) => over(t("bad"), c, 0.1), min: NORMAL },
   { where: "form error icon (bad on bad/10 over card)", fg: "bad", bg: (t, c) => over(t("bad"), c, 0.1), min: UI },
   { where: "focus outline (accent on card)", fg: "accent", bg: (_, c) => c, min: UI },
+  { where: "Facebook avatar ring + verified badge (Facebook blue on card)", fg: "fb-blue", bg: (_, c) => c, min: UI },
+  { where: "verified badge check (white on Facebook blue)", fg: "fb-white", bg: (t) => t("fb-blue"), min: UI },
 ];
 
 describe("shop contrast over the photo wall", () => {
@@ -58,7 +61,7 @@ describe("shop contrast over the photo wall", () => {
   for (const id of PACK_IDS) {
     for (const mode of ["light", "dark"] as const) {
       it(`${id} ${mode}: every text >= 4.5:1 and every UI mark >= 3:1 on its worst-case background`, () => {
-        const tokens: Record<string, string> = { ...BASE[mode], ...packById(id).brand.colors[mode] };
+        const tokens: Record<string, string> = { ...BASE[mode], ...packById(id).brand.colors[mode], "fb-blue": FB_BLUE, "fb-white": "#FFFFFF" };
         const t = (k: string) => {
           expect(tokens[k], `token --${k}`).toMatch(/^#[0-9a-fA-F]{6}$/);
           return hex(tokens[k]);

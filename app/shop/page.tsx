@@ -43,7 +43,7 @@ export default async function ShopPage({ searchParams }: { searchParams: Promise
   return (
     <ShopView
       brandName={pack.brand.name} logo={pack.brand.assets.logo ?? null} copy={pack.shop.copy} inside={inside} products={products}
-      previews={pack.shop.previews} gallery={gallery} fromPrice={formatPrice(pack.shop, pack.shop.products[cheapest].price)} messenger={env.messenger} open={state.open} testMode={state.open && state.testMode} cancelled={(await searchParams).cancelled === "1"}
+      previews={pack.shop.previews} gallery={gallery} facebookPage={pack.shop.facebookPage} fromPrice={formatPrice(pack.shop, pack.shop.products[cheapest].price)} messenger={env.messenger} open={state.open} testMode={state.open && state.testMode} cancelled={(await searchParams).cancelled === "1"}
     />
   );
 }

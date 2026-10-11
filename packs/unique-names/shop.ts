@@ -22,6 +22,8 @@ export const UNIQUE_NAMES_SHOP: PackShop = {
   previews: { cover: "/packs/unique-names/shop/cover.webp", page: "/packs/unique-names/shop/names-page.webp" },
   // 28 clean photoshoot photos from our cards (no names on them), 480 px WebP, for the moving wall behind the page.
   gallery: { dir: "/packs/unique-names/shop-gallery", ...galleryManifest },
+  // The Facebook page as buyers know it (Meta Verified, confirmed by the owner 2026-10-12; numbers from the page).
+  facebookPage: { avatar: "/packs/unique-names/avatar.webp", verified: true, followers: "136K", tagline: "Every name is a blessing ✨" },
   copy: {
     metaTitle: "The Unique Names Collection (PDF)",
     metaDescription: "Every unique baby name from our page, with simple meanings, in one lovely PDF. Instant download after payment.",

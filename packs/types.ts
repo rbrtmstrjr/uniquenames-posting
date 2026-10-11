@@ -218,6 +218,10 @@ export interface PackShop {
   /** The slow-moving photo wall behind /shop (decorative): the page's clean card photos (no name text on them), small
    *  WebP files under public/ (`dir`) listed in that folder's manifest.json. null = no gallery (a plain background). */
   gallery: ShopGallery | null;
+  /** The page's Facebook identity at the top of /shop, drawn like Facebook does: the profile photo (square, under
+   *  public/) in a blue ring, the blue verified badge when the page is Meta Verified, the follower count ("136K") and
+   *  the tagline. null = not shown (the header keeps the logo). */
+  facebookPage: { avatar: string; verified: boolean; followers: string | null; tagline: string | null } | null;
   copy: {
     /** <title> and the share text. */
     metaTitle: string;

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { packById } from "@/packs";
 import { OrderForm, type ShopProductOption } from "@/components/shop/order-form";
 import { ShopView } from "@/components/shop/shop-view";
@@ -177,6 +177,48 @@ describe("ShopView photo wall + phone order bar", () => {
     render(<ShopView {...base} open={false} />);
     expect(screen.queryByTestId("sticky-order-bar")).toBeNull();
     expect(document.getElementById("hero-cta")).toBeNull();
+  });
+});
+
+describe("ShopView Facebook page (avatar with the blue ring + verified badge)", () => {
+  const base = {
+    brandName: "Unique Names", logo: "/packs/unique-names/logo.svg", copy: UN.shop.copy, inside: ["x"], products: PRODUCTS,
+    previews: null, messenger: null, cancelled: false, open: true,
+  };
+
+  it("Unique Names: avatar, verified, 136K followers and the tagline in its pack; Name Nest has none", () => {
+    expect(UN.shop.facebookPage).toEqual({ avatar: "/packs/unique-names/avatar.webp", verified: true, followers: "136K", tagline: "Every name is a blessing ✨" });
+    expect(statSync(join(process.cwd(), "public", UN.shop.facebookPage!.avatar)).size).toBeGreaterThan(0);
+    expect(packById("name-nest").shop.facebookPage).toBeNull();
+  });
+
+  it("the hero shows the page like Facebook: photo, ring (decorative), labelled verified badge, name, followers, tagline", () => {
+    render(<ShopView {...base} facebookPage={UN.shop.facebookPage} />);
+    const hero = screen.getByRole("region", { name: UN.shop.copy.title });
+    const photo = within(hero).getByAltText("Unique Names Facebook page");
+    expect(photo.getAttribute("src")).toBe("/packs/unique-names/avatar.webp");
+    const avatar = photo.closest("[data-fb-avatar]")!;
+    expect(avatar.querySelector("[data-fb-ring]")!.getAttribute("aria-hidden")).toBe("true");
+    expect(within(hero).getByRole("img", { name: "Verified Facebook page" })).toBeTruthy();
+    expect(within(hero).getByText("Unique Names")).toBeTruthy();
+    expect(within(hero).getByText(/136K followers/)).toBeTruthy();
+    expect(within(hero).getByText(/Verified page/)).toBeTruthy();
+    expect(within(hero).getByText("Every name is a blessing ✨")).toBeTruthy();
+    // the header shows the small photo (decorative next to the page name) instead of the generic logo
+    const header = document.querySelector("header")!;
+    expect(header.querySelector("img")!.getAttribute("src")).toBe("/packs/unique-names/avatar.webp");
+    expect(header.querySelector("img")!.getAttribute("alt")).toBe("");
+  });
+
+  it("not verified: no badge and no 'Verified page'; no page: no avatar, the logo in the header", () => {
+    render(<ShopView {...base} facebookPage={{ ...UN.shop.facebookPage!, verified: false, followers: null, tagline: null }} />);
+    expect(screen.queryByRole("img", { name: "Verified Facebook page" })).toBeNull();
+    expect(screen.queryByText(/Verified page/)).toBeNull();
+    expect(screen.queryByText(/followers/)).toBeNull();
+    cleanup();
+    render(<ShopView {...base} facebookPage={null} />);
+    expect(screen.queryByAltText("Unique Names Facebook page")).toBeNull();
+    expect(document.querySelector("header img")!.getAttribute("src")).toBe("/packs/unique-names/logo.svg");
   });
 });
 
