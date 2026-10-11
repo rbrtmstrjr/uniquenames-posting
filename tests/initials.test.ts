@@ -5,6 +5,7 @@ import {
 } from "@/lib/series/initials";
 import { postLabel } from "@/lib/series/letter";
 import { filterInitialsCombos } from "@/lib/ai/suggest-filter";
+import { groundingProblem } from "@/lib/ai/meaning-grounding";
 
 describe("initials helpers", () => {
   it("reads a two-word name's initials, accents dropped; anything else has none", () => {
@@ -83,43 +84,123 @@ describe("initials helpers", () => {
 });
 
 describe("filterInitialsCombos", () => {
-  const cand = (name: string, meaning = "noble and kingly", o: Record<string, string> = {}) => ({ name, meaning, gender: "boy", first_meaning: "noble", second_meaning: "king", ...o });
+  // [name, card meaning, first name's meaning, middle name's meaning]
+  const cand = (name: string, meaning: string, p1: string, p2: string, o: Record<string, string> = {}) => ({ name, meaning, gender: "boy", part1_meaning: p1, part2_meaning: p2, ...o });
+  const opts = (o: Partial<Parameters<typeof filterInitialsCombos>[2]> = {}) => ({ initials: "AR", want: 10, ...o });
 
-  it("keeps valid new pairs with the right initials, in the AI's order, at most `want`", () => {
+  it("keeps valid new pairs with the right initials and grounded meanings, in the AI's order, at most `want`", () => {
     const r = filterInitialsCombos([
-      cand("asher rowan", "Happy Little Tree."), cand("Arlo Reed"), cand("Axel Reid"), cand("Amos Rhett"),
-    ], ["Arlo Reed"], { initials: "AR", want: 2 }, "boy");
-    expect(r.fresh).toEqual([{ name: "Asher Rowan", meaning: "happy little tree" }, { name: "Axel Reid", meaning: "noble and kingly" }]);
-    expect(r.duplicates).toBe(1);
-    expect(r.offInitials).toBe(1);
+      cand("alaric rhys", "Ardor Of The Ruler.", "ruler of all", "ardor"), cand("Arlo Reed", "x y", "x", "y"),
+      cand("Anselm Rafe", "divine helmet of counsel", "divine helmet", "wolf counsel"), cand("Aldo Remy", "old and wise oarsman", "old and wise", "oarsman"),
+    ], ["Arlo Reed"], opts({ want: 2 }), "boy");
+    expect(r.fresh).toEqual([
+      { name: "Alaric Rhys", meaning: "ardor of the ruler", parts: ["ruler of all", "ardor"] },
+      { name: "Anselm Rafe", meaning: "divine helmet of counsel", parts: ["divine helmet", "wolf counsel"] },
+    ]);
+    expect([r.duplicates, r.offInitials]).toEqual([1, 1]);
   });
 
-  it("drops wrong initials, one-word or three-word names, hedges, long or short meanings, repeats in the batch", () => {
+  it("rejects a card meaning with imagery in neither part, or with nothing from one part (Andrew Russell)", () => {
     const r = filterInitialsCombos([
-      cand("Reid Axel"), cand("Arlo"), cand("Arlo Jay Reed"), cand("Arlo Rhys", "lion or bear"), cand("Arlo Rex", "king"),
-      cand("Arlo Ryan", "one two three four five six seven"), cand("Atlas Rome"), cand("atlas rome"),
-    ], [], { initials: "AR", want: 10 }, "boy");
-    expect(r.fresh.map((f) => f.name)).toEqual(["Atlas Rome"]);
-    expect(r.offInitials).toBe(1);
-    expect(r.duplicates).toBe(1);
-    expect(r.invalid).toBe(5);
+      cand("Andrew Russell", "brave little fox", "manly and strong", "little red one"),
+      cand("Andre Russ", "strong little red one", "manly and strong", "little red one"),
+      cand("Alden Roy", "old friend", "old friend", "king"),
+      cand("Amos Roald", "carried", "carried by god", "famous ruler"),
+      cand("Abel Royce", "breath of the king", "breath", ""),
+    ], [], opts(), "boy");
+    expect(r.fresh.map((f) => f.name)).toEqual(["Andre Russ"]);
+    expect(r.ungrounded).toBe(3);
+    expect(r.invalid).toBe(1); // a one-word card meaning
+  });
+
+  it("the owner's own meaning of a part wins over the AI's", () => {
+    const knownParts = new Map([["rafe", "wise wolf"]]);
+    const ok = cand("Anselm Rafe", "divine wise wolf", "divine helmet", "wolf counsel");
+    const bad = cand("Alden Rafe", "old friend of counsel", "old friend", "wolf counsel");
+    const r = filterInitialsCombos([ok, bad], [], opts({ knownParts }), "boy");
+    expect(r.fresh).toEqual([{ name: "Anselm Rafe", meaning: "divine wise wolf", parts: ["divine helmet", "wise wolf"] }]);
+    expect(r.ungrounded).toBe(1);
+  });
+
+  it("unique pages: very common names are out for either part while enough uncommon ones pass", () => {
+    const list = [
+      cand("Aaron Rhett", "lofty advice", "lofty", "advice"), cand("Alaric Ryan", "ruler and king", "ruler of all", "little king"),
+      cand("Ansel Roan", "divine red", "divine helmet", "red"), cand("Amos Rhodes", "carried by roses", "carried by god", "roses"),
+    ];
+    const strict = filterInitialsCombos(list, [], opts({ unique: true, need: 2 }), "boy");
+    expect(strict.fresh.map((f) => f.name)).toEqual(["Ansel Roan", "Amos Rhodes"]);
+    expect(strict.common).toBe(2);
+    // name-nest (not unique): common names are fine
+    expect(filterInitialsCombos(list, [], opts(), "boy").fresh).toHaveLength(4);
+  });
+
+  it("too few uncommon: relaxes only the part that blocked, uncommon ones first", () => {
+    const list = [
+      cand("Aaron Rhett", "lofty advice", "lofty", "advice"), cand("Adam Reed", "earth and red", "earth", "red"),
+      cand("Alaric Ryan", "ruler and king", "ruler of all", "little king"), cand("Ansel Roan", "divine red", "divine helmet", "red"),
+    ];
+    const r = filterInitialsCombos(list, [], opts({ unique: true, need: 3 }), "boy");
+    expect(r.fresh.map((f) => f.name)).toEqual(["Ansel Roan", "Aaron Rhett", "Adam Reed"]);
+    expect(r.common).toBe(1); // Alaric Ryan: the middle name's rule never had to relax
+  });
+
+  it("rare initials (Q, U, X, Y, Z) relax the rule for that part only", () => {
+    const r = filterInitialsCombos([
+      cand("Xavier Zion", "new house of zion", "new house", "zion"), cand("Xavier Zeke", "new house of god", "new house", "god strengthens"),
+    ], [], opts({ initials: "XZ", unique: true, need: 1 }), "boy");
+    expect(r.fresh.map((f) => f.name)).toEqual(["Xavier Zion", "Xavier Zeke"]);
+    const a = filterInitialsCombos([cand("Aaron Zion", "lofty zion", "lofty", "zion"), cand("Alaric Zev", "ruler of the wolf", "ruler of all", "wolf")],
+      [], opts({ initials: "AZ", unique: true, need: 1 }), "boy");
+    expect(a.fresh.map((f) => f.name)).toEqual(["Alaric Zev"]);
+  });
+
+  it("drops wrong initials, one-word or three-word names, hedges, repeats in the batch", () => {
+    const r = filterInitialsCombos([
+      cand("Reid Alaric", "red ruler", "red", "ruler"), cand("Arlo", "x y", "x", "y"), cand("Arlo Jay Reed", "x y", "x", "y"),
+      cand("Arlo Rhys", "army or ardor", "army", "ardor"), cand("Alaric Rhys", "ardor of the ruler", "ruler of all", "ardor"), cand("alaric rhys", "ardor of the ruler", "ruler of all", "ardor"),
+    ], [], opts(), "boy");
+    expect(r.fresh.map((f) => f.name)).toEqual(["Alaric Rhys"]);
+    expect([r.offInitials, r.duplicates, r.invalid]).toEqual([1, 1, 3]);
   });
 
   it("drops brands, Tagalog words, the other gender's names and unkind meanings (card or part)", () => {
     const r = filterInitialsCombos([
-      cand("Armani Reed"), cand("Abel Mahal", "breath and love"), cand("Asher Rose"), cand("Aaron Rhys", "the shining one", { gender: "girl" }),
-      cand("Amos Reese", "bitter little king"), cand("Arlo Rafe", "noble wolf counsel", { second_meaning: "wolf of sorrow" }), cand("Ansel Roan"),
-    ], [], { initials: "AR", want: 10 }, "boy");
-    expect(r.fresh.map((f) => f.name)).toEqual(["Ansel Roan"]);
-    expect(r.blocked).toBe(2);
-    expect(r.wrongGender).toBe(2);
-    expect(r.negative).toBe(2);
-    expect(r.offInitials).toBe(0);
+      cand("Armani Reed", "x red", "x", "red"), cand("Abel Mahal", "breath and love", "breath", "love"), cand("Ansel Rose", "divine rose", "divine helmet", "rose"),
+      cand("Arlo Rhys", "army ardor", "army", "ardor", { gender: "girl" }), cand("Amos Reese", "bitter carried", "carried by god", "bitter"),
+      cand("Alaric Rhys", "ardor of the ruler", "ruler of all", "ardor"),
+    ], [], opts(), "boy");
+    expect(r.fresh.map((f) => f.name)).toEqual(["Alaric Rhys"]);
+    expect([r.blocked, r.wrongGender, r.negative]).toEqual([2, 2, 1]);
   });
 
   it("never throws on junk", () => {
     expect(filterInitialsCombos(null as unknown as [], [], { initials: "AR", want: 3 }, "girl").fresh).toEqual([]);
     expect(filterInitialsCombos([{} as never, { name: 3 } as never], [], { initials: "AR", want: 3 }, "girl").fresh).toEqual([]);
+  });
+});
+
+describe("meaning grounding", () => {
+  it("allows the parts' words in any order and form, small joining words and close synonyms; nothing else", () => {
+    expect(groundingProblem("strong little red one", "manly and strong", "little red one")).toBeNull();
+    expect(groundingProblem("gracious song", "grace", "melody")).toBeNull();
+    expect(groundingProblem("noble and kingly", "noble", "king")).toBeNull();
+    expect(groundingProblem("brave little fox", "manly and strong", "little red one")).toBe('"brave fox" is in neither part\'s meaning');
+    expect(groundingProblem("priceless ray of light", "priceless", "wise protector")).toMatch(/ray light/);
+    expect(groundingProblem("little red one", "manly and strong", "little red one")).toBe("nothing from the first name's meaning");
+    expect(groundingProblem("manly one", "manly", "")).toBe("a part meaning is missing");
+  });
+});
+
+describe("one use of each part per post", () => {
+  it("skips a name whose first or middle name is already in the post (or on it)", () => {
+    const plan = pickInitialsNames({
+      want: 5, takenParts: ["Amos Jude"],
+      available: [{ id: "a1", name: "Mila June", meaning: "dear youth" }, { id: "a2", name: "Maya June", meaning: "x y" }],
+      fresh: [{ name: "Mabel Jane", meaning: "lovable grace" }, { name: "Mila Joy", meaning: "x y" }, { name: "Mira Jude", meaning: "x y" }, { name: "Maeve Josie", meaning: "x y" }],
+      used: [],
+    });
+    expect(plan.picks.map((p) => p.name)).toEqual(["Mila June", "Mabel Jane", "Maeve Josie"]);
+    expect(plan.short).toBe(2);
   });
 });
 

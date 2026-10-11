@@ -102,6 +102,8 @@ export interface PackSuggest {
   letterSystem: string;
   /** Fresh two-word names for a post by initials (first name + middle name initials, migration 017). */
   initialsSystem: string;
+  /** Initials posts on a page of UNIQUE names: very common names are rejected for both parts (except rare initials). */
+  initialsUnique: boolean;
 }
 
 export interface PackReels {

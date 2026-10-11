@@ -59,8 +59,9 @@ export type InitialsSource = "available" | "new" | "used";
 export const SOURCE_LABEL: Record<InitialsSource, string> = { available: "unused", new: "new AI", used: "reused" };
 
 export interface InitialsName { id: string; name: string; meaning: string }
-export interface InitialsCombo { name: string; meaning: string }
-export interface InitialsPick { source: InitialsSource; name_id: string | null; name: string; meaning: string }
+/** A fresh AI name; `parts` = the first and middle name's standard meanings its card meaning is built from. */
+export interface InitialsCombo { name: string; meaning: string; parts?: [string, string] }
+export interface InitialsPick { source: InitialsSource; name_id: string | null; name: string; meaning: string; parts?: [string, string] }
 export type SourceCounts = Record<InitialsSource, number>;
 export interface InitialsNamesPlan { picks: InitialsPick[]; counts: SourceCounts; short: number }
 
@@ -68,19 +69,20 @@ const key = (s: string) => s.replace(/\s+/g, " ").trim().toLowerCase();
 
 /**
  * The names of a post by initials, strictly new first: unused names (in the order given), then fresh AI names, then
- * names used before (pass them least recently used first), `want` at most; a name never twice (case-insensitive).
- * `short` = how many the post lacks when all three run out.
+ * names used before (pass them least recently used first), `want` at most. Each first name and each middle name is
+ * used once per post (no two "June"s), never one of `takenParts` (the names already on the post), so a name is never
+ * there twice either. `short` = how many the post lacks when all three run out.
  */
-export function pickInitialsNames(i: { want: number; available: InitialsName[]; fresh: InitialsCombo[]; used: InitialsName[] }): InitialsNamesPlan {
+export function pickInitialsNames(i: { want: number; available: InitialsName[]; fresh: InitialsCombo[]; used: InitialsName[]; takenParts?: string[] }): InitialsNamesPlan {
   const picks: InitialsPick[] = [];
-  const seen = new Set<string>();
-  const take = (source: InitialsSource, rows: { id?: string; name: string; meaning: string }[]) => {
+  const parts = new Set((i.takenParts ?? []).flatMap((n) => key(n).split(" ")));
+  const take = (source: InitialsSource, rows: { id?: string; name: string; meaning: string; parts?: [string, string] }[]) => {
     for (const r of rows) {
       if (picks.length >= i.want) return;
-      const k = key(r.name);
-      if (!k || !r.meaning.trim() || seen.has(k)) continue;
-      seen.add(k);
-      picks.push({ source, name_id: source === "new" ? null : r.id ?? null, name: r.name.trim(), meaning: r.meaning.trim() });
+      const words = key(r.name).split(" ").filter(Boolean);
+      if (!words.length || !r.meaning.trim() || words.some((w) => parts.has(w))) continue;
+      for (const w of words) parts.add(w);
+      picks.push({ source, name_id: source === "new" ? null : r.id ?? null, name: r.name.trim(), meaning: r.meaning.trim(), ...(r.parts ? { parts: r.parts } : {}) });
     }
   };
   take("available", i.available);

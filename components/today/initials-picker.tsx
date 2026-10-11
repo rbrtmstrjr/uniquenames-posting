@@ -119,6 +119,8 @@ export function InitialsPicker({ gender, pairs, need, first, second, onFirst, on
                   <span className="min-w-0">
                     <span className="block text-sm font-semibold text-ink">{n.name}</span>
                     <span className="block text-xs text-muted">{n.meaning}</span>
+                    {/* A fresh AI name: the two parts' standard meanings its card meaning is built from. */}
+                    {n.parts && <span className="block text-[11px] text-muted/80">{n.name.split(" ")[0]}: {n.parts[0]} · {n.name.split(" ")[1]}: {n.parts[1]}</span>}
                   </span>
                   <Badge tone={TONE[n.source]} className="shrink-0">{SOURCE_LABEL[n.source]}</Badge>
                 </li>

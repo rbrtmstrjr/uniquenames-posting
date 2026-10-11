@@ -34,7 +34,8 @@ export interface InitialsRequest {
   postDate: string;
 }
 
-export type InitialsPreviewName = { source: InitialsSource; name: string; meaning: string };
+/** `parts`: a fresh AI name's first and middle name meanings (why its card meaning says what it says). */
+export type InitialsPreviewName = { source: InitialsSource; name: string; meaning: string; parts?: [string, string] };
 export type InitialsPlanResult = ActionResult<{
   initials: string; want: number; names: InitialsPreviewName[]; counts: SourceCounts; summary: string; short: number;
   /** The fresh AI names in the plan: send them back with Generate (no new AI call then). */
@@ -59,7 +60,9 @@ function badRequest(i: InitialsRequest): string | null {
 function badCombos(list: unknown, max: number): string | null {
   if (list === undefined) return null;
   if (!Array.isArray(list) || list.length > max) return "Too many names. Reload and try again.";
-  const ok = list.every((c) => c && typeof c === "object" && typeof c.name === "string" && typeof c.meaning === "string" && c.name.length <= 40 && c.meaning.length <= 80);
+  const part = (p: unknown) => typeof p === "string" && p.length <= 80;
+  const ok = list.every((c) => c && typeof c === "object" && typeof c.name === "string" && typeof c.meaning === "string" && c.name.length <= 40 && c.meaning.length <= 80
+    && (c.parts === undefined || (Array.isArray(c.parts) && c.parts.length === 2 && c.parts.every(part))));
   return ok ? null : "Bad names. Reload and try again.";
 }
 function badSkip(list: unknown): string | null {
@@ -93,7 +96,7 @@ export async function planInitialsAction(i: InitialsRequest & { keep?: InitialsC
   const { plan, fresh, aiError } = r.result;
   return {
     ok: true, initials, want, short: plan.short, counts: plan.counts, summary: sourceSummary(plan.counts), fresh, reuse,
-    names: plan.picks.map((p) => ({ source: p.source, name: p.name, meaning: p.meaning })),
+    names: plan.picks.map((p) => ({ source: p.source, name: p.name, meaning: p.meaning, ...(p.parts ? { parts: p.parts } : {}) })),
     aiNote: aiError ? `${aiError.replace(/\.$/, "")}. Using your unused${reuse ? " and earlier" : ""} names instead.` : null,
   };
 }

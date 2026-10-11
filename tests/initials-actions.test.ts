@@ -81,7 +81,14 @@ function world(w: World = {}) {
 }
 const base = { gender: "boy" as const, first: "A", second: "R", count: 6, postDate: "2026-10-11" };
 const isNamesCall = (c: unknown[]) => /initials [A-Z] and [A-Z]: the first name/.test((c[0] as { prompt: string }).prompt);
-const combos = (...xs: [string, string][]) => ({ ok: true, data: xs.map(([name, meaning]) => ({ name, meaning, gender: "boy", first_meaning: "x", second_meaning: "y" })) });
+// [name, card meaning, first name's meaning, middle name's meaning]
+const combos = (...xs: [string, string, string, string][]) => ({ ok: true, data: xs.map(([name, meaning, part1_meaning, part2_meaning]) => ({ name, meaning, gender: "boy", part1_meaning, part2_meaning })) });
+const ALARIC: [string, string, string, string] = ["Alaric Rhys", "ardor of the ruler", "ruler of all", "ardor"];
+const ANSELM: [string, string, string, string] = ["Anselm Rafe", "divine helmet of counsel", "divine helmet", "wolf counsel"];
+const ARI: [string, string, string, string] = ["Ari Raphael", "lion healed by god", "lion", "god heals"];
+const ALDO: [string, string, string, string] = ["Aldo Remy", "old and wise oarsman", "old and wise", "oarsman"];
+const MILO: [string, string, string, string] = ["Milo Rex", "soldier king", "soldier", "king"];
+const combo = (c: [string, string, string, string]) => ({ name: c[0], meaning: c[1], parts: [c[2], c[3]] as [string, string] });
 const rpc = (fn: string) => fake.rpcs.filter((r) => r.fn === fn).map((r) => r.args as Record<string, unknown>);
 type Planned = { source: string; name: string; name_id: string | null; position: number };
 
@@ -90,13 +97,14 @@ afterEach(() => { vi.restoreAllMocks(); });
 
 describe("planInitialsAction (the preview)", () => {
   it("unused first, then ONE AI call for a few more than missing, then names used before (least recently used first)", async () => {
-    generateJson.mockResolvedValueOnce(combos(["Asher Rowan", "happy little tree"], ["arlo reed", "dup"], ["Axel Reid", "father of peace"], ["Milo Rex", "soldier king"], ["Ari Raphael", "lion healed by god"]));
+    generateJson.mockResolvedValueOnce(combos(ALARIC, ["arlo reed", "dup meaning", "x", "y"], ANSELM, MILO, ARI));
     const r = await planInitialsAction(base);
     expect(r.ok && r.names.map((n) => `${n.name} [${n.source}]`)).toEqual([
-      "Ansel Roan [available]", "Arlo Reed [available]", "Asher Rowan [new]", "Axel Reid [new]", "Ari Raphael [new]", "Amos Rhett [used]",
+      "Ansel Roan [available]", "Arlo Reed [available]", "Alaric Rhys [new]", "Anselm Rafe [new]", "Ari Raphael [new]", "Amos Rhett [used]",
     ]);
     expect(r.ok && r.summary).toBe("2 unused · 3 new AI · 1 reused");
-    expect(r.ok && r.fresh.map((f) => f.name)).toEqual(["Asher Rowan", "Axel Reid", "Ari Raphael"]);
+    expect(r.ok && r.fresh.map((f) => f.name)).toEqual(["Alaric Rhys", "Anselm Rafe", "Ari Raphael"]);
+    expect(r.ok && r.names[2].parts).toEqual(["ruler of all", "ardor"]);
     expect(r.ok && [r.want, r.short, r.aiNote, r.reuse]).toEqual([6, 0, null, true]);
     expect(generateJson).toHaveBeenCalledTimes(1);
     const call = generateJson.mock.calls[0][0] as { prompt: string; system: string };
@@ -106,6 +114,24 @@ describe("planInitialsAction (the preview)", () => {
     expect(call.system).toContain("@unique_names");
     expect(fake.rpcs).toHaveLength(0);
     expect(fake.queries.some((q) => isUpdate(q) || op(q, "insert"))).toBe(false);
+  });
+
+  it("Unique Names: the prompt shows the page's style and its own part meanings; common names are out while uncommon ones suffice", async () => {
+    world({ names: [...NAMES(), nm("Rafe", { style: "single", meaning: "wise wolf" }), nm("Silas Wren"), nm("Ezra Vale")] });
+    generateJson.mockResolvedValueOnce(combos(["Aaron Ryan", "lofty king", "lofty", "little king"], ["Anselm Rafe", "divine wise wolf", "divine helmet", "wolf counsel"], ALARIC));
+    const r = await planInitialsAction({ ...base, count: 4 });
+    const prompt = (generateJson.mock.calls[0][0] as { prompt: string }).prompt;
+    expect(prompt).toMatch(/Match the style of the page's own two-word boy names, for example: .*Silas Wren.*Ezra Vale/);
+    expect(prompt).toContain("Rafe = wise wolf");
+    expect(r.ok && r.names.filter((n) => n.source === "new").map((n) => [n.name, n.parts])).toEqual([
+      ["Anselm Rafe", ["divine helmet", "wise wolf"]], ["Alaric Rhys", ["ruler of all", "ardor"]],
+    ]);
+  });
+
+  it("only common names offered: the rule relaxes for the part that blocked, so the plan is not short", async () => {
+    generateJson.mockResolvedValueOnce(combos(["Aaron Rhett", "lofty advice", "lofty", "advice"]));
+    const r = await planInitialsAction({ ...base, count: 3 });
+    expect(r.ok && r.names.map((n) => n.name)).toEqual(["Ansel Roan", "Arlo Reed", "Aaron Rhett"]);
   });
 
   it("no AI call when the unused names cover the post", async () => {
@@ -124,13 +150,14 @@ describe("planInitialsAction (the preview)", () => {
   });
 
   it("Shuffle: skipped names are never offered again; kept names are re-checked and reused without asking more", async () => {
-    generateJson.mockResolvedValueOnce(combos(["Asher Rowan", "happy little tree"], ["Axel Reid", "father of peace"], ["Ari Raphael", "lion healed by god"], ["Aldo Remy", "old and wise oarsman"]));
-    const r = await planInitialsAction({ ...base, skip: ["Asher Rowan"] });
-    expect(r.ok && r.fresh.map((f) => f.name)).toEqual(["Axel Reid", "Ari Raphael", "Aldo Remy"]);
-    expect((generateJson.mock.calls[0][0] as { prompt: string }).prompt).toContain("Asher Rowan");
+    generateJson.mockResolvedValueOnce(combos(ALARIC, ANSELM, ARI, ALDO));
+    const r = await planInitialsAction({ ...base, skip: ["Alaric Rhys"] });
+    expect(r.ok && r.fresh.map((f) => f.name)).toEqual(["Anselm Rafe", "Ari Raphael", "Aldo Remy"]);
+    expect((generateJson.mock.calls[0][0] as { prompt: string }).prompt).toContain("Alaric Rhys");
     generateJson.mockClear();
-    const kept = await planInitialsAction({ ...base, count: 5, keep: [{ name: "Axel Reid", meaning: "father of peace" }, { name: "Arlo Reed", meaning: "taken" }, { name: "Asher Rowan", meaning: "happy little tree" }, { name: "Aldo Remy", meaning: "old and wise oarsman" }] });
-    expect(kept.ok && kept.fresh.map((f) => f.name)).toEqual(["Axel Reid", "Asher Rowan", "Aldo Remy"]);
+    const kept = await planInitialsAction({ ...base, count: 5, keep: [combo(ANSELM), { name: "Arlo Reed", meaning: "taken name", parts: ["x", "y"] }, combo(ALARIC), combo(ALDO), { name: "Ari Raphael", meaning: "brave fox", parts: ["lion", "god heals"] }] });
+    // kept again: still new and grounded ("brave fox" is not in "lion" / "god heals")
+    expect(kept.ok && kept.fresh.map((f) => f.name)).toEqual(["Anselm Rafe", "Alaric Rhys", "Aldo Remy"]);
     expect(kept.ok && kept.counts).toEqual({ available: 2, new: 3, used: 0 });
     expect(generateJson).not.toHaveBeenCalled();
   });
@@ -152,7 +179,7 @@ describe("planInitialsAction (the preview)", () => {
 });
 
 describe("createInitialsPostAction (Generate)", () => {
-  const input = { ...base, themeId: THEME_ID, requestId: REQ, fresh: [{ name: "Asher Rowan", meaning: "happy little tree" }, { name: "Axel Reid", meaning: "father of peace" }] };
+  const input = { ...base, themeId: THEME_ID, requestId: REQ, fresh: [combo(ALARIC), combo(ANSELM)] };
   const captionCall = () => generateJson.mock.calls.find((c) => !isNamesCall(c))?.[0] as { prompt: string } | undefined;
 
   it("re-plans with fresh reads (no AI names call) and makes it in one create_initials_post with sources, initials and caption", async () => {
@@ -164,7 +191,7 @@ describe("createInitialsPostAction (Generate)", () => {
     expect(p.initials).toBe("AR");
     expect(p.request_id).toBe(REQ);
     expect(p.cards.map((c) => [c.position, c.source, c.name, c.name_id])).toEqual([
-      [1, "available", "Ansel Roan", "n-AnselRoan"], [2, "available", "Arlo Reed", "n-ArloReed"], [3, "new", "Asher Rowan", null], [4, "new", "Axel Reid", null],
+      [1, "available", "Ansel Roan", "n-AnselRoan"], [2, "available", "Arlo Reed", "n-ArloReed"], [3, "new", "Alaric Rhys", null], [4, "new", "Anselm Rafe", null],
       [5, "used", "Amos Rhett", "n-AmosRhett"], [6, "used", "Abel Ross", "n-AbelRoss"],
     ]);
     expect(captionCall()!.prompt).toContain("Followers asked for names with the initials A and R");
@@ -196,10 +223,10 @@ describe("createInitialsPostAction (Generate)", () => {
     expect(await createInitialsPostAction(input)).toEqual({ ok: true, postId: POST_ID, cards: 4, short: 2 });
     expect(rpc("create_initials_post")).toHaveLength(0);
     const ins = fake.queries.find((q) => q.table === "names" && op(q, "insert"))!;
-    expect((op(ins, "insert")![1] as { name: string; status: string }[]).map((r) => [r.name, r.status])).toEqual([["Asher Rowan", "available"], ["Axel Reid", "available"]]);
+    expect((op(ins, "insert")![1] as { name: string; status: string }[]).map((r) => [r.name, r.status])).toEqual([["Alaric Rhys", "available"], ["Anselm Rafe", "available"]]);
     const p = rpc("create_post")[0].p as { style: string; cards: { name: string; name_id: string }[] };
     expect(p.style).toBe("two-word");
-    expect(p.cards.map((c) => c.name_id)).toEqual(["n-AnselRoan", "n-ArloReed", "ins-Asher Rowan", "ins-Axel Reid"]);
+    expect(p.cards.map((c) => c.name_id)).toEqual(["n-AnselRoan", "n-ArloReed", "ins-Alaric Rhys", "ins-Anselm Rafe"]);
   });
 
   it("017 functions missing although the column exists: falls back the same way", async () => {
@@ -237,9 +264,9 @@ describe("an initials post after it is made", () => {
 
   it("Add card with no unused left asks the AI for one; when it fails, a name used before (not one on the post)", async () => {
     world({ post: POST, postCards: [...onPost, { name_id: "n-ArloReed", position: 3, shot: null, name: "Arlo Reed", kind: "post" }] });
-    generateJson.mockResolvedValueOnce(combos(["Asher Rowan", "happy little tree"]));
+    generateJson.mockResolvedValueOnce(combos(ALARIC));
     await addCardAction(POST_ID);
-    expect(rpc("add_initials_card")[0].c).toMatchObject({ name: "Asher Rowan", name_id: null, source: "new" });
+    expect(rpc("add_initials_card")[0].c).toMatchObject({ name: "Alaric Rhys", name_id: null, source: "new" });
     generateJson.mockResolvedValue({ ok: false, error: "down" });
     await addCardAction(POST_ID);
     expect(rpc("add_initials_card")[1].c).toMatchObject({ name: "Abel Ross", name_id: "n-AbelRoss", source: "used" });
@@ -268,8 +295,8 @@ describe("an initials post after it is made", () => {
 
   it("the card's AI ideas keep the initials", async () => {
     world({ post: POST, card: { id: CARD_ID, post_id: POST_ID, theme_id: THEME_ID, kind: "post" } });
-    generateJson.mockResolvedValueOnce(combos(["Asher Rowan", "happy little tree"], ["Milo Rex", "soldier king"]));
-    expect(await cardNameIdeasAction(CARD_ID)).toEqual({ ok: true, ideas: [{ name: "Asher Rowan", meaning: "happy little tree" }] });
+    generateJson.mockResolvedValueOnce(combos(ALARIC, MILO));
+    expect(await cardNameIdeasAction(CARD_ID)).toEqual({ ok: true, ideas: [{ name: "Alaric Rhys", meaning: "ardor of the ruler" }] });
   });
 
   it("Rewrite caption keeps saying the initials", async () => {

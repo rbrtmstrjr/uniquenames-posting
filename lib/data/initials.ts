@@ -3,7 +3,7 @@ import type { createClient } from "@/lib/supabase/server";
 import type { Gender, NameRow } from "@/lib/db/types";
 import { chunks, nameKey } from "@/lib/actions/helpers";
 import { filterInitialsCombos } from "@/lib/ai/suggest-filter";
-import { suggestForInitials } from "@/lib/ai/initials";
+import { INITIALS_UNIQUE, STYLE_EXAMPLES, suggestForInitials } from "@/lib/ai/initials";
 import {
   hasInitials, initialsAiWanted, initialsText, leastRecentlyUsed, pickInitialsNames,
   type InitialsCombo, type InitialsNamesPlan,
@@ -27,6 +27,10 @@ export interface InitialsStock {
   allNames: string[];
   /** Names with these initials (any gender or status): the AI is told not to repeat them. */
   seen: string[];
+  /** A spread of the owner's two-word names of the gender (the style the AI follows). */
+  examples: string[];
+  /** The owner's meanings of single names (lowercase name → meaning; this gender's first): a fresh name's part uses it. */
+  knownParts: Map<string, string>;
 }
 
 /** Every names row, every page (a single select is capped at 1000 rows server-side). */
@@ -75,7 +79,17 @@ export async function loadInitialsStock(sb: SB, i: { gender: Gender; initials: s
   }
   for (const n of reusable) later(nameKey(n.name), n.post_id ? posts.get(n.post_id)?.created_at : null);
   const used = leastRecentlyUsed(reusable.map((n) => ({ ...n, lastUsed: lastUse.get(nameKey(n.name)) ?? null })));
-  return { ok: true, stock: { available, used, allNames: all.rows.map((n) => n.name), seen: withInitials.map((n) => n.name) } };
+  const live = (n: NameRow) => n.status === "available" || n.status === "used" || n.status === "reserved";
+  const twoWord = all.rows.filter((n) => n.gender === i.gender && n.style === "two-word" && live(n));
+  const step = Math.max(1, Math.floor(twoWord.length / STYLE_EXAMPLES));
+  const examples = twoWord.filter((_, k) => k % step === 0).slice(0, STYLE_EXAMPLES).map((n) => n.name);
+  const knownParts = new Map<string, string>();
+  const singles = all.rows.filter((n) => n.style === "single" && live(n) && n.meaning?.trim());
+  for (const n of [...singles.filter((x) => x.gender === i.gender), ...singles.filter((x) => x.gender !== i.gender)]) {
+    const k = n.name.trim().toLowerCase();
+    if (!knownParts.has(k)) knownParts.set(k, n.meaning.trim().toLowerCase());
+  }
+  return { ok: true, stock: { available, used, allNames: all.rows.map((n) => n.name), seen: withInitials.map((n) => n.name), examples, knownParts } };
 }
 
 export interface InitialsNamesResult {
@@ -101,13 +115,17 @@ export async function planInitialsNames(sb: SB, i: {
   const { stock } = got;
   const skip = i.skip ?? [];
   const known = [...stock.allNames, ...skip];
-  const kept = filterInitialsCombos((i.keep ?? []).map((c) => ({ ...c, gender: i.gender })), known, { initials: i.initials, want: i.want }, i.gender).fresh;
+  // Names already shown are checked again (still new, still grounded in their part meanings).
+  const kept = filterInitialsCombos((i.keep ?? []).map((c) => ({ name: c.name, meaning: c.meaning, gender: i.gender, part1_meaning: c.parts?.[0], part2_meaning: c.parts?.[1] })),
+    known, { initials: i.initials, want: i.want, unique: INITIALS_UNIQUE, knownParts: stock.knownParts }, i.gender).fresh;
   let fresh = kept;
   let aiError: string | undefined;
   const need = i.want - stock.available.length - kept.length;
   if (i.ai && need > 0) {
+    const ask = initialsAiWanted(need);
+    // Every valid one is kept (a name whose first or middle name repeats another's is skipped when picking).
     const ai = await suggestForInitials({
-      gender: i.gender, initials: i.initials, want: need, ask: initialsAiWanted(need),
+      gender: i.gender, initials: i.initials, want: ask, need, ask, examples: stock.examples, knownParts: stock.knownParts,
       allNames: [...known, ...kept.map((k) => k.name)], existing: [...stock.seen, ...kept.map((k) => k.name)], skip,
     });
     if (!ai.ok) aiError = ai.error;
@@ -116,7 +134,7 @@ export async function planInitialsNames(sb: SB, i: {
       if (!ai.result.fresh.length) aiError = `The AI had no new ${initialsText(i.initials)} names this time.`;
     }
   }
-  const plan = pickInitialsNames({ want: i.want, available: stock.available, fresh, used: i.reuse === false ? [] : stock.used });
+  const plan = pickInitialsNames({ want: i.want, available: stock.available, fresh, used: i.reuse === false ? [] : stock.used, takenParts: i.onPost?.names });
   const taken = new Set(plan.picks.filter((p) => p.source === "new").map((p) => nameKey(p.name)));
   return { ok: true, result: { plan, fresh: fresh.filter((f) => taken.has(nameKey(f.name))), aiError, stock } };
 }
