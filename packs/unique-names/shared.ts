@@ -66,4 +66,10 @@ export const UNIQUE_NAMES_SHARED: PackShared = {
   // The supabase/schema.sql column defaults (the live project keeps its own rows).
   cardText: { titleFont: "poppins", meaningFont: "poppins", markFont: "poppins", layout: "classic" },
   namePicker: { order: "oldest" },
+  // The names PDF's meaning groups (migration 018), in simple global English.
+  nameCategories: {
+    nature: "Nature & Flowers", light: "Light, Sun & Stars", water: "Water & Sea", strength: "Strength & Courage",
+    faith: "Faith & Blessing", love: "Love & Joy", wisdom: "Wisdom & Grace", royal: "Royal & Noble", peace: "Peace & Calm",
+    gems: "Gems & Beauty", earth: "Earth & Seasons", more: "More Beautiful Names",
+  },
 };

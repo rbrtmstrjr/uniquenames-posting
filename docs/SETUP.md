@@ -161,6 +161,21 @@ Followers ask for names with two initials, like **A** and **R** (Arjay Royce). *
 4. New AI names get a short natural meaning built only from the two names' standard meanings (like "an oarsman under god's protection"; when a part is one of your single names, your meaning is used). The preview shows both part meanings. They are saved to the Names page with the post, so they count as used next time. Check them on the post before you publish (the AI is weakest on rare letters like Q, X, U).
 5. **Add card** on the post takes the next name in the same order. The card dialog's **My names** tab lists the two-word names with those initials, unused ones first, then the ones marked **used before**; **AI ideas** suggests names with the same initials. The caption says the names have the initials A & R (also after **Rewrite caption**). Posts and Today show **A·R** on the post.
 
+## The names PDF to sell (existing install)
+**Names > Export PDF** makes a lovely, password-protected PDF of all your approved names (available, in a post or used; never pending or skipped) to sell to your followers: a cover, a welcome page with tips for finding "the one", a contents page with page numbers, the names (Girl, then Boy for **Both**; single names, then combo names; grouped by meaning, A to Z, each with its meaning) and a thank-you page. Every download gets a NEW password, and the buyer's name or email is printed on every page (a footer and a soft diagonal mark).
+1. Supabase **SQL Editor**: paste and run `supabase/migrations/018_names_pdf.sql` (safe to run again; no worker restart needed). It adds each name's meaning group and the **Past exports** log. Before it runs, Export PDF still works, but the names are sorted again for every PDF (slower) and the PDF is not logged, so copy its password when it shows.
+2. Push to GitHub so Vercel redeploys the website.
+3. **Names > Export PDF**: type the buyer's name or email, pick **Girl**, **Boy** or **Both** (the dialog shows how many single and combo names go in), then **Create PDF**. The first time, the AI sorts every name by what its meaning is about (Nature & Flowers, Light, Sun & Stars, Faith & Blessing, …), about 300 names per step with a progress bar. Each name is sorted once; new names are sorted at the next export. To move a name to another group, use the small select on its row on the Names page (**Not sorted** = the AI sorts it next time).
+4. The PDF downloads and its password shows **once**, with a **Copy password** button. It is also kept in **Past exports** at the top of the Names page (**Show password**).
+
+### Selling the names PDF
+- Make a new PDF for every buyer: each one gets its own password and the buyer's name on every page.
+- Send the file and the password in **two separate messages** (for example the PDF as an email or Messenger attachment, then the password in a second message once the payment is confirmed). Never put the password in the file name or next to the file.
+- Tell the buyer: "Open the PDF and type this password." It opens in any PDF app on a phone or computer. Printing is allowed; copying text and editing are blocked.
+- A buyer lost the password? Names > **Past exports** > find their name > **Show password** > copy and send it again.
+- No PDF lock is perfect. The buyer's name on every page is what keeps people from sharing it.
+- Unique Names PDFs are A4 size; Name Nest PDFs are US Letter.
+
 ## When something is wrong
 - Header dot red, "PC offline": turn on the PC. The worker starts at login. **Generate** is disabled (the button says why) until the PC is back.
 - Amber dot, "ComfyUI closed": open ComfyUI Desktop. **Generate** stays disabled until then; text edits and Re-stamp still work.

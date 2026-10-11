@@ -3,6 +3,7 @@ import type { Session, ShotSpec } from "@/lib/planner/shots";
 import type { CaptionStyle } from "@/lib/captions/styles";
 import type { ReelFormat } from "@/lib/reels/formats";
 import type { ReelTopic } from "@/lib/reels/topics";
+import type { MeaningCategory } from "@/lib/names/categories";
 
 // A niche pack = everything one Facebook page's app does differently (docs/PACKS.md). The engine (lib/*, app/*,
 // components/*) reads the active pack; nothing here imports runtime code, so packs stay plain data modules that
@@ -63,6 +64,8 @@ export interface PackShared {
   cardText: { titleFont: string; meaningFont: string; markFont: string; layout: CardLayout };
   /** The card dialog's "My names" tab: 'us-rank' = the best US rank first (migration 015), then oldest; 'oldest' = oldest first. */
   namePicker: { order: "us-rank" | "oldest" };
+  /** The names PDF's meaning groups (migration 018), worded for this page; shown on the Names page and in the PDF. */
+  nameCategories: Readonly<Record<MeaningCategory, string>>;
 }
 
 /** Name cards: the children's looks, the photoshoot shot lists and the closing card's moment. */
@@ -134,9 +137,54 @@ export interface PackReels {
   threadDistance?: string;
 }
 
+/** What the names PDF wants to know: the girl / boy pick of a download. */
+export type PdfGender = "girl" | "boy" | "both";
+
+/**
+ * The sellable names PDF (Names > Export PDF, migration 018): the page's copy, colours, fonts and page size. Server
+ * only. Texts may hold {count} (names in the PDF), {buyer}, {year}, {page} (brand name) and {handle}.
+ */
+export interface PackPdf {
+  /** "A4" (Unique Names) or "LETTER" (Name Nest, US). */
+  pageSize: "A4" | "LETTER";
+  /** The collection's name, over the cover title ("The Unique Names Collection"). */
+  collection: string;
+  /** The cover title per pick ("Baby Girl Names"). */
+  titles: Readonly<Record<PdfGender, string>>;
+  /** The warm line under the cover title. */
+  subtitle: string;
+  /** A short line in the script font on the cover and the back page (none = no script font). */
+  scriptLine?: string;
+  /** Section names: the gender eyebrow ("Girl Names") and each style's title + one-line intro. */
+  genderLabels: Readonly<Record<Gender, string>>;
+  styles: Readonly<Record<"single" | "two-word", { title: string; intro: string }>>;
+  welcome: {
+    heading: string;
+    intro: string;
+    insideHeading: string;
+    inside: readonly string[];
+    tipsHeading: string;
+    tips: readonly { title: string; text: string }[];
+    trustHeading: string;
+    trust: string;
+  };
+  contentsHeading: string;
+  /** "© {year} {page}. For personal use by {buyer} only. Please don't share or resell." */
+  copyright: string;
+  thanks: { heading: string; lines: readonly string[]; follow: string };
+  /** The PDF's colours (hex). */
+  colors: { paper: string; ink: string; muted: string; accent: string; accentSoft: string; line: string; leaf: string };
+  /** Font files in lib/pdf/fonts (OFL, committed): the names and headings, the text, its bold, an optional script. */
+  fonts: { display: string; body: string; bodyBold: string; script?: string };
+  /** The logo drawn on the cover and the back page, and the little ornament of the dividers (vector, drawn in code). */
+  logo: "flower" | "nest";
+  ornament: "sprig" | "berry";
+}
+
 export interface NichePack extends PackShared {
   cards: PackCards;
   captions: PackCaptions;
   suggest: PackSuggest;
   reels: PackReels;
+  pdf: PackPdf;
 }

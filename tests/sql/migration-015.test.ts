@@ -63,7 +63,7 @@ describe("015_name_nest.sql on the live schema (v1 + 002..014)", () => {
   });
 });
 
-describe("fresh schema.sql matches v1 + 002..015 (names, settings)", () => {
+describe("fresh schema.sql matches v1 + 002..015 (+ 018) (names, settings)", () => {
   const TABLES = "('names','settings')";
   const shape = async (db: PGlite) => ({
     columns: (await db.query(`select table_name, column_name, data_type, is_nullable, column_default from information_schema.columns
@@ -73,7 +73,9 @@ describe("fresh schema.sql matches v1 + 002..015 (names, settings)", () => {
   });
 
   it("has the same columns and constraints", async () => {
-    const want = await shape(await migratedDb());
+    const migrated = await migratedDb();
+    await migrated.exec(stripSupabase(read("supabase", "migrations", "018_names_pdf.sql")));
+    const want = await shape(migrated);
     const cols = (want.columns as { table_name: string; column_name: string }[]).map((c) => `${c.table_name}.${c.column_name}`);
     expect(cols).toEqual(expect.arrayContaining(["names.origin", "names.us_rank", "names.us_year", "settings.card_layout"]));
     expect(await shape(await freshDb())).toEqual(want);

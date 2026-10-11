@@ -112,7 +112,7 @@ describe("017_initials_posts.sql on the live schema (v1 + 002..016)", () => {
   });
 });
 
-describe("fresh schema.sql matches v1 + 002..017", () => {
+describe("fresh schema.sql matches v1 + 002..017 (+ 018)", () => {
   const TABLES = "('settings','cards','posts','themes','names')";
   const FUNCS = "('create_initials_post','add_initials_card','swap_initials_card_name','set_name_origin')";
   const shape = async (db: PGlite) => ({
@@ -126,7 +126,9 @@ describe("fresh schema.sql matches v1 + 002..017", () => {
   });
 
   it("has the same tables and the same four functions", async () => {
-    const want = await shape(await migratedDb());
+    const migrated = await migratedDb();
+    await migrated.exec(stripSupabase(read("supabase", "migrations", "018_names_pdf.sql")));
+    const want = await shape(migrated);
     expect((want.columns as { column_name: string }[]).map((c) => c.column_name)).toContain("initials");
     expect(want.functions).toHaveLength(4);
     expect(await shape(await freshDb())).toEqual(want);
