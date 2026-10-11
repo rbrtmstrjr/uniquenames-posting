@@ -15,6 +15,8 @@ import { fontsOf, sameFonts, validateFonts, type PostFonts } from "@/lib/fonts/p
 import { addClosingCard } from "@/lib/cta/card";
 import { seriesPart } from "@/lib/series/az";
 import { isLetter } from "@/lib/series/letter";
+import { initialsText, isInitials } from "@/lib/series/initials";
+import { planInitialsNames } from "@/lib/data/initials";
 
 const NEEDS_003 = "Changing a post's fonts needs a database update first: run supabase/migrations/003_post_fonts.sql in Supabase. Nothing was re-stamped.";
 const missingColumn = (e: { message: string; code?: string }) => e.code === "PGRST204" || /schema cache/i.test(e.message);
@@ -203,11 +205,13 @@ export async function rewriteCaptionAction(postId: string): Promise<ActionResult
   const series = part ? { part } : undefined;
   // A post by letter (013) keeps saying its letter, with its letter tag.
   const letter = isLetter(p.letter) ? p.letter : null;
+  // A post by initials (017) keeps saying its initials.
+  const initials = isInitials(p.initials) ? p.initials : null;
   const ai = await aiCaptionLine({
-    theme: theme as ThemeRow, gender: p.gender, style: p.style, captionStyle, names, recent: history.texts, recentTags: recentTags(history), series, letter,
+    theme: theme as ThemeRow, gender: p.gender, style: p.style, captionStyle, names, recent: history.texts, recentTags: recentTags(history), series, letter, initials,
   }, REWRITE_TIMEOUT_MS);
   if (!ai) return fail("Could not write a new caption right now. Your caption is unchanged — try again in a moment.");
-  const { caption, caption_style, hashtag_set } = composePostCaption({ ai, aiOn: true, captionStyle, gender: p.gender, settings: settings as SettingsRow, history, series, letter });
+  const { caption, caption_style, hashtag_set } = composePostCaption({ ai, aiOn: true, captionStyle, gender: p.gender, settings: settings as SettingsRow, history, series, letter, initials });
   let { data, error } = await sb.from("posts").update({ caption, caption_style, hashtag_set }).eq("id", postId).select("id");
   // Before 009 there is no style / hashtag set column: save the caption alone.
   if (missing009(error)) ({ data, error } = await sb.from("posts").update({ caption }).eq("id", postId).select("id"));
@@ -274,19 +278,23 @@ export async function addCardAction(postId: string): Promise<ActionResult<{ card
   if (lock) return fail(lock);
   if (!post) return fail("Post not found.");
   const p = post as PostRow;
+  const initials = isInitials(p.initials) ? p.initials : null;
   const [{ data: theme }, { data: names }, { data: cards }] = await Promise.all([
     sb.from("themes").select("*").eq("id", p.theme_id).single(),
-    sb.from("names").select("*").eq("gender", p.gender).eq("style", p.style).eq("status", "available"),
-    sb.from("cards").select("name_id, position, shot").eq("post_id", postId),
+    // A post by initials (017) reads its names its own way (unused, then fresh AI, then used before).
+    initials ? Promise.resolve({ data: [] as NameRow[] }) : sb.from("names").select("*").eq("gender", p.gender).eq("style", p.style).eq("status", "available"),
+    sb.from("cards").select("name_id, position, shot, name, kind").eq("post_id", postId),
   ]);
-  const used = (cards ?? []).map((c) => c.name_id).filter(Boolean) as string[];
-  const next = Math.max(0, ...(cards ?? []).map((c) => c.position as number)) + 1;
+  const postCards = (cards ?? []) as { name_id: string | null; position: number; shot: string | null; name?: string; kind?: string }[];
+  const used = postCards.map((c) => c.name_id).filter(Boolean) as string[];
+  const next = Math.max(0, ...postCards.map((c) => c.position)) + 1;
+  if (initials) return addInitialsCard(sb, { post: p, initials, theme: theme as ThemeRow, cards: postCards, nextPosition: next });
   // The post's child age (004): Random = a new child of a random age, a fixed age = the post's
   // child. A post made before ages existed (or before 004 runs: no column) keeps its one baby.
   const plan = planExtraCard({ theme: theme as ThemeRow, gender: p.gender, style: p.style, names: (names ?? []) as NameRow[], usedNameIds: used, nextPosition: next,
     salt: `${postId}|${Date.now()}`, subjectKey: subjectKey(p.post_date, p.gender, p.style), age: storedAge(p.subject_age),
     // Every shot already in the post, so the new card is a new frame and not a near-copy.
-    usedShots: (cards ?? []).map((c) => c.shot as string | null).filter((s): s is string => !!s),
+    usedShots: postCards.map((c) => c.shot).filter((s): s is string => !!s),
     // A post by letter (013): the new name starts with the same letter.
     letter: isLetter(p.letter) ? p.letter : null });
   if (!plan.ok) return fail(plan.reason);
@@ -295,6 +303,37 @@ export async function addCardAction(postId: string): Promise<ActionResult<{ card
   const r = data as { status: string; card_id?: string };
   if (r.status !== "ok" || !r.card_id) return fail("That name was just taken. Try again.");
   return { ok: true, cardId: r.card_id };
+}
+
+/**
+ * Add card on a post by initials (017): the next name by the same priority as the post (unused, then one fresh AI name,
+ * then a name used before, least recently used), never one already on the post, in one transaction (add_initials_card).
+ */
+async function addInitialsCard(sb: Awaited<ReturnType<typeof createClient>>, o: {
+  post: PostRow; initials: string; theme: ThemeRow; nextPosition: number;
+  cards: { name_id: string | null; shot: string | null; name?: string; kind?: string }[];
+}): Promise<ActionResult<{ cardId: string }>> {
+  const { post: p } = o;
+  const onPost = {
+    nameIds: o.cards.map((c) => c.name_id).filter((x): x is string => !!x),
+    names: o.cards.filter((c) => (c.kind ?? "post") === "post" && c.name).map((c) => c.name!),
+  };
+  const named = await planInitialsNames(sb, { gender: p.gender, initials: o.initials, want: 1, ai: true, reuse: true, onPost });
+  if (!named.ok) return fail(named.error);
+  const pick = named.result.plan.picks[0];
+  if (!pick) {
+    return fail(`No more ${p.gender} ${initialsText(o.initials)} names: none unused, ${named.result.aiError ? "the AI could not add one right now" : "the AI had no new one"}, and none used before. Try again in a moment.`);
+  }
+  const row = { id: pick.name_id ?? "new", name: pick.name, meaning: pick.meaning, gender: p.gender, style: "two-word", status: "available" } as NameRow;
+  const plan = planExtraCard({ theme: o.theme, gender: p.gender, style: "two-word", names: [row], usedNameIds: [], nextPosition: o.nextPosition,
+    salt: `${p.id}|${Date.now()}`, subjectKey: subjectKey(p.post_date, p.gender, p.style), age: storedAge(p.subject_age),
+    usedShots: o.cards.map((c) => c.shot).filter((s): s is string => !!s) });
+  if (!plan.ok) return fail(plan.reason);
+  const { data, error } = await sb.rpc("add_initials_card", { p_post: p.id, c: { ...plan.card, name_id: pick.name_id, source: pick.source } });
+  if (error) return fail(error.message);
+  const r = data as { status: string; card_id?: string; reason?: string };
+  if (r.status === "ok" && r.card_id) return { ok: true, cardId: r.card_id };
+  return fail(r.status === "error" && r.reason ? r.reason : "That name was just taken. Try again.");
 }
 
 const CLOSING_NEEDS_010 = "The closing card needs a database update first: run supabase/migrations/010_cta_card.sql in Supabase.";

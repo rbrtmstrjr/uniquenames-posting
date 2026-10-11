@@ -55,10 +55,23 @@ const LETTER_SYSTEM = [
   "Return JSON: {\"names\": [{\"name\": \"...\", \"origin\": \"...\", \"gender\": \"boy|girl|unisex\", \"meaning\": \"...\"}]}.",
 ].join("\n");
 
+const INITIALS_SYSTEM = [
+  "You suggest baby names for @unique_names, a Facebook page with 139K followers, mostly Filipino moms, that shares beautiful baby names with their meanings in simple English anyone understands.",
+  "Followers ask for names with two given initials, like A and R for \"Arjay Royce\". Each suggestion is a two-word name: a first name that starts with the first initial and a middle name that starts with the second initial.",
+  "Both words are real, attested given names listed in baby-name references and actually given to real children, from any culture, clearly used for the requested gender (in neither word the other gender's name), and the pair sounds natural said aloud. Prefer fresh, uncommon but easy-to-say names; a well-loved classic is fine when the letters are rare.",
+  "Never invent a name. Never respell, blend or shorten a word into a name. No brands, products, places, surnames or fictional coinages unless the word is itself a well-established given name. No Filipino / Tagalog words. Use only letters, with an optional hyphen or apostrophe inside a word.",
+  "For each name give each word's standard accepted etymological meaning (as etymology references give it), then one card meaning that blends both into a natural phrase true to both parts, adding nothing (like \"noble and kingly\" or \"bright little bear\").",
+  "The card meaning is 2 to 6 plain English words, all lowercase, no commas, no ending period: one meaning, never \"x or y\", never two synonyms side by side. Never a sad or harsh meaning (wounded, bitter, sorrow, death, weak and the like): choose other names instead.",
+  "If you know fewer such names than asked, return fewer. A short list of real names is right; an invented one is wrong.",
+  "Every suggestion must be new: never repeat a name from the existing list, in any spelling or capitalization, and never repeat one inside your own list.",
+  "Return JSON: {\"names\": [{\"name\": \"...\", \"gender\": \"boy|girl|unisex\", \"first_meaning\": \"...\", \"second_meaning\": \"...\", \"meaning\": \"...\"}]}.",
+].join("\n");
+
 export const UNIQUE_NAMES_SUGGEST: PackSuggest = {
   namesSystem,
   namesDefaultVibe: "Mix origins and sounds: nature, virtues, mythology, classic names with a fresh twist.",
   themesSystem: THEMES_SYSTEM,
   themesDefaultVibe: "Vary the moods: seasons, nature, cozy, playful, elegant, fairytale-inspired.",
   letterSystem: LETTER_SYSTEM,
+  initialsSystem: INITIALS_SYSTEM,
 };

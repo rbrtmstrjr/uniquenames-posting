@@ -4,6 +4,8 @@ import { createClient } from "@/lib/supabase/server";
 import type { Gender, NameStyle } from "@/lib/db/types";
 import { suggestForLetter, suggestNames, suggestThemes } from "@/lib/ai/suggest";
 import { LETTER_IDEAS, isLetter, startsWith } from "@/lib/series/letter";
+import { hasInitials, initialsText, isInitials } from "@/lib/series/initials";
+import { suggestForInitials } from "@/lib/ai/initials";
 import { NAME_COUNT, THEME_COUNT, VIBE_MAX, filterNameSuggestions, filterThemeSuggestions } from "@/lib/ai/suggest-filter";
 import { fail, requireOwner, type ActionResult } from "./result";
 import { UUID_RE } from "./helpers";
@@ -82,8 +84,16 @@ export async function cardNameIdeasAction(cardId: string): Promise<CardNameIdeas
   ]);
   if (!post) return fail("Post not found.");
   if (all.error) return fail(all.error);
-  const { gender, style, letter } = post as { gender: Gender; style: NameStyle; letter?: string | null };
+  const { gender, style, letter, initials } = post as { gender: Gender; style: NameStyle; letter?: string | null; initials?: string | null };
   const existing = all.rows.filter((n) => n.gender === gender && n.style === style).map((n) => n.name);
+  // A post by initials (017): two-word ideas with its initials (the same prompt and checks as the post's fresh names).
+  if (isInitials(initials)) {
+    const ai = await suggestForInitials({ gender, initials, want: CARD_IDEAS, ask: CARD_IDEAS + 3, allNames: all.rows.map((n) => n.name),
+      existing: all.rows.filter((n) => hasInitials(n.name, initials)).map((n) => n.name) });
+    if (!ai.ok) return fail(`The AI could not suggest names: ${ai.error}`);
+    if (!ai.result.fresh.length) return fail(`The AI had no new ${initialsText(initials)} names this time. Try again.`);
+    return { ok: true, ideas: ai.result.fresh };
+  }
   // A post by letter: the ideas start with its letter too (the hardened letter prompt and checks).
   if (isLetter(letter)) {
     const ai = await suggestForLetter({ gender, style, letter, count: CARD_IDEAS, existing: existing.filter((n) => startsWith(n, letter)), allNames: all.rows.map((n) => n.name) });

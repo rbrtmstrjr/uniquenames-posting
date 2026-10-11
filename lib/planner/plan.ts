@@ -5,6 +5,7 @@ import { hashSeed, seededRandom, shuffle } from "./random";
 import { buildMixedShotSpecs, buildShots, dealAges, sessionShots, shotSpec, type ShotSpec } from "./shots";
 import { SUBJECT_AGES, type AgeChoice } from "./age";
 import { startsWith } from "@/lib/series/letter";
+import type { InitialsPick, InitialsSource } from "@/lib/series/initials";
 
 /** One key per post for its child (look, and session for older posts): add-a-card reuses it so extra cards match. */
 export const subjectKey = (postDate: string, gender: Gender, style: NameStyle) => `${postDate}|${gender}|${style}`;
@@ -100,6 +101,31 @@ function galleryCards(chosen: NameRow[], theme: ThemeRow, gender: Gender, postDa
     position: k + 1, name_id: n.id, name: n.name.trim(), meaning: n.meaning.trim(), shot: frames[k].shot,
     prompt: buildPrompt(theme, frames[k].shot, gender, frames[k].subject), seed: cardSeed(postDate, n.name, k),
   }));
+}
+
+/** A card of a post by initials (migration 017): where its name comes from; a fresh AI name has no row yet (name_id null). */
+export interface InitialsPlannedCard extends Omit<PlannedCard, "name_id"> { name_id: string | null; source: InitialsSource }
+export type InitialsPlanResult = { ok: true; theme_id: string; cards: InitialsPlannedCard[] } | { ok: false; reason: string };
+
+/**
+ * A post by initials: the picked names (already in their new-first order) as a gallery like a normal two-word post
+ * (the same shots, child age and seeds), on the chosen theme or the next one in line.
+ */
+export function planInitialsPost(i: { picks: InitialsPick[]; themes: ThemeRow[]; themeId?: string; gender: Gender; postDate: string; age?: AgeChoice | null }): InitialsPlanResult {
+  if (!i.picks.length) return { ok: false, reason: "No names to put on the cards." };
+  let theme: ThemeRow | undefined;
+  if (i.themeId) {
+    theme = i.themes.find((t) => t.id === i.themeId);
+    if (!theme || theme.gender !== i.gender || theme.status !== "available" || !themeComplete(theme)) {
+      return { ok: false, reason: "That theme is not available for a " + i.gender + " post. Pick another theme." };
+    }
+  } else {
+    theme = nextTheme(i.themes, i.gender);
+    if (!theme) return { ok: false, reason: `No unused ${i.gender} theme is left. Add a theme on the Themes page.` };
+  }
+  const rows = i.picks.map((p) => ({ id: p.name_id ?? "", name: p.name, meaning: p.meaning }) as NameRow);
+  const cards = galleryCards(rows, theme, i.gender, i.postDate, subjectKey(i.postDate, i.gender, "two-word"), i.age);
+  return { ok: true, theme_id: theme.id, cards: cards.map((c, k) => ({ ...c, name_id: i.picks[k].name_id, source: i.picks[k].source })) };
 }
 
 export interface ExtraCardInput {

@@ -100,6 +100,8 @@ export interface PackSuggest {
   themesDefaultVibe: string;
   /** Names for a post by letter. */
   letterSystem: string;
+  /** Fresh two-word names for a post by initials (first name + middle name initials, migration 017). */
+  initialsSystem: string;
 }
 
 export interface PackReels {

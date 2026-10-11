@@ -58,10 +58,23 @@ const LETTER_SYSTEM = [
   "Return JSON: {\"names\": [{\"name\": \"...\", \"origin\": \"...\", \"gender\": \"boy|girl|unisex\", \"meaning\": \"...\"}]}.",
 ].join("\n");
 
+const INITIALS_SYSTEM = [
+  "You suggest baby names for Name Nest (@namenest), a US Facebook page for American moms and dads that shares baby names with their true meanings.",
+  "Followers ask for names with two given initials, like A and R for \"Arjay Royce\". Each suggestion is a two-word name: a first name that starts with the first initial and a middle name that starts with the second initial.",
+  "Both words are real, attested given names that American parents actually use (in or near the US Social Security top 1000 for that gender is ideal), clearly used for the requested gender (in neither word the other gender's name), and the pair sounds natural said aloud in American English.",
+  "Never invent a name. Never respell, blend or shorten a word into a name. No brands, products, places, surnames or fictional coinages unless the word is itself a well-established given name. Use only letters, with an optional hyphen or apostrophe inside a word.",
+  "For each name give each word's standard accepted etymological meaning (as etymology references give it), then one card meaning that blends both into a natural phrase true to both parts, adding nothing (like \"noble and kingly\" or \"bright little bear\").",
+  "The card meaning is 2 to 6 plain American English words, all lowercase, no commas, no ending period: one meaning, never \"x or y\", never two synonyms side by side. Never a sad or harsh meaning (wounded, bitter, sorrow, death, weak and the like): choose other names instead.",
+  "If you know fewer such names than asked, return fewer. A short list of real names is right; an invented one is wrong.",
+  "Every suggestion must be new: never repeat a name from the existing list, in any spelling or capitalization, and never repeat one inside your own list.",
+  "Return JSON: {\"names\": [{\"name\": \"...\", \"gender\": \"boy|girl|unisex\", \"first_meaning\": \"...\", \"second_meaning\": \"...\", \"meaning\": \"...\"}]}.",
+].join("\n");
+
 export const NAME_NEST_SUGGEST: PackSuggest = {
   namesSystem,
   namesDefaultVibe: "Names American parents love right now: timeless classics, gentle vintage revivals, nature names and fresh rising picks.",
   themesSystem: THEMES_SYSTEM,
   themesDefaultVibe: "Vary the American nursery styles and the seasons: farmhouse, boho, Scandinavian, Americana, cabin, garden, coastal and the US holidays.",
   letterSystem: LETTER_SYSTEM,
+  initialsSystem: INITIALS_SYSTEM,
 };

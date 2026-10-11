@@ -122,3 +122,23 @@ describe("filterInitialsCombos", () => {
     expect(filterInitialsCombos([{} as never, { name: 3 } as never], [], { initials: "AR", want: 3 }, "girl").fresh).toEqual([]);
   });
 });
+
+describe("captions for a post by initials", async () => {
+  const { captionProblem, captionPrompt, templateLine } = await import("@/lib/ai/caption");
+  const theme = { title: "Ocean", backdrop: "b", outfit: "o", props: "p", lighting: "l", palette: "c" };
+
+  it("the prompt tells the AI the initials; a line that never says them earns a retry", () => {
+    expect(captionPrompt({ theme, gender: "girl", captionStyle: "story", initials: "MJ" })).toContain("baby girl names with the initials M & J");
+    const input = { captionStyle: "story" as const, initials: "MJ" };
+    for (const ok of ["Baby girl names with the initials M & J.", "Sweet picks for M and J!", "Names for little M.J. fans", "Initials M·J, all of them lovely"]) {
+      expect(captionProblem(ok, input)).toBeNull();
+    }
+    expect(captionProblem("Sweet names for your little girl.", input)).toBe("does not say the names have the initials M & J");
+    expect(captionProblem("Many joyful names.", input)).not.toBeNull();
+  });
+
+  it("the template names the initials; other posts are unchanged", () => {
+    expect(templateLine("boy", "Lovely names.", undefined, null, "AR")).toBe("Baby boy names with the initials A & R. Lovely names.");
+    expect(templateLine("boy", "Lovely names.")).toBe("Lovely names.");
+  });
+});
