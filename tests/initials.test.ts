@@ -267,3 +267,19 @@ describe("natural card meanings (initials)", async () => {
     expect(r.stiffNames).toEqual([{ name: "Armand Ravi", meaning: "army man sun", parts: ["army man", "sun"] }]);
   });
 });
+
+describe("near-duplicate parts and origin lines", async () => {
+  const { partKey, comboOrigin } = await import("@/lib/series/initials");
+  it("treats Ann/Anne, Isabel/Isabelle, Gracie/Gracy, Hannah/Hanna as the same part; Mae and May too", () => {
+    for (const [a, b] of [["Ann", "Anne"], ["Isabel", "Isabelle"], ["Gracie", "Gracy"], ["Hannah", "Hanna"], ["Mae", "May"]]) expect(partKey(a)).toBe(partKey(b));
+    for (const [a, b] of [["June", "Jane"], ["Jo", "Joe"], ["Rose", "Rosa"]]) expect(partKey(a) === partKey(b)).toBe(a === "Jo");
+  });
+  it("an origin line only when both parts' origins are known: one origin when they match, never longer than 40", () => {
+    const o = new Map([["hazel", "English"], ["june", "Latin"], ["hannah", "Hebrew"], ["jane", "Hebrew"], ["xo", "x".repeat(30)], ["jo", "y".repeat(20)]]);
+    expect(comboOrigin("Hazel June", o)).toBe("English · Latin");
+    expect(comboOrigin("Hannah Jane", o)).toBe("Hebrew");
+    expect(comboOrigin("Harper June", o)).toBeNull();
+    expect(comboOrigin("Xo Jo", o)).toBeNull();
+    expect(comboOrigin("Hazel", o)).toBeNull();
+  });
+});

@@ -329,7 +329,7 @@ async function addInitialsCard(sb: Awaited<ReturnType<typeof createClient>>, o: 
     salt: `${p.id}|${Date.now()}`, subjectKey: subjectKey(p.post_date, p.gender, p.style), age: storedAge(p.subject_age),
     usedShots: o.cards.map((c) => c.shot).filter((s): s is string => !!s) });
   if (!plan.ok) return fail(plan.reason);
-  const { data, error } = await sb.rpc("add_initials_card", { p_post: p.id, c: { ...plan.card, name_id: pick.name_id, source: pick.source } });
+  const { data, error } = await sb.rpc("add_initials_card", { p_post: p.id, c: { ...plan.card, name_id: pick.name_id, source: pick.source, ...(pick.origin ? { origin: pick.origin } : {}) } });
   if (error) return fail(error.message);
   const r = data as { status: string; card_id?: string; reason?: string };
   if (r.status === "ok" && r.card_id) return { ok: true, cardId: r.card_id };

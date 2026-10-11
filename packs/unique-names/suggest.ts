@@ -80,4 +80,8 @@ export const UNIQUE_NAMES_SUGGEST: PackSuggest = {
   letterSystem: LETTER_SYSTEM,
   initialsSystem: INITIALS_SYSTEM,
   initialsUnique: true,
+  initialsExamples: {
+    boy: ["Silas Wren", "Ezra Vale", "Kai Lennox", "Milo Thorne", "Soren Blake", "Callum Ray", "Bodhi Lane", "Ronan Ellis"],
+    girl: ["Flora Wren", "Selah Rose", "Dahlia Rae", "Anya Wren", "Sienna Belle", "Jolie Mae", "Evangeline Sky", "Alina Joy"],
+  },
 };

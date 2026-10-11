@@ -104,6 +104,8 @@ export interface PackSuggest {
   initialsSystem: string;
   /** Initials posts on a page of UNIQUE names: very common names are rejected for both parts (except rare initials). */
   initialsUnique: boolean;
+  /** Style examples for initials names when the page has no two-word names of that gender yet. */
+  initialsExamples: Readonly<Record<Gender, readonly string[]>>;
 }
 
 export interface PackReels {

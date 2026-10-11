@@ -150,7 +150,9 @@ export async function createInitialsPostAction(input: InitialsRequest & {
     const rowById = new Map<string, NameRow>([...stock.available, ...stock.used].map((n) => [n.id, n]));
     const postNames: CaptionName[] = plan.picks.map((p) => {
       const row = p.name_id ? rowById.get(p.name_id) : undefined;
-      return row?.origin || row?.us_rank ? { name: p.name, meaning: p.meaning, origin: row.origin ?? null, usRank: row.us_rank ?? null } : { name: p.name, meaning: p.meaning };
+      if (row?.origin || row?.us_rank) return { name: p.name, meaning: p.meaning, origin: row.origin ?? null, usRank: row.us_rank ?? null };
+      // A fresh pair has no US rank; its parts' origins (Name Nest) are still a fact for the caption.
+      return p.origin ? { name: p.name, meaning: p.meaning, origin: p.origin, usRank: null } : { name: p.name, meaning: p.meaning };
     });
     const captionStyle = pickStyle(h.styles, postNames);
     const aiOn = captionAiOn(s);
@@ -175,7 +177,8 @@ export async function createInitialsPostAction(input: InitialsRequest & {
     if (reuse) {
       const { data, error } = await sb.rpc("create_initials_post", { p: {
         ...base, initials, caption_style, hashtag_set,
-        cards: gallery.cards.map((c) => ({ position: c.position, source: c.source, name_id: c.name_id, name: c.name, meaning: c.meaning, shot: c.shot, prompt: c.prompt, seed: c.seed })),
+        cards: gallery.cards.map((c, k) => ({ position: c.position, source: c.source, name_id: c.name_id, name: c.name, meaning: c.meaning, shot: c.shot, prompt: c.prompt, seed: c.seed,
+          ...(plan.picks[k].origin ? { origin: plan.picks[k].origin } : {}) })),
       } });
       if (error) {
         if (!missingFunction(error)) return fail(`Could not create the post: ${error.message}`);

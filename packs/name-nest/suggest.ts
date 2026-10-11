@@ -82,4 +82,8 @@ export const NAME_NEST_SUGGEST: PackSuggest = {
   letterSystem: LETTER_SYSTEM,
   initialsSystem: INITIALS_SYSTEM,
   initialsUnique: false,
+  initialsExamples: {
+    boy: ["Wyatt James", "Theo Bennett", "Miles Everett", "Henry Cole", "Jack Russell", "Owen Thomas", "Caleb Wade", "Luke Harrison"],
+    girl: ["Hazel June", "Eloise Kate", "Nora Claire", "Violet Mae", "Clara Jane", "Lucy Anne", "Ivy Rose", "Ellie Grace"],
+  },
 };

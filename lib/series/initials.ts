@@ -59,9 +59,29 @@ export type InitialsSource = "available" | "new" | "used";
 export const SOURCE_LABEL: Record<InitialsSource, string> = { available: "unused", new: "new AI", used: "reused" };
 
 export interface InitialsName { id: string; name: string; meaning: string }
-/** A fresh AI name; `parts` = the first and middle name's standard meanings its card meaning is built from. */
-export interface InitialsCombo { name: string; meaning: string; parts?: [string, string] }
-export interface InitialsPick { source: InitialsSource; name_id: string | null; name: string; meaning: string; parts?: [string, string] }
+/**
+ * A fresh AI name; `parts` = the first and middle name's standard meanings its card meaning is built from; `origin` =
+ * both parts' origins from the names table ("English · Latin", the Name Nest card chip), when both are known.
+ */
+export interface InitialsCombo { name: string; meaning: string; parts?: [string, string]; origin?: string | null }
+export interface InitialsPick { source: InitialsSource; name_id: string | null; name: string; meaning: string; parts?: [string, string]; origin?: string | null }
+
+/** A part's near-duplicate key: "Anne" = "Ann", "Isabelle" = "Isabel", "Gracy" = "Gracie", "Hannah" = "Hanna", "Mae" = "May". */
+export const partKey = (w: string) =>
+  w.toLowerCase().normalize("NFD").replace(/[^a-z]/g, "").replace(/y/g, "i").replace(/ae$/, "ai").replace(/(.)\1+/g, "$1").replace(/(?<=..)[eh]+$/, "");
+
+/**
+ * A two-word name's origin from its parts' known origins (lowercase name → origin): "English · Latin", one origin when
+ * both are the same, null when a part's origin is unknown or the line would be longer than 40 characters.
+ */
+export function comboOrigin(name: string, origins: Map<string, string>): string | null {
+  const words = name.trim().split(/\s+/);
+  if (words.length !== 2) return null;
+  const o = words.map((w) => (origins.get(w.toLowerCase()) ?? "").replace(/\s+/g, " ").trim());
+  if (o.some((x) => !x)) return null;
+  const line = o[0].toLowerCase() === o[1].toLowerCase() ? o[0] : `${o[0]} · ${o[1]}`;
+  return line.length <= 40 ? line : null;
+}
 export type SourceCounts = Record<InitialsSource, number>;
 export interface InitialsNamesPlan { picks: InitialsPick[]; counts: SourceCounts; short: number }
 
@@ -70,7 +90,7 @@ const key = (s: string) => s.replace(/\s+/g, " ").trim().toLowerCase();
 /**
  * The names of a post by initials, strictly new first: unused names (in the order given), then fresh AI names, then
  * names used before (pass them least recently used first), then `late` fresh names (common ones), `want` at most. Each first name and each middle name is
- * used once per post (no two "June"s), never one of `takenParts` (the names already on the post), so a name is never
+ * used once per post (no two "June"s, nor "Ann" and "Anne"), never one of `takenParts` (the names already on the post), so a name is never
  * there twice either. `short` = how many the post lacks when all three run out.
  */
 export function pickInitialsNames(i: {
@@ -79,14 +99,15 @@ export function pickInitialsNames(i: {
   late?: InitialsCombo[];
 }): InitialsNamesPlan {
   const picks: InitialsPick[] = [];
-  const parts = new Set((i.takenParts ?? []).flatMap((n) => key(n).split(" ")));
-  const take = (source: InitialsSource, rows: { id?: string; name: string; meaning: string; parts?: [string, string] }[]) => {
+  const parts = new Set((i.takenParts ?? []).flatMap((n) => key(n).split(" ").map(partKey)));
+  const take = (source: InitialsSource, rows: { id?: string; name: string; meaning: string; parts?: [string, string]; origin?: string | null }[]) => {
     for (const r of rows) {
       if (picks.length >= i.want) return;
-      const words = key(r.name).split(" ").filter(Boolean);
+      const words = key(r.name).split(" ").filter(Boolean).map(partKey);
       if (!words.length || !r.meaning.trim() || words.some((w) => parts.has(w))) continue;
       for (const w of words) parts.add(w);
-      picks.push({ source, name_id: source === "new" ? null : r.id ?? null, name: r.name.trim(), meaning: r.meaning.trim(), ...(r.parts ? { parts: r.parts } : {}) });
+      picks.push({ source, name_id: source === "new" ? null : r.id ?? null, name: r.name.trim(), meaning: r.meaning.trim(),
+        ...(r.parts ? { parts: r.parts } : {}), ...(r.origin ? { origin: r.origin } : {}) });
     }
   };
   take("available", i.available);

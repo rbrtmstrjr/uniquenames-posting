@@ -4,8 +4,9 @@ import type { Gender, NameRow } from "@/lib/db/types";
 import { chunks, nameKey } from "@/lib/actions/helpers";
 import { filterInitialsCombos } from "@/lib/ai/suggest-filter";
 import { INITIALS_UNIQUE, STYLE_EXAMPLES, suggestForInitials } from "@/lib/ai/initials";
+import { activePack } from "@/packs";
 import {
-  hasInitials, initialsAiWanted, initialsText, leastRecentlyUsed, pickInitialsNames,
+  comboOrigin, hasInitials, initialsAiWanted, initialsText, leastRecentlyUsed, pickInitialsNames,
   type InitialsCombo, type InitialsNamesPlan,
 } from "@/lib/series/initials";
 
@@ -27,10 +28,15 @@ export interface InitialsStock {
   allNames: string[];
   /** Names with these initials (any gender or status): the AI is told not to repeat them. */
   seen: string[];
-  /** A spread of the owner's two-word names of the gender (the style the AI follows). */
+  /** A spread of the owner's two-word names of the gender (the style the AI follows); the pack's examples when none. */
   examples: string[];
-  /** The owner's meanings of single names (lowercase name → meaning; this gender's first): a fresh name's part uses it. */
+  /**
+   * The meanings of single names in the names table (lowercase name → meaning; this gender's first; any status but
+   * skip, so Name Nest's SSA names awaiting approval count): a fresh name's part uses it instead of the AI's.
+   */
   knownParts: Map<string, string>;
+  /** The origins of those single names (lowercase name → origin): a fresh name's origin line ("English · Latin"). */
+  knownOrigins: Map<string, string>;
 }
 
 /** Every names row, every page (a single select is capped at 1000 rows server-side). */
@@ -82,14 +88,17 @@ export async function loadInitialsStock(sb: SB, i: { gender: Gender; initials: s
   const live = (n: NameRow) => n.status === "available" || n.status === "used" || n.status === "reserved";
   const twoWord = all.rows.filter((n) => n.gender === i.gender && n.style === "two-word" && live(n));
   const step = Math.max(1, Math.floor(twoWord.length / STYLE_EXAMPLES));
-  const examples = twoWord.filter((_, k) => k % step === 0).slice(0, STYLE_EXAMPLES).map((n) => n.name);
+  const own = twoWord.filter((_, k) => k % step === 0).slice(0, STYLE_EXAMPLES).map((n) => n.name);
+  const examples = own.length ? own : [...activePack().suggest.initialsExamples[i.gender]];
   const knownParts = new Map<string, string>();
-  const singles = all.rows.filter((n) => n.style === "single" && live(n) && n.meaning?.trim());
+  const knownOrigins = new Map<string, string>();
+  const singles = all.rows.filter((n) => n.style === "single" && n.status !== "skip" && n.meaning?.trim());
   for (const n of [...singles.filter((x) => x.gender === i.gender), ...singles.filter((x) => x.gender !== i.gender)]) {
     const k = n.name.trim().toLowerCase();
     if (!knownParts.has(k)) knownParts.set(k, n.meaning.trim().toLowerCase());
+    if (!knownOrigins.has(k) && n.origin?.trim()) knownOrigins.set(k, n.origin.trim());
   }
-  return { ok: true, stock: { available, used, allNames: all.rows.map((n) => n.name), seen: withInitials.map((n) => n.name), examples, knownParts } };
+  return { ok: true, stock: { available, used, allNames: all.rows.map((n) => n.name), seen: withInitials.map((n) => n.name), examples, knownParts, knownOrigins } };
 }
 
 export interface InitialsNamesResult {
@@ -138,6 +147,10 @@ export async function planInitialsNames(sb: SB, i: {
       if (!ai.result.fresh.length && !ai.result.relaxed.length) aiError = `The AI had no new ${initialsText(i.initials)} names this time.`;
     }
   }
+  // A fresh name's origin line comes from its parts' origins in the names table (never from the AI).
+  const withOrigin = (c: InitialsCombo): InitialsCombo => ({ ...c, origin: comboOrigin(c.name, stock.knownOrigins) });
+  fresh = fresh.map(withOrigin);
+  late = late.map(withOrigin);
   const plan = pickInitialsNames({ want: i.want, available: stock.available, fresh, late, used: i.reuse === false ? [] : stock.used, takenParts: i.onPost?.names });
   const taken = new Set(plan.picks.filter((p) => p.source === "new").map((p) => nameKey(p.name)));
   return { ok: true, result: { plan, fresh: [...fresh, ...late].filter((f) => taken.has(nameKey(f.name))), aiError, stock } };
