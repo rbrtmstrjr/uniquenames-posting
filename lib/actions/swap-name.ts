@@ -5,8 +5,10 @@ import type { CardRow, NameRow, PostRow } from "@/lib/db/types";
 import { activePack } from "@/packs";
 import { nameDetail } from "@/lib/names/detail";
 import { isLetter, startsWith } from "@/lib/series/letter";
+import { hasInitials, initialsText, isInitials } from "@/lib/series/initials";
+import { loadInitialsStock } from "@/lib/data/initials";
 import { validateName } from "./validate";
-import { nextSeed, restampMode, UUID_RE } from "./helpers";
+import { nameKey, nextSeed, restampMode, UUID_RE } from "./helpers";
 import { generateLockReason } from "./generate-guard";
 import { fail, requireOwner, type ActionResult } from "./result";
 
@@ -25,7 +27,8 @@ const BUSY = "This card is being made right now. Wait for it to finish.";
 const NOT_FOUND = "Card not found.";
 const NAME_CARDS_ONLY = "Only the name cards of a post take a name from the Names page.";
 
-export type SwapName = { id: string; name: string; meaning: string; detail: string | null };
+/** `usedBefore`: on a post by initials (017), a name already used on an earlier post (offered after the unused ones). */
+export type SwapName = { id: string; name: string; meaning: string; detail: string | null; usedBefore?: boolean };
 export type SwapNamesResult = ActionResult<{ names: SwapName[]; next: number | null }>;
 
 /** The search text, safe inside a PostgREST or() filter and a LIKE pattern. */
@@ -59,6 +62,7 @@ export async function listSwapNamesAction(cardId: string, opts: { q?: string; cu
   const got = await cardAndPost(sb, cardId);
   if ("error" in got) return fail(got.error);
   const { card, post } = got;
+  if (isInitials(post.initials)) return listInitialsNames(sb, card, post.initials, post, opts.q, cursor);
   const { data: onPost, error: pe } = await sb.from("cards").select("name_id").eq("post_id", card.post_id!);
   if (pe) return fail(pe.message);
   const used = [...new Set(((onPost ?? []) as Pick<CardBits, "name_id">[]).map((c) => c.name_id).filter((x): x is string => !!x))];
@@ -76,6 +80,34 @@ export async function listSwapNamesAction(cardId: string, opts: { q?: string; cu
     ok: true,
     names: rows.slice(0, PAGE).map((n) => ({ id: n.id, name: n.name, meaning: n.meaning, detail: nameDetail(n) })),
     next: rows.length > PAGE ? cursor + PAGE : null,
+  };
+}
+
+/**
+ * My names on a post by initials (017): the two-word names of the post's gender with its initials that are not on the
+ * post yet, unused ones first (Name Nest: best US rank first), then the names used before (least recently used
+ * first), labelled `usedBefore`. `q` searches name and meaning; 20 a page.
+ */
+async function listInitialsNames(sb: SB, card: CardRow, initials: string, post: PostRow, q: string | undefined, cursor: number): Promise<SwapNamesResult> {
+  const { data: onPost, error: pe } = await sb.from("cards").select("name_id, name, kind").eq("post_id", card.post_id!);
+  if (pe) return fail(pe.message);
+  const rows = (onPost ?? []) as { name_id: string | null; name: string | null; kind?: string }[];
+  const got = await loadInitialsStock(sb, { gender: post.gender, initials, onPost: {
+    nameIds: rows.map((r) => r.name_id).filter((x): x is string => !!x),
+    names: rows.filter((r) => (r.kind ?? "post") === "post" && r.name).map((r) => r.name!),
+  } });
+  if (!got.ok) return fail(got.error);
+  const rank = (n: NameRow) => (typeof n.us_rank === "number" ? n.us_rank : Infinity);
+  const available = activePack().namePicker.order === "us-rank" ? [...got.stock.available].sort((a, b) => rank(a) - rank(b)) : got.stock.available;
+  const all = [...available.map((n) => ({ n, usedBefore: false })), ...got.stock.used.map((n) => ({ n, usedBefore: true }))];
+  const want = cleanQuery(q ?? "").toLowerCase();
+  const hits = want ? all.filter(({ n }) => n.name.toLowerCase().includes(want) || n.meaning.toLowerCase().includes(want)) : all;
+  return {
+    ok: true,
+    names: hits.slice(cursor, cursor + PAGE).map(({ n, usedBefore }) => ({
+      id: n.id, name: n.name, meaning: n.meaning, detail: nameDetail(n), ...(usedBefore ? { usedBefore: true } : {}),
+    })),
+    next: hits.length > cursor + PAGE ? cursor + PAGE : null,
   };
 }
 
@@ -118,6 +150,35 @@ async function swapInSteps(sb: SB, card: CardRow, post: PostRow, name: NameRow, 
 }
 
 /**
+ * My names on a post by initials (017): an unused name is reserved for the post as usual; a name used before goes on the
+ * card as text only (its names row stays on its first post), in one transaction (swap_initials_card_name).
+ */
+async function swapInitialsName(sb: SB, o: { card: CardRow; post: PostRow; initials: string; name: NameRow | null; meaning: string; newPicture: boolean; lock: string | null }):
+  Promise<ActionResult<{ mode: Mode }>> {
+  const { card, post, name } = o;
+  if (!name) return fail(TAKEN);
+  if (card.name_id === name.id || (!card.name_id && nameKey(card.name) === nameKey(name.name))) return { ok: true, mode: restampMode(card) };
+  if (name.gender !== post.gender || name.style !== "two-word") return fail("That name is for another kind of post (boy / girl or name style). Pick another.");
+  const label = initialsText(o.initials);
+  if (!hasInitials(name.name, o.initials)) return fail(`This post's names have the initials ${label}. Pick a name with those initials.`);
+  if (!["available", "used", "reserved"].includes(name.status)) return fail(TAKEN);
+  const bad = validateName(name.name, o.meaning);
+  if (bad) return fail(bad);
+  const mode: Mode = o.newPicture ? "regenerate" : restampMode(card);
+  if (mode === "regenerate" && o.lock) return fail(o.lock);
+  const { data, error } = await sb.rpc("swap_initials_card_name", {
+    p_card: card.id, p_name: name.id, p_version: card.version, p_meaning: o.meaning.trim().toLowerCase(), p_mode: mode, p_seed: nextSeed(card.id, card.version + 1, card.seed),
+  });
+  if (error) return fail(missingFunction(error) ? "Run supabase/migrations/017_initials_posts.sql in Supabase first, then try again." : error.message);
+  const r = data as { status: string; reason?: string };
+  if (r.status === "taken") return fail(TAKEN);
+  if (r.status === "stale") return fail(STALE);
+  if (r.status !== "ok") return fail(r.reason ?? "Could not change the name. Try again.");
+  revalidatePath("/names");
+  return { ok: true, mode };
+}
+
+/**
  * "Save text" (or "New picture") after picking a name in My names: the card takes that name and the meaning in the
  * field, and is queued again: the photo is kept and only the text is re-stamped, unless `newPicture` (or the card has
  * no clean photo) makes a new photo. The new name is reserved for the post; the old one goes back to the Names page.
@@ -137,6 +198,7 @@ export async function swapCardNameAction(cardId: string, nameId: string, meaning
   const { card, post } = got;
   if (card.status === "generating") return fail(BUSY);
   const name = nameRow as NameRow | null;
+  if (isInitials(post.initials)) return swapInitialsName(sb, { card, post, initials: post.initials, name, meaning, newPicture: !!opts.newPicture, lock });
   // Already this card's name (a second tap after it saved): nothing to do.
   if (name && card.name_id === name.id) return { ok: true, mode: restampMode(card) };
   if (!name || name.status !== "available") return fail(TAKEN);

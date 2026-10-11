@@ -10,6 +10,7 @@ import { DatePicker } from "@/components/ui/date-picker";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/shadcn/select";
 import { useHotkey } from "@/lib/realtime/hotkey";
 import { createPostAction } from "@/lib/actions/posts";
+import { createInitialsPostAction } from "@/lib/actions/initials";
 import { callAction } from "@/lib/actions/call";
 import type { Gender, NameStyle, SettingsRow, ThemeRow } from "@/lib/db/types";
 import { useWorkerContext } from "@/components/shell/app-shell";
@@ -23,6 +24,8 @@ import { AGE_CHOICES, AGE_LABELS, type AgeChoice } from "@/lib/planner/age";
 import { postSummary } from "@/lib/today/summary";
 import { letterKey, type LetterStock } from "@/lib/series/letter";
 import { LetterPicker } from "@/components/today/letter-picker";
+import { InitialsPicker, useInitialsPlan } from "@/components/today/initials-picker";
+import { initialsText, type InitialsStock } from "@/lib/series/initials";
 import { useTodaySelection } from "@/components/today/selection";
 import { cn } from "@/lib/utils/cn";
 
@@ -81,12 +84,14 @@ function manilaToday() {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Manila" }).format(new Date());
 }
 
-type Mode = "post" | "letter";
+type Mode = "post" | "letter" | "initials";
 
-export function NewPostPanel({ settings, themes, stock, busy, letters }: {
+export function NewPostPanel({ settings, themes, stock, busy, letters, initials }: {
   settings: SettingsRow; themes: ThemeRow[]; stock: { gender: Gender; style: NameStyle; count: number }[]; busy: boolean;
   /** Posts by letter: available names per letter for each gender + style (the By letter option shows with it). */
   letters?: LetterStock;
+  /** Posts by initials (017): available two-word names per pair of initials for each gender (the Initials option shows with it). */
+  initials?: InitialsStock;
 }) {
   const { health } = useWorkerContext();
   // Shared with the Stock card on Today (it highlights the matching count).
@@ -103,6 +108,11 @@ export function NewPostPanel({ settings, themes, stock, busy, letters }: {
   const [mode, setMode] = useState<Mode>("post");
   const [letter, setLetter] = useState<string | null>(null);
   const byLetter = mode === "letter" && !!letters;
+  // Initials: two-word names whose first name starts with `first` and middle name with `second` (A·R).
+  const byInitials = mode === "initials" && !!initials;
+  const [first, setFirst] = useState<string | null>(null);
+  const [second, setSecond] = useState<string | null>(null);
+  const pair = first && second ? `${first}${second}` : null;
 
   const genderThemes = useMemo(() => themes.filter((t) => t.gender === gender), [themes, gender]);
   const theme = genderThemes.find((t) => t.id === themeId) ?? genderThemes[0];
@@ -110,19 +120,39 @@ export function NewPostPanel({ settings, themes, stock, busy, letters }: {
   const counts = Array.from({ length: settings.max_images - settings.min_images + 1 }, (_, i) => String(settings.min_images + i));
   const wanted = count === "auto" ? settings.min_images : Number(count);
   const gen = canGenerate(health);
+  const postDate = date || manilaToday();
+  const plan = useInitialsPlan({ enabled: byInitials, gender, first, second, count: count === "auto" ? null : Number(count), postDate });
   const letterCounts = letters?.[letterKey(gender, style)] ?? {};
   const forLetter = byLetter && letter ? letterCounts[letter] ?? 0 : 0;
-  const summary = postSummary({ count, min: settings.min_images, max: settings.max_images, gender, style, age, themeTitle: theme?.title, letter: byLetter ? letter : null });
+  const summary = postSummary({ count, min: settings.min_images, max: settings.max_images, gender, style: byInitials ? "two-word" : style, age, themeTitle: theme?.title,
+    letter: byLetter ? letter : null, initials: byInitials ? pair : null });
   // The PC lock comes first: it is the one the owner fixes at the PC, not on this form.
   const blocked = !gen.ok ? gen.reason
+    : byInitials ? (!pair ? "Pick both initials." : plan.loading || plan.shuffling ? "Planning the names…" : plan.error ? plan.error
+      : !plan.plan?.names.length ? `No ${gender} ${initialsText(pair)} names yet. Try Shuffle.` : !theme ? `No ${gender} theme left. Add a theme first.` : null)
     : byLetter && !letter ? "Pick a letter."
       : byLetter && forLetter < wanted ? `Only ${forLetter} ${gender} ${style} names start with ${letter}${count === "auto" ? "" : `, but you chose ${count} cards`}. Suggest more with AI or pick fewer cards.`
         : left < wanted ? `Only ${left} ${gender} ${style} names left${count === "auto" ? "" : `, but you chose ${count} cards`}. Add names or pick fewer cards.` : !theme ? `No ${gender} theme left. Add a theme first.` : null;
 
   const generate = () => {
     if (blocked || pending) return;
+    if (byInitials) {
+      const shown = plan.plan;
+      const requestId = plan.requestId;
+      if (!pair || !shown || !requestId) return;
+      const label = initialsText(pair);
+      start(async () => {
+        const r = await callAction(() => createInitialsPostAction({ gender, first: pair[0], second: pair[1], count: count === "auto" ? null : Number(count), postDate,
+          themeId: theme?.id, requestId, fonts, subjectAge: age, fresh: shown.fresh }));
+        if (!r.ok) { toast.error(r.error); return; }
+        toast.success(r.short ? `${label} post queued with ${r.cards} cards (${r.short} short). Cards will appear as they are made.` : `${label} post queued. Cards will appear as they are made.`);
+        // Those names are taken now: the next initials post starts from a fresh pick.
+        setFirst(null);
+        setSecond(null);
+      });
+      return;
+    }
     start(async () => {
-      const postDate = date || manilaToday();
       const only = byLetter && letter ? { letter } : {};
       const r = await callAction(() => createPostAction({ gender, style, count: count === "auto" ? null : Number(count), postDate, themeId: theme?.id, requestId: crypto.randomUUID(), fonts, subjectAge: age, ...only }));
       if (!r.ok) { toast.error(r.error); return; }
@@ -140,9 +170,10 @@ export function NewPostPanel({ settings, themes, stock, busy, letters }: {
           <DatePicker label="Post date" value={date} onChange={setDate} today={manilaToday()} className="w-auto" />
         </div>
 
-        {letters && (
+        {(letters || initials) && (
           <Segmented fill label="Post type" value={mode} onChange={setMode}
-            options={[{ value: "post", label: "Normal post" }, { value: "letter", label: "By letter" }]} />
+            options={[{ value: "post", label: "Normal post" }, ...(letters ? [{ value: "letter" as const, label: "By letter" }] : []),
+              ...(initials ? [{ value: "initials" as const, label: "Initials" }] : [])]} />
         )}
 
         <Section label="Who">
@@ -153,8 +184,11 @@ export function NewPostPanel({ settings, themes, stock, busy, letters }: {
                 options={[{ value: "boy", label: "Boy" }, { value: "girl", label: "Girl" }]} />
             </Field>
             <Field label="Name style">
-              <Segmented fill label="Name style" value={style} onChange={(v) => setSel({ gender, style: v })}
-                options={[{ value: "two-word", label: "Two-word" }, { value: "single", label: "Single" }]} />
+              {byInitials
+                // Initials are always a first + middle name.
+                ? <div className="flex h-11 items-center rounded-xl bg-surface-2 px-3.5 text-sm font-semibold text-ink">Two-word</div>
+                : <Segmented fill label="Name style" value={style} onChange={(v) => setSel({ gender, style: v })}
+                  options={[{ value: "two-word", label: "Two-word" }, { value: "single", label: "Single" }]} />}
             </Field>
             <Field label="Child age" id="age-label" className="col-span-2 @2xl:col-span-1">
               <Select value={age} onValueChange={(v) => setAge(v as AgeChoice)}>
@@ -207,6 +241,13 @@ export function NewPostPanel({ settings, themes, stock, busy, letters }: {
           </Section>
         )}
 
+        {byInitials && initials && (
+          <Section label="Initials">
+            <InitialsPicker gender={gender} pairs={initials[gender] ?? {}} need={wanted} first={first} second={second}
+              onFirst={setFirst} onSecond={setSecond} plan={plan.plan} loading={plan.loading} error={plan.error} shuffling={plan.shuffling} onShuffle={() => void plan.shuffle()} />
+          </Section>
+        )}
+
         <Section label="Cards">
           {/* Phone: an even 6-column grid (Auto takes two). Wider: one full-width track. */}
           <Segmented fill label="Number of cards" value={count} onChange={setCount} className="grid h-auto grid-cols-6 @2xl:flex @2xl:h-11"
@@ -225,10 +266,10 @@ export function NewPostPanel({ settings, themes, stock, busy, letters }: {
                 ? <span className="block text-xs font-semibold text-warn-text">{blocked}</span>
                 : busy
                   ? <span className="block text-xs text-muted">If a post is still being made, the new cards wait in line.</span>
-                  : <span className="block text-xs text-muted">{byLetter ? `${forLetter} ${letter} names left` : `${left} names left`}<span className="hidden sm:inline"> · press G</span></span>}
+                  : <span className="block text-xs text-muted">{byInitials && plan.plan ? plan.plan.summary : byLetter ? `${forLetter} ${letter} names left` : `${left} names left`}<span className="hidden sm:inline"> · press G</span></span>}
           </div>
           <Button size="lg" onClick={generate} loading={pending} disabled={!!blocked} className="w-full shrink-0 sm:w-auto">
-            <Sparkles className="size-4" /> {byLetter && letter ? `Generate ${letter} post` : "Generate post"}
+            <Sparkles className="size-4" /> {byInitials && pair ? `Generate ${initialsText(pair)} post` : byLetter && letter ? `Generate ${letter} post` : "Generate post"}
           </Button>
         </div>
       </div>

@@ -25,6 +25,7 @@ const m012 = stripSupabase(read("supabase", "migrations", "012_two_styles.sql"))
 const m013 = stripSupabase(read("supabase", "migrations", "013_letter_posts.sql"));
 const m014 = stripSupabase(read("supabase", "migrations", "014_reel_formats.sql"));
 const m015 = stripSupabase(read("supabase", "migrations", "015_name_nest.sql"));
+const m017 = stripSupabase(read("supabase", "migrations", "017_initials_posts.sql"));
 
 async function liveDb(hashtags?: string) {
   const db = new PGlite();
@@ -110,6 +111,7 @@ describe("fresh schema.sql matches v1 + 002..009 (+ 010)", () => {
     await migrated.exec(m013);
     await migrated.exec(m014);
     await migrated.exec(m015);
+    await migrated.exec(m017);
     const want = await shape(migrated);
     const cols = (want.columns as { table_name: string; column_name: string }[]).map((c) => `${c.table_name}.${c.column_name}`);
     expect(cols).toEqual(expect.arrayContaining(["settings.hashtags_always", "settings.hashtag_pool", "posts.caption_style", "posts.hashtag_set", "reels.caption", "reels.hashtags"]));

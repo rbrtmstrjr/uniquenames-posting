@@ -9,7 +9,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { brand } from "@/packs/shared";
 
 // Create post waits on Gemini for the caption (9 s budget) plus a few DB round trips;
-// By letter > Suggest with AI waits on Gemini for name ideas (up to ~50 s).
+// By letter > Suggest with AI waits on Gemini for name ideas (up to ~50 s); an Initials plan waits on its AI calls (up to 45 s in all).
 export const maxDuration = 60;
 
 export default async function TodayPage() {
@@ -25,7 +25,7 @@ export default async function TodayPage() {
         {/* Phones: New post first. Desktop: the post being made + Stock on the wide left (70%), New post on the right (30%). */}
         <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_380px] xl:grid-cols-[minmax(0,1fr)_440px] 2xl:grid-cols-[minmax(0,7fr)_minmax(0,3fr)]">
           <div className="min-w-0 lg:order-2">
-            <NewPostPanel settings={d.settings} themes={d.themes} stock={d.stock} busy={d.activePosts.some((a) => a.post.status === "generating")} letters={d.letters} />
+            <NewPostPanel settings={d.settings} themes={d.themes} stock={d.stock} busy={d.activePosts.some((a) => a.post.status === "generating")} letters={d.letters} initials={d.initials} />
           </div>
           <div className="min-w-0 space-y-4 lg:order-1">
             {/* An A–Z series (made before posts by letter) shows both parts, Part 1 first. */}

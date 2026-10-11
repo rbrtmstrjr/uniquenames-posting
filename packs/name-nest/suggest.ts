@@ -58,10 +58,32 @@ const LETTER_SYSTEM = [
   "Return JSON: {\"names\": [{\"name\": \"...\", \"origin\": \"...\", \"gender\": \"boy|girl|unisex\", \"meaning\": \"...\"}]}.",
 ].join("\n");
 
+const INITIALS_SYSTEM = [
+  "You suggest baby names for Name Nest (@namenest), a US Facebook page for American moms and dads that shares baby names with their true meanings.",
+  "Followers ask for names with two given initials, like A and R. Each suggestion is a two-word name: a first name that starts with the first initial and a middle name that starts with the second initial.",
+  "Both words are real, attested given names that American parents actually use (in or near the US Social Security top 1000 for that gender is ideal), clearly used for the requested gender (in neither word the other gender's name), and the pair sounds natural said aloud in American English.",
+  "Never invent a name. Never respell, blend or shorten a word into a name. No brands, products, places, surnames or fictional coinages unless the word is itself a well-established given name. Use only letters, with an optional hyphen or apostrophe inside a word.",
+  "For each name give each part's standard meaning as etymology references give it, 1 to 4 plain words (like Andrew = \"manly and strong\", Russell = \"little red one\", Rhys = \"enthusiasm\"): part1_meaning for the first name, part2_meaning for the middle name.",
+  "Then the card meaning: a warm, natural English phrase of 2 to 7 lowercase words, like the page's own cards (\"majestic and passionate\", \"blessed with quiet strength\"). Its content words come ONLY from the two part meanings (you may change a word's form, like protected to protection, god to god's or king to kingly) and each part gives at least one; add only small grammar words (a, an, the, of, and, with, by, from, under, who, in, as, like, one, to). Never add new imagery or adjectives.",
+  "Good: Ansel Remy (protected by god / oarsman) = \"an oarsman under god's protection\"; Amos Rafferty (burden bearer / prosperous) = \"a prosperous burden bearer\"; Arlo Ross (fortified hill / headland) = \"the fortified hill by the headland\"; Armand Ravi (army man / sun) = \"army man of the sun\"; Andrew Russell (manly and strong / little red one) = \"strong little red one\".",
+  "Bad: \"army man sun\" or \"fortified hill headland\" (a pile of words with no grammar); \"brave little fox\" for Andrew Russell (brave and fox are in neither part meaning).",
+  "The card meaning has no commas and no ending period: one meaning, never \"x or y\". Never a sad or harsh meaning (wounded, bitter, sorrow, death, weak and the like): choose other names instead.",
+  "Use each first name and each middle name at most once in your whole list (no two names with the same middle name).",
+  "If you know fewer such names than asked, return fewer. A short list of real names is right; an invented one is wrong.",
+  "Every suggestion must be new: never repeat a name from the existing list, in any spelling or capitalization, and never repeat one inside your own list.",
+  "Return JSON: {\"names\": [{\"name\": \"...\", \"gender\": \"boy|girl|unisex\", \"part1_meaning\": \"...\", \"part2_meaning\": \"...\", \"meaning\": \"...\"}]}.",
+].join("\n");
+
 export const NAME_NEST_SUGGEST: PackSuggest = {
   namesSystem,
   namesDefaultVibe: "Names American parents love right now: timeless classics, gentle vintage revivals, nature names and fresh rising picks.",
   themesSystem: THEMES_SYSTEM,
   themesDefaultVibe: "Vary the American nursery styles and the seasons: farmhouse, boho, Scandinavian, Americana, cabin, garden, coastal and the US holidays.",
   letterSystem: LETTER_SYSTEM,
+  initialsSystem: INITIALS_SYSTEM,
+  initialsUnique: false,
+  initialsExamples: {
+    boy: ["Wyatt James", "Theo Bennett", "Miles Everett", "Henry Cole", "Jack Russell", "Owen Thomas", "Caleb Wade", "Luke Harrison"],
+    girl: ["Hazel June", "Eloise Kate", "Nora Claire", "Violet Mae", "Clara Jane", "Lucy Anne", "Ivy Rose", "Ellie Grace"],
+  },
 };

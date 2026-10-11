@@ -5,6 +5,9 @@ import { nameKey, normalizeName, styleOf } from "@/lib/actions/helpers";
 import { validateName, validateTheme, type ThemeInput } from "@/lib/actions/validate";
 import { letterOf } from "@/lib/series/az";
 import { isCommonName, negativeMeaning, notAGivenName, otherGenderName } from "./common-names";
+import { plainWordsProblem } from "./plain-words";
+import { initialsOf } from "@/lib/series/initials";
+import { groundingProblem, stiffProblem } from "./meaning-grounding";
 
 export interface NameSuggestion { name: string; meaning: string }
 export type ThemeFields = Omit<ThemeInput, "gender">;
@@ -27,7 +30,7 @@ const cleanMeaning = (m: string) => m.replace(/\s+/g, " ").trim().replace(/[.!]+
  * name in the database, any gender or status) nor earlier in the batch. A two-word name may
  * share its first OR second word with another name: only the full name must be new.
  */
-export function filterNameSuggestions(cands: NameSuggestion[], existing: Iterable<string>, style: NameStyle): FilterResult<NameSuggestion> {
+export function filterNameSuggestions(cands: NameSuggestion[], existing: Iterable<string>, style: NameStyle, maxWords: number = MEANING_MAX_WORDS): FilterResult<NameSuggestion> {
   const have = new Set<string>();
   for (const n of existing) have.add(nameKey(n));
   const fresh: NameSuggestion[] = [];
@@ -37,7 +40,7 @@ export function filterNameSuggestions(cands: NameSuggestion[], existing: Iterabl
     const name = normalizeName(typeof c?.name === "string" ? c.name : "");
     const meaning = cleanMeaning(typeof c?.meaning === "string" ? c.meaning : "");
     const words = meaning ? meaning.split(" ").length : 0;
-    if (validateName(name, meaning) || styleOf(name) !== style || name.split(" ").length > 2 || words < MEANING_MIN_WORDS || words > MEANING_MAX_WORDS) {
+    if (validateName(name, meaning) || styleOf(name) !== style || name.split(" ").length > 2 || words < MEANING_MIN_WORDS || words > maxWords) {
       invalid++;
       continue;
     }
@@ -179,4 +182,97 @@ export function filterLetterSuggestions(cands: LetterCandidate[], existing: Iter
     kept.push({ ...s, letter: need.letter });
   }
   return { fresh: kept, duplicates, invalid, offLetter, blocked, wrongGender, negative };
+}
+
+// ---------------------------------------------------------------- posts by initials (017): fresh AI combos
+/** What the AI returns for initials: the full name, who it is for, each part's standard meaning and the blended card meaning. */
+export interface InitialsCandidate extends NameSuggestion { gender?: string; part1_meaning?: string; part2_meaning?: string }
+/** A fresh two-word name that passed, with the part meanings its card meaning is built from. */
+export interface InitialsSuggestion extends NameSuggestion { parts: [string, string] }
+export interface InitialsFilterResult extends FilterResult<InitialsSuggestion> {
+  /** Valid and new, but other initials, or more than wanted. */
+  offInitials: number;
+  /** Not a given name (a brand, a coinage) or a Filipino / Tagalog word or jargon in the name or meaning. */
+  blocked: number;
+  /** A very common name for one part (US / PH top 100, classics) on a page of unique names: in `relaxed`, not `fresh`. */
+  common: number;
+  /** Otherwise valid names that only pass with the common-name rule relaxed (the plan takes them after names used before). */
+  relaxed: InitialsSuggestion[];
+  /** Said (by the AI, or by the common lists) to be the other gender's name. */
+  wrongGender: number;
+  /** A sad or harsh meaning (the card meaning or a part's). */
+  negative: number;
+  /** The card meaning adds words that are in neither part's meaning (invented imagery), or a part meaning is missing. */
+  ungrounded: number;
+  /** Grounded but stiff (a pile of words, no grammar): sent back once for a natural rewrite (`stiffNames`). */
+  stiff: number;
+  stiffNames: { name: string; meaning: string; parts: [string, string] }[];
+}
+
+/** A card meaning of a post by initials: 2 to 7 words (one more than other cards, for a natural phrase with "of", "the"). */
+export const INITIALS_MEANING_MAX_WORDS = 7;
+
+/** Letters with few real names: on a unique-names page the common-name rule is relaxed for a part with one of these. */
+export const RARE_INITIALS = ["Q", "U", "X", "Y", "Z"] as const;
+const PART_MEANING_MAX_WORDS = 4;
+
+export interface InitialsFilterOptions {
+  initials: string;
+  /** At most this many are kept (in the AI's order). */
+  want: number;
+  /** Unique names (Unique Names): very common names go to `relaxed` for BOTH parts, except a rare initial's part. */
+  unique?: boolean;
+  /** The owner's own meanings of single names (lowercase name → meaning): a part found here uses this meaning. */
+  knownParts?: Map<string, string>;
+}
+
+/**
+ * Fresh two-word names for a post by initials: the usual name filter (a valid two-word name, a meaning of 2 to 6
+ * lowercase words, new against `existing` = every name in the database plus any to skip, and earlier in the batch,
+ * case-insensitive), then out go hedged meanings ("x or y"), non-names, Filipino / Tagalog words and jargon, the other
+ * gender's names, unkind meanings, other initials, and card meanings not grounded in the two part meanings (the owner's
+ * own meaning of a part wins over the AI's). On a unique-names page very common names are out for both parts, except a
+ * part with a rare initial; when that leaves fewer than `need`, the rule is relaxed for the part(s) that blocked, and
+ * those names come after the uncommon ones. At most `want`, otherwise in the AI's order (it lists the best first).
+ */
+export function filterInitialsCombos(cands: InitialsCandidate[], existing: Iterable<string>, o: InitialsFilterOptions, gender: Gender): InitialsFilterResult {
+  const list = Array.isArray(cands) ? cands.filter((c) => c && typeof c === "object") : [];
+  const said = new Map(list.map((c) => [typeof c.name === "string" ? nameKey(c.name) : "", c]));
+  const other = gender === "boy" ? "girl" : "boy";
+  const { fresh, duplicates, invalid: bad } = filterNameSuggestions(list, existing, "two-word", INITIALS_MEANING_MAX_WORDS);
+  const r: InitialsFilterResult = { fresh: [], duplicates, invalid: bad, offInitials: 0, blocked: 0, common: 0, wrongGender: 0, negative: 0, ungrounded: 0, stiff: 0, stiffNames: [], relaxed: [] };
+  const str = (v: unknown) => (typeof v === "string" ? v.replace(/\s+/g, " ").trim().toLowerCase().replace(/[.!]+$/, "") : "");
+  const strictPart = o.initials.split("").map((l) => !!o.unique && !(RARE_INITIALS as readonly string[]).includes(l));
+  type Ok = InitialsSuggestion & { commonParts: boolean[] };
+  const passed: Ok[] = [];
+  for (const s of fresh) {
+    const words = s.name.split(" ");
+    const c = said.get(nameKey(s.name));
+    const parts = words.map((w, i) => o.knownParts?.get(w.toLowerCase()) ?? str(i === 0 ? c?.part1_meaning : c?.part2_meaning)) as [string, string];
+    if (s.name.length > 40 || s.meaning.length > 80 || HEDGE.test(s.meaning)) { r.invalid++; continue; }
+    if (words.some(notAGivenName) || plainWordsProblem(s.name) || plainWordsProblem(s.meaning)) { r.blocked++; continue; }
+    if (str(c?.gender) === other || words.some((w) => otherGenderName(w, gender))) { r.wrongGender++; continue; }
+    if (negativeMeaning(s.meaning) || parts.some(negativeMeaning)) { r.negative++; continue; }
+    if (initialsOf(s.name) !== o.initials) { r.offInitials++; continue; }
+    if (parts.some((p) => !p || p.split(" ").length > PART_MEANING_MAX_WORDS + 2) || groundingProblem(s.meaning, parts[0], parts[1])) { r.ungrounded++; continue; }
+    if (stiffProblem(s.meaning)) { r.stiff++; r.stiffNames.push({ name: s.name, meaning: s.meaning, parts }); continue; }
+    passed.push({ ...s, parts, commonParts: words.map((w) => isCommonName(w, gender)) });
+  }
+  const allowed = (x: Ok, relax: boolean[]) => x.commonParts.every((isCommon, i) => !isCommon || !strictPart[i] || relax[i]);
+  const strict = passed.filter((x) => allowed(x, [false, false]));
+  // Common only: relaxing the part that blocked the most names comes first (names common in that part only), then the
+  // other part, then both. The plan takes these last, after the owner's names used before.
+  const blocked = passed.filter((x) => !strict.includes(x));
+  const blockedBy = [0, 1].map((i) => blocked.filter((x) => x.commonParts[i] && strictPart[i]).length);
+  const top = blockedBy[0] >= blockedBy[1] ? [true, false] : [false, true];
+  const rank = (x: Ok) => (allowed(x, top) ? 0 : allowed(x, [!top[0], !top[1]]) ? 1 : 2);
+  const relaxed = [...blocked].sort((a, b) => rank(a) - rank(b));
+  r.common = relaxed.length;
+  const out = (x: Ok) => ({ name: x.name, meaning: x.meaning, parts: x.parts });
+  for (const x of strict) {
+    if (r.fresh.length >= o.want) { r.offInitials++; continue; }
+    r.fresh.push(out(x));
+  }
+  r.relaxed = relaxed.slice(0, o.want).map(out);
+  return r;
 }

@@ -7,6 +7,7 @@ import { NAME_STYLES, pickStyle, type CaptionName, type CaptionStyle } from "@/l
 import { askCaption, firstWord, openers, sanitizeText, type AiCaption } from "./caption-core";
 import { AZ_SERIES_TAG, partRange, type AzPart } from "@/lib/series/az";
 import { isLetter, letterTag } from "@/lib/series/letter";
+import { isInitials } from "@/lib/series/initials";
 import { activePack } from "@/packs";
 
 export type { AiCaption } from "./caption-core";
@@ -39,6 +40,8 @@ export interface CaptionInput {
   series?: CaptionSeries;
   /** A post by letter (013): every name starts with this letter, and the caption says so. */
   letter?: string | null;
+  /** A post by initials (017, "AR"): every name is a first name with the first initial + a middle name with the second. */
+  initials?: string | null;
 }
 export interface CaptionSeries { part: AzPart }
 
@@ -87,6 +90,11 @@ export function captionPrompt(input: CaptionInput): string {
     lines.push("", `Every name in this post starts with the letter ${l}: baby ${gender} names starting with ${l}.`,
       `Say naturally that these are baby ${gender} names starting with the letter ${l}, for example "baby ${gender} names that start with ${l}".`);
   }
+  if (isInitials(input.initials)) {
+    const [a, b] = [input.initials[0], input.initials[1]];
+    lines.push("", `Followers asked for names with the initials ${a} and ${b}: every name in this post is a first name starting with ${a} and a middle name starting with ${b}.`,
+      `Say naturally that these are baby ${gender} names with the initials ${a} & ${b}, for example "baby ${gender} names with the initials ${a} & ${b}".`);
+  }
   const recent = (input.recent ?? []).filter(Boolean);
   if (recent.length) {
     lines.push("", "Recent captions on the page, newest first. Yours must read clearly different (opening word, sentence shape, question):",
@@ -114,17 +122,28 @@ const letterRe = (l: string) => new RegExp([
   String.raw`(?<!\p{L})${l}[-\s]names\b`,
 ].join("|"), "u");
 
+/** The initials named as such: "initials A & R", "A and R", "A.R.", "A·R" (the capitals themselves). */
+const initialsRe = (ab: string) => {
+  const [a, b] = [ab[0], ab[1]];
+  return new RegExp([
+    String.raw`[Ii]nitials?\s+["'“‘]?${a}(?!\p{L})`,
+    String.raw`(?<!\p{L})${a}\.?\s*(?:&|and|\+|·|-|/)\s*${b}\.?(?!\p{L})`,
+    String.raw`(?<!\p{L})${a}\.${b}\.?(?!\p{L})`,
+  ].join("|"), "u");
+};
+
 /**
  * Why a caption is not right yet: it opens like a recent one, a name style names too few names, a series
  * part does not say its part, or a post by letter does not say its letter.
  */
-export function captionProblem(line: string, input: Pick<CaptionInput, "captionStyle" | "names" | "recent" | "series" | "letter">): string | null {
+export function captionProblem(line: string, input: Pick<CaptionInput, "captionStyle" | "names" | "recent" | "series" | "letter" | "initials">): string | null {
   const w = firstWord(line);
   if (w && openers(input.recent ?? []).includes(w)) return `starts with "${w}" like a recent caption`;
   const own = activePack().captions.postProblem?.(line);
   if (own) return own;
   if (input.series && !partRe(input.series.part).test(line)) return `does not say it is Part ${input.series.part} of the A to Z series`;
   if (isLetter(input.letter) && !letterRe(input.letter).test(line)) return `does not say the names start with the letter ${input.letter}`;
+  if (isInitials(input.initials) && !initialsRe(input.initials).test(line)) return `does not say the names have the initials ${input.initials[0]} & ${input.initials[1]}`;
   const need = input.captionStyle === "choice" ? 2 : NAME_STYLES.includes(input.captionStyle) ? 1 : 0;
   if (need && (input.names ?? []).filter((n) => n.name.trim() && nameRe(n.name).test(line)).length < need) {
     return need === 2 ? "does not name two names from the list" : "does not name a name from the list";
@@ -146,9 +165,10 @@ export function withHashtags(line: string, hashtags: string): string {
   return tags ? `${line}\n\n${tags}` : line;
 }
 
-export const templateLine = (gender: Gender, template: string, series?: CaptionSeries, letter?: string | null) => {
+export const templateLine = (gender: Gender, template: string, series?: CaptionSeries, letter?: string | null, initials?: string | null) => {
   const line = template.replace(/\{gender\}/g, gender).trim();
   if (series) return `A to Z baby ${gender} names, Part ${series.part} (${partRange(series.part)}). ${line}`.trim();
+  if (isInitials(initials)) return `Baby ${gender} names with the initials ${initials[0]} & ${initials[1]}. ${line}`.trim();
   return isLetter(letter) ? `Baby ${gender} names starting with ${letter}. ${line}`.trim() : line;
 };
 
@@ -165,6 +185,8 @@ export function composePostCaption(o: {
   series?: CaptionSeries;
   /** A post by letter: its letter tag takes the first theme-tag slot, and the template names the letter. */
   letter?: string | null;
+  /** A post by initials: the template names the initials; no extra tag (an "#initialsar" tag reads badly), so the theme tags stay. */
+  initials?: string | null;
 }): PostCaption {
   const { always, pool } = tagSettings(o.settings);
   const ai = o.aiOn ? o.ai : null;
@@ -173,7 +195,7 @@ export function composePostCaption(o: {
   const set = tags.join(" ");
   return ai
     ? { caption: withHashtags(ai.line, set), caption_style: o.captionStyle, hashtag_set: set, source: "ai" }
-    : { caption: withHashtags(templateLine(o.gender, o.settings.caption_template, o.series, o.letter), set), caption_style: "template", hashtag_set: set, source: "template" };
+    : { caption: withHashtags(templateLine(o.gender, o.settings.caption_template, o.series, o.letter, o.initials), set), caption_style: "template", hashtag_set: set, source: "template" };
 }
 
 /**

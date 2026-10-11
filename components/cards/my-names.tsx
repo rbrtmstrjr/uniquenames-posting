@@ -92,6 +92,8 @@ export function MyNames({ cardId, pickedId, onPick, refreshKey = 0, onFirstLoad 
                     <span className="block text-sm font-semibold text-ink">{n.name}</span>
                     <span className="block text-xs text-muted">{n.meaning}</span>
                     {n.detail && <span className="block text-xs text-muted">{n.detail}</span>}
+                    {/* A post by initials (017) also offers names used on earlier posts, after the unused ones. */}
+                    {n.usedBefore && <span className="mt-1 inline-block rounded-md bg-warn/15 px-1.5 py-0.5 text-[11px] font-semibold text-warn-text">used before</span>}
                   </span>
                   {on && <Check className="size-4 shrink-0 text-accent" aria-hidden />}
                 </button>

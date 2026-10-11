@@ -196,6 +196,14 @@ class RunnerLayoutTest(unittest.TestCase):
         self.assertEqual(r.kwargs, [{"layout": NEST, "detail": "#3 in the US %s Latin" % DOT}])
         self.assertEqual([q for q in s.selects if q[0] == "names"], [("names", "id=eq.n1&select=name,origin,us_rank,us_year")])
 
+    def test_initials_pair_gets_its_origins_only_and_a_reused_name_no_line(self):
+        # A post by initials (017): a fresh two-word name has no US rank, only its parts' origins ("English · Latin");
+        # a name used before has no name_id on its new card, so no line at all.
+        s = NamesSupa(NEST, {"n2": {"name": "Hazel June", "origin": "English %s Latin" % DOT, "us_rank": None, "us_year": None}})
+        r = self.run_one(s, job(name_id="n2", name="Hazel June", meaning="the hazel tree born in june"))
+        self.assertEqual(r.kwargs, [{"layout": NEST, "detail": "English %s Latin" % DOT}])
+        self.assertEqual(self.run_one(NamesSupa(NEST), job(name="Amos Rhett")).kwargs, [{"layout": NEST, "detail": None}])
+
     def test_a_renamed_card_or_a_missing_name_gets_no_line(self):
         s = NamesSupa(NEST, {"n1": {"name": "Olive", "origin": "Latin", "us_rank": 3, "us_year": 2024}})
         self.assertEqual(self.run_one(s, job(name_id="n1", name="Olivia")).kwargs, [{"layout": NEST, "detail": None}])

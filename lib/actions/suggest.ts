@@ -4,6 +4,8 @@ import { createClient } from "@/lib/supabase/server";
 import type { Gender, NameStyle } from "@/lib/db/types";
 import { suggestForLetter, suggestNames, suggestThemes } from "@/lib/ai/suggest";
 import { LETTER_IDEAS, isLetter, startsWith } from "@/lib/series/letter";
+import { hasInitials, initialsText, isInitials } from "@/lib/series/initials";
+import { suggestForInitials } from "@/lib/ai/initials";
 import { NAME_COUNT, THEME_COUNT, VIBE_MAX, filterNameSuggestions, filterThemeSuggestions } from "@/lib/ai/suggest-filter";
 import { fail, requireOwner, type ActionResult } from "./result";
 import { UUID_RE } from "./helpers";
@@ -78,12 +80,22 @@ export async function cardNameIdeasAction(cardId: string): Promise<CardNameIdeas
     // select * (letter is 013's column): works before and after the migration.
     sb.from("posts").select("*").eq("id", card.post_id).single(),
     sb.from("themes").select("title").eq("id", card.theme_id).single(),
-    selectAll<{ name: string; gender: Gender; style: NameStyle }>(sb, "names", "name, gender, style"),
+    selectAll<{ name: string; gender: Gender; style: NameStyle; meaning?: string }>(sb, "names", "name, gender, style, meaning"),
   ]);
   if (!post) return fail("Post not found.");
   if (all.error) return fail(all.error);
-  const { gender, style, letter } = post as { gender: Gender; style: NameStyle; letter?: string | null };
+  const { gender, style, letter, initials } = post as { gender: Gender; style: NameStyle; letter?: string | null; initials?: string | null };
   const existing = all.rows.filter((n) => n.gender === gender && n.style === style).map((n) => n.name);
+  // A post by initials (017): two-word ideas with its initials (the same prompt and checks as the post's fresh names).
+  if (isInitials(initials)) {
+    const rows = all.rows;
+    const knownParts = new Map(rows.filter((n) => n.style === "single" && n.meaning).map((n) => [n.name.toLowerCase(), n.meaning!.toLowerCase()]));
+    const ai = await suggestForInitials({ gender, initials, want: CARD_IDEAS, ask: CARD_IDEAS + 3, allNames: rows.map((n) => n.name), knownParts,
+      existing: rows.filter((n) => hasInitials(n.name, initials)).map((n) => n.name) });
+    if (!ai.ok) return fail(`The AI could not suggest names: ${ai.error}`);
+    if (!ai.result.fresh.length && !ai.result.relaxed.length) return fail(`The AI had no new ${initialsText(initials)} names this time. Try again.`);
+    return { ok: true, ideas: [...ai.result.fresh, ...ai.result.relaxed].slice(0, CARD_IDEAS).map((n) => ({ name: n.name, meaning: n.meaning })) };
+  }
   // A post by letter: the ideas start with its letter too (the hardened letter prompt and checks).
   if (isLetter(letter)) {
     const ai = await suggestForLetter({ gender, style, letter, count: CARD_IDEAS, existing: existing.filter((n) => startsWith(n, letter)), allNames: all.rows.map((n) => n.name) });

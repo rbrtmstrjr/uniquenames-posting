@@ -10,11 +10,14 @@ const ageText = (age: AgeChoice) =>
  * The Today footer line: "10 cards · Boy · Two-word · Random ages · Modern Realism" ("Auto" → "6–15 cards");
  * a post by letter adds "names starting with K" after the cards.
  */
-export function postSummary({ count, min, max, gender, style, age, themeTitle, letter }: {
+export function postSummary({ count, min, max, gender, style, age, themeTitle, letter, initials }: {
   count: string; min: number; max: number; gender: Gender; style: NameStyle; age: AgeChoice; themeTitle?: string; letter?: string | null;
+  /** A post by initials ("AR"): "initials A·R" after the cards. */
+  initials?: string | null;
 }) {
   const cards = count === "auto" ? `${min}–${max} cards` : `${count} cards`;
-  return [cards, letter ? `names starting with ${letter}` : null, cap(gender), cap(style), ageText(age), themeTitle].filter(Boolean).join(" · ");
+  const kind = initials ? `initials ${initials[0]}·${initials[1]}` : letter ? `names starting with ${letter}` : null;
+  return [cards, kind, cap(gender), cap(style), ageText(age), themeTitle].filter(Boolean).join(" · ");
 }
 
 /** Names left for one gender + style: none, low (under 15 or under the biggest post), or fine. */

@@ -41,6 +41,8 @@ export interface PostRow {
   series?: string | null; series_id?: string | null; series_part?: number | null;
   /** Migration 013 (absent before it runs): a post by letter's capital letter (every name starts with it); null otherwise. */
   letter?: string | null;
+  /** Migration 017 (absent before it runs): a post by initials' two capitals ('AR' = first name A, middle name R); null otherwise. */
+  initials?: string | null;
 }
 export interface CardRow {
   id: string; post_id: string | null; theme_id: string; kind: CardKind; position: number; name_id: string | null;

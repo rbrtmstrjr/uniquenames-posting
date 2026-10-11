@@ -4,7 +4,7 @@ const { generateJson, claudeJson } = vi.hoisted(() => ({ generateJson: vi.fn(), 
 vi.mock("@/lib/ai/gemini", () => ({ generateJson }));
 vi.mock("@/lib/ai/claude", () => ({ claudeJson, CLAUDE_HAIKU: "claude-haiku-5-5", CLAUDE_SONNET: "claude-sonnet-5-5", CLAUDE_OPUS: "claude-opus-5-5" }));
 
-import { aiJson, aiProvider, claudeModelFor } from "@/lib/ai/provider";
+import { aiJson, aiProvider, claudeEffortFor, claudeModelFor } from "@/lib/ai/provider";
 import type { GeminiSchema } from "@/lib/ai/gemini";
 
 const schema: GeminiSchema = { type: "OBJECT", properties: { a: { type: "STRING" } }, required: ["a"] };
@@ -43,6 +43,13 @@ describe("claudeModelFor", () => {
     expect(claudeModelFor("script")).toBe("claude-sonnet-5-5");
     vi.stubEnv("AI_SCRIPT_MODEL", "gpt-9");
     expect(claudeModelFor("script")).toBe("claude-haiku-5-5");
+  });
+
+  it("uses Sonnet with low effort for initials names (whatever AI_SCRIPT_MODEL says)", () => {
+    expect(claudeModelFor("initials")).toBe("claude-sonnet-5-5");
+    expect(claudeEffortFor("initials")).toBe("low");
+    vi.stubEnv("AI_SCRIPT_MODEL", "opus");
+    expect(claudeModelFor("initials")).toBe("claude-sonnet-5-5");
   });
 
   it("uses Opus for scripts when AI_SCRIPT_MODEL=opus (small tasks stay on Haiku)", () => {
@@ -90,5 +97,15 @@ describe("aiJson", () => {
     vi.stubEnv("AI_PROVIDER", "claude");
     await aiJson({ system: "s", prompt: "p", schema, timeoutMs: 5000, task: "small", temperature: 0.4, thinkingBudget: 2048 });
     expect(claudeJson).toHaveBeenCalledWith({ system: "s", prompt: "p", schema, timeoutMs: 5000, parse: undefined, model: "claude-haiku-5-5", effort: "low" });
+  });
+});
+
+describe("aiJson: initials names", () => {
+  it("go to Claude Sonnet at low effort with AI_PROVIDER=claude, and to Gemini unchanged otherwise", async () => {
+    await aiJson({ ...input, task: "initials" });
+    expect(generateJson).toHaveBeenCalledWith(input);
+    vi.stubEnv("AI_PROVIDER", "claude");
+    await aiJson({ ...input, task: "initials" });
+    expect(claudeJson).toHaveBeenCalledWith({ system: "s", prompt: "p", schema, timeoutMs: 9000, parse, model: "claude-sonnet-5-5", effort: "low" });
   });
 });

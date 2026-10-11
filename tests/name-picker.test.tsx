@@ -4,7 +4,7 @@ import { act, cleanup, fireEvent, render, screen, within } from "@testing-librar
 import type { CardRow } from "@/lib/db/types";
 import { polyfillRadix } from "./helpers/radix-jsdom";
 
-type Row = { id: string; name: string; meaning: string; detail: string | null };
+type Row = { id: string; name: string; meaning: string; detail: string | null; usedBefore?: boolean };
 const mine: Row[] = [
   { id: "n-cyrus", name: "Cyrus", meaning: "sun", detail: null },
   { id: "n-olivia", name: "Olivia", meaning: "olive tree", detail: "#1 in the US (2024) · Latin" },
@@ -139,5 +139,16 @@ describe("CardDialog: My names | AI ideas", () => {
     expect(listSwapNamesAction).toHaveBeenLastCalledWith("c1", { cursor: 20 });
     expect(within(myList()).getAllByRole("button")).toHaveLength(2);
     expect(screen.queryByRole("button", { name: "Show more" })).toBeNull();
+  });
+});
+
+describe("My names on a post by initials", () => {
+  it("names used before come after the unused ones, labelled", async () => {
+    listSwapNamesAction.mockImplementation(async () => ({ ok: true, names: [
+      { id: "n-arlo", name: "Arlo Reed", meaning: "eagle and red", detail: null },
+      { id: "n-amos", name: "Amos Rhett", meaning: "carried by god", detail: null, usedBefore: true },
+    ], next: null }));
+    await open(card({ name: "Asher Rowan", name_id: null }));
+    expect(within(myList()).getAllByRole("button").map((b) => b.textContent)).toEqual(["Arlo Reedeagle and red", "Amos Rhettcarried by godused before"]);
   });
 });

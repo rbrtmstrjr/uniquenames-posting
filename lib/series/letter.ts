@@ -2,6 +2,7 @@
 // (for a two-word name, the first name). Pure helpers shared by Today, the actions, the planner and captions.
 import type { Gender, NameStyle } from "@/lib/db/types";
 import { AZ_LETTERS, letterOf, seriesLabel } from "./az";
+import { initialsLabel } from "./initials";
 
 export const LETTERS = AZ_LETTERS;
 
@@ -28,8 +29,9 @@ export const letterKey = (gender: Gender, style: NameStyle) => `${gender}|${styl
 /** The label a post by letter shows ("Letter A"); null otherwise (or before 013). */
 export const letterLabel = (p: { letter?: string | null }) => (isLetter(p.letter) ? `Letter ${p.letter}` : null);
 
-/** A post's small label on Posts / the post page / Today: its A–Z part (old series posts) or its letter. */
-export const postLabel = (p: { series?: string | null; series_part?: number | null; letter?: string | null }) => seriesLabel(p) ?? letterLabel(p);
+/** A post's small label on Posts / the post page / Today: its A–Z part (old series posts), its letter or its initials ("A·R"). */
+export const postLabel = (p: { series?: string | null; series_part?: number | null; letter?: string | null; initials?: string | null }) =>
+  seriesLabel(p) ?? letterLabel(p) ?? initialsLabel(p);
 
 /** The hashtag a post by letter carries in a theme-tag slot: #namesstartingwitha. */
 export const letterTag = (letter: string) => `#namesstartingwith${letter.toLowerCase()}`;
