@@ -65,4 +65,5 @@ export const UNIQUE_NAMES_SHARED: PackShared = {
   },
   // The supabase/schema.sql column defaults (the live project keeps its own rows).
   cardText: { titleFont: "poppins", meaningFont: "poppins", markFont: "poppins", layout: "classic" },
+  namePicker: { order: "oldest" },
 };

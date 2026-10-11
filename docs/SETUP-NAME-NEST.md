@@ -77,6 +77,11 @@ Pro). Vercel Hobby is for non-commercial use; check whether the pages need Pro.
   climbs, stop PH-reaching promotion first, then restrict single posts to the US.
 - Monetization is invite-only in 2026; plan for 3–6 months with no Meta payout. File a W-8BEN when invited.
 
+## Database updates after setup
+A project set up from `supabase/schema.sql` before 2026-10-11: in the **SQL Editor** run
+`supabase/migrations/016_swap_card_name.sql` once (safe to run again). It lets the card dialog's **My names** tab put a
+name from the Names page on a card in one safe step. A project set up later already has it.
+
 ## Updating the names later
 When SSA publishes a new year (each May): `npx tsx scripts/import-ssa.ts`, then
 `npx tsx --conditions=react-server scripts/name-meanings.ts` (needs `ANTHROPIC_API_KEY` in `.env.local`; ~1-2 US cents

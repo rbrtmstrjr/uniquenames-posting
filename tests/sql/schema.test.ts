@@ -192,7 +192,7 @@ describe("supabase security block", () => {
     await db.exec(block);
     const can = async (role: string, fn: string) =>
       (await one<{ ok: boolean }>(db, `select has_function_privilege($1, $2, 'execute') ok`, [role, fn])).ok;
-    for (const fn of ["public.create_post(jsonb)", "public.add_card(uuid, jsonb)", "public.delete_card(uuid)", "public.delete_post(uuid)", "public.refresh_post(uuid)"]) {
+    for (const fn of ["public.create_post(jsonb)", "public.add_card(uuid, jsonb)", "public.delete_card(uuid)", "public.delete_post(uuid)", "public.refresh_post(uuid)", "public.swap_card_name(uuid, uuid, int, text, text, bigint)"]) {
       expect(await can("authenticated", fn), fn).toBe(true);
       expect(await can("anon", fn), fn).toBe(false);
     }

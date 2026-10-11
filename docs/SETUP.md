@@ -148,6 +148,11 @@ Reel scripts, captions and the name/theme/letter suggestions can be written by A
 
 `ANTHROPIC_API_KEY` is a server-only secret like the Gemini key: never name it `NEXT_PUBLIC_...`. To go back to Gemini, remove `AI_PROVIDER` (or set it to `gemini`) and redeploy. When the Claude balance is empty, the AI buttons say "Your Claude credits have run out".
 
+## Pick a card's name from the Names page (existing install)
+The card dialog on a post has two tabs above the name ideas: **My names** (your unused names from the Names page that fit the post: same boy / girl, same name style, the post's letter on a post by letter; search by name or meaning, **Show more** for the next 20) and **AI ideas** (as before). Tap a name, then **Save text** (keeps the photo, re-stamps the text) or **New picture**: the name is taken for this post and the card's old name goes back to the Names page as available.
+1. Supabase **SQL Editor**: paste and run `supabase/migrations/016_swap_card_name.sql` (safe to run again; no worker restart needed). Until it runs, the swap still works, in a few separate steps instead of one safe transaction.
+2. Push to GitHub so Vercel redeploys the website.
+
 ## When something is wrong
 - Header dot red, "PC offline": turn on the PC. The worker starts at login. **Generate** is disabled (the button says why) until the PC is back.
 - Amber dot, "ComfyUI closed": open ComfyUI Desktop. **Generate** stays disabled until then; text edits and Re-stamp still work.

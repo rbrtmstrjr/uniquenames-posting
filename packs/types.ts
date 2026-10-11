@@ -61,6 +61,8 @@ export interface PackShared {
   voices: { house: readonly HouseVoice[]; default: string };
   /** The card fonts (catalog ids) and the card layout a new project starts with (settings, migration 015). */
   cardText: { titleFont: string; meaningFont: string; markFont: string; layout: CardLayout };
+  /** The card dialog's "My names" tab: 'us-rank' = the best US rank first (migration 015), then oldest; 'oldest' = oldest first. */
+  namePicker: { order: "us-rank" | "oldest" };
 }
 
 /** Name cards: the children's looks, the photoshoot shot lists and the closing card's moment. */

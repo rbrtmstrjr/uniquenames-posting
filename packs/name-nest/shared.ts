@@ -74,4 +74,5 @@ export const NAME_NEST_SHARED: PackShared = {
   },
   // A warm serif name over a clean rounded sans (Unique Names: Poppins), stamped in the Name Nest layout.
   cardText: { titleFont: "dmserif", meaningFont: "nunito", markFont: "nunito", layout: "name-nest" },
+  namePicker: { order: "us-rank" },
 };

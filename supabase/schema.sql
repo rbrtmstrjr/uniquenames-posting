@@ -1,5 +1,5 @@
 -- Unique Names posting: database. Paste the whole file into the Supabase SQL editor and run it once.
--- A project created before v2 runs supabase/migrations/002_v2.sql, 003_post_fonts.sql, 004_subject_age.sql, 005_reels.sql, 006_reel_voices.sql, 007_reel_themes.sql, 008_reel_playbook.sql, 009_captions.sql, 010_cta_card.sql, 011_az_series.sql, 012_two_styles.sql, 013_letter_posts.sql, 014_reel_formats.sql then 015_name_nest.sql instead (this file already includes them).
+-- A project created before v2 runs supabase/migrations/002_v2.sql, 003_post_fonts.sql, 004_subject_age.sql, 005_reels.sql, 006_reel_voices.sql, 007_reel_themes.sql, 008_reel_playbook.sql, 009_captions.sql, 010_cta_card.sql, 011_az_series.sql, 012_two_styles.sql, 013_letter_posts.sql, 014_reel_formats.sql, 015_name_nest.sql then 016_swap_card_name.sql instead (this file already includes them).
 -- Status 'pending' = an AI-suggested name/theme waiting for approval; nothing here ever plans it (only 'available').
 
 -- ---------------------------------------------------------------- tables
@@ -544,6 +544,60 @@ begin
   return jsonb_build_object('status', 'ok', 'paths', v_paths);
 end $$;
 
+-- ---------------------------------------------------------------- swap_card_name (016)
+-- swap_card_name: in ONE transaction, a post card takes an available name from the names table:
+--   * the card (locked, version-guarded, never while it is being made) gets the name, the meaning, name_id and is
+--     queued again: p_mode 'restamp' keeps the photo (Pillow only), 'regenerate' makes a new photo with p_seed;
+--   * the new name is reserved for the post at the card's position ('used' straight away on a posted post, which
+--     refresh_post never touches; a ready post flips it to 'used' through the card trigger as usual);
+--   * the old name goes back to 'available' when it came from the names table and no other card uses it.
+-- Answers {status: ok, mode} | {status: stale} (the card changed) | {status: taken} (the name is no longer available or
+-- doesn't fit the post) | {status: error, reason}. Calling it again after it succeeded answers ok.
+create or replace function public.swap_card_name(p_card uuid, p_name uuid, p_version int, p_meaning text, p_mode text, p_seed bigint)
+returns jsonb language plpgsql as $$
+declare v_card public.cards%rowtype; v_post public.posts%rowtype; v_name public.names%rowtype;
+begin
+  if p_mode not in ('restamp', 'regenerate') then
+    return jsonb_build_object('status', 'error', 'reason', 'Unknown mode.');
+  end if;
+  select * into v_card from public.cards where id = p_card for update;
+  if not found then return jsonb_build_object('status', 'error', 'reason', 'Card not found.'); end if;
+  if v_card.kind <> 'post' or v_card.post_id is null then
+    return jsonb_build_object('status', 'error', 'reason', 'Only the name cards of a post take a name.');
+  end if;
+  if v_card.name_id = p_name then return jsonb_build_object('status', 'ok', 'mode', p_mode); end if;
+  if v_card.version <> p_version or v_card.status = 'generating' then return jsonb_build_object('status', 'stale'); end if;
+
+  select * into v_post from public.posts where id = v_card.post_id for update;
+  if not found then return jsonb_build_object('status', 'error', 'reason', 'Post not found.'); end if;
+  select * into v_name from public.names
+    where id = p_name and status = 'available' and gender = v_post.gender and style = v_post.style for update;
+  if not found then return jsonb_build_object('status', 'taken'); end if;
+
+  if v_card.name_id is not null then
+    update public.names set status = 'available', post_id = null, position = null
+      where id = v_card.name_id and status in ('reserved', 'used')
+        and not exists (select 1 from public.cards where name_id = v_card.name_id and id <> p_card);
+  end if;
+  update public.names
+    set status = case when v_post.status = 'posted' then 'used' else 'reserved' end,
+        post_id = v_card.post_id, position = v_card.position,
+        meaning = coalesce(nullif(btrim(p_meaning), ''), meaning)
+    where id = p_name;
+
+  if p_mode = 'restamp' then
+    update public.cards set name = v_name.name, meaning = coalesce(nullif(btrim(p_meaning), ''), v_name.meaning), name_id = p_name,
+      status = 'restamp', claimed_at = null, error = null, version = v_card.version + 1, queued_at = now()
+      where id = p_card;
+  else
+    update public.cards set name = v_name.name, meaning = coalesce(nullif(btrim(p_meaning), ''), v_name.meaning), name_id = p_name,
+      status = 'queued', claimed_at = null, started_at = null, finished_at = null, error = null, attempts = 0,
+      version = v_card.version + 1, seed = p_seed, queued_at = now()
+      where id = p_card;
+  end if;
+  return jsonb_build_object('status', 'ok', 'mode', p_mode);
+end $$;
+
 -- ---------------------------------------------------------------- worker: claim + stuck recovery
 drop function if exists public.claim_next_card();
 create or replace function public.claim_next_card(p_restamp_only boolean default false) returns jsonb language plpgsql as $$
@@ -869,8 +923,10 @@ revoke execute on function public.delete_card(uuid) from public, anon;
 revoke execute on function public.delete_post(uuid) from public, anon;
 revoke execute on function public.refresh_post(uuid) from public, anon;
 revoke execute on function public.create_series(jsonb) from public, anon;
+revoke execute on function public.swap_card_name(uuid, uuid, int, text, text, bigint) from public, anon;
 grant execute on function public.create_post(jsonb), public.add_card(uuid, jsonb), public.delete_card(uuid),
-  public.delete_post(uuid), public.refresh_post(uuid), public.create_series(jsonb) to authenticated, service_role;
+  public.delete_post(uuid), public.refresh_post(uuid), public.create_series(jsonb),
+  public.swap_card_name(uuid, uuid, int, text, text, bigint) to authenticated, service_role;
 
 -- ---------------------------------------------------------------- storage
 insert into storage.buckets (id, name, public) values ('cards', 'cards', false) on conflict (id) do nothing;
