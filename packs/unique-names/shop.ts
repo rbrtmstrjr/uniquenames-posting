@@ -14,8 +14,9 @@ export const UNIQUE_NAMES_SHOP: PackShop = {
   },
   productOrder: ["girl", "boy", "both"],
   paymentMethods: ["qrph"],
-  // TODO(owner): the page's Messenger link, e.g. "https://m.me/<page username>" (or set env SHOP_MESSENGER_URL).
-  messenger: null,
+  // The page has no username, so Messenger takes its page id (facebook.com/profile.php?id=61572452954153).
+  // env SHOP_MESSENGER_URL overrides it.
+  messenger: "https://m.me/61572452954153",
   delivery: { email: true, messenger: false },
   previews: { cover: "/packs/unique-names/shop/cover.webp", page: "/packs/unique-names/shop/names-page.webp" },
   copy: {

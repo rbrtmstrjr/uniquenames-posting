@@ -66,8 +66,8 @@ Google account > Security > 2-Step Verification > **App passwords** > create one
 Without these, buyers still get the download and password on the thanks page; Orders shows "not emailed".
 
 ### 6. Help link
-Put your page's Messenger link in `packs/unique-names/shop.ts` (`messenger: "https://m.me/<page username>"`) or set
-`SHOP_MESSENGER_URL` in Vercel. Until then the "Need help?" link is hidden.
+The "Need help?" link opens Messenger with your page: `https://m.me/61572452954153` (your page id; the page has no
+username), set in `packs/unique-names/shop.ts`. `SHOP_MESSENGER_URL` in Vercel overrides it.
 
 ### 7. Test in test mode
 Open `/shop`, pick an edition, use your own email and pay on PayMongo's test checkout. The thanks page should switch

@@ -147,8 +147,11 @@ describe("shop env and keys", () => {
       SHOP_BASE_URL: "https://shop.example.com/", SHOP_MESSENGER_URL: "https://m.me/uniquenames",
     });
     expect(e).toMatchObject({ mode: "test", paymentMethods: ["qrph"], smtp: { user: "me@gmail.com", pass: "abcdefghijklmnop", from: "me@gmail.com" }, baseUrl: "https://shop.example.com", messenger: "https://m.me/uniquenames" });
-    expect(shopEnv(UN.shop, { SHOP_MESSENGER_URL: "javascript:alert(1)", SHOP_BASE_URL: "not a url" })).toMatchObject({ messenger: null, baseUrl: null, smtp: null, mode: null });
+    expect(shopEnv({ ...UN.shop, messenger: null }, { SHOP_MESSENGER_URL: "javascript:alert(1)", SHOP_BASE_URL: "not a url" })).toMatchObject({ messenger: null, baseUrl: null, smtp: null, mode: null });
     expect(shopEnv(UN.shop, { VERCEL_PROJECT_PRODUCTION_URL: "un.vercel.app" }).baseUrl).toBe("https://un.vercel.app");
+    // the pack's own help link (page id; no username), unless env overrides it
+    expect(UN.shop.messenger).toBe("https://m.me/61572452954153");
+    expect(shopEnv(UN.shop, {}).messenger).toBe("https://m.me/61572452954153");
     expect(siteUrl({ baseUrl: null }, "https://x.vercel.app/api/shop/checkout")).toBe("https://x.vercel.app");
   });
 
