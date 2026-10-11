@@ -274,6 +274,16 @@ describe("near-duplicate parts and origin lines", async () => {
     for (const [a, b] of [["Ann", "Anne"], ["Isabel", "Isabelle"], ["Gracie", "Gracy"], ["Hannah", "Hanna"], ["Mae", "May"]]) expect(partKey(a)).toBe(partKey(b));
     for (const [a, b] of [["June", "Jane"], ["Jo", "Joe"], ["Rose", "Rosa"]]) expect(partKey(a) === partKey(b)).toBe(a === "Jo");
   });
+  it("forms of the same name are near-duplicates too (Helen/Helena, Julia/Juliet/Julieta, Mira/Mirabel), Marisol/Marina are not", async () => {
+    const { nearSame } = await import("@/lib/series/initials");
+    for (const [a, b] of [["Helen", "Helena"], ["Julia", "Juliet"], ["Juliet", "Julieta"], ["Mira", "Mirabel"]]) expect(nearSame(partKey(a), partKey(b))).toBe(true);
+    for (const [a, b] of [["Marisol", "Marina"], ["Josephine", "Josie"], ["June", "Juno"]]) expect(nearSame(partKey(a), partKey(b))).toBe(false);
+    const plan = pickInitialsNames({ want: 4, available: [], used: [], fresh: [
+      { name: "Helena Josie", meaning: "x y" }, { name: "Helen Julieta", meaning: "x y" }, { name: "Holly Juliet", meaning: "x y" }, { name: "Hattie Julia", meaning: "x y" },
+    ] });
+    expect(plan.picks.map((p) => p.name)).toEqual(["Helena Josie", "Holly Juliet"]);
+  });
+
   it("an origin line only when both parts' origins are known: one origin when they match, never longer than 40", () => {
     const o = new Map([["hazel", "English"], ["june", "Latin"], ["hannah", "Hebrew"], ["jane", "Hebrew"], ["xo", "x".repeat(30)], ["jo", "y".repeat(20)]]);
     expect(comboOrigin("Hazel June", o)).toBe("English · Latin");

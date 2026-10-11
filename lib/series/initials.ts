@@ -71,6 +71,17 @@ export const partKey = (w: string) =>
   w.toLowerCase().normalize("NFD").replace(/[^a-z]/g, "").replace(/y/g, "i").replace(/ae$/, "ai").replace(/(.)\1+/g, "$1").replace(/(?<=..)[eh]+$/, "");
 
 /**
+ * Are two part keys the same name in another spelling or form? Equal keys, or a shared start of 4+ letters covering at
+ * least 3/4 of the shorter one: Helen = Helena, Julia = Juliet = Julieta, Mira = Mirabel; Marisol and Marina differ.
+ */
+export function nearSame(a: string, b: string): boolean {
+  if (a === b) return true;
+  let n = 0;
+  while (n < a.length && n < b.length && a[n] === b[n]) n++;
+  return n >= 4 && n >= 0.75 * Math.min(a.length, b.length);
+}
+
+/**
  * A two-word name's origin from its parts' known origins (lowercase name → origin): "English · Latin", one origin when
  * both are the same, null when a part's origin is unknown or the line would be longer than 40 characters.
  */
@@ -99,13 +110,13 @@ export function pickInitialsNames(i: {
   late?: InitialsCombo[];
 }): InitialsNamesPlan {
   const picks: InitialsPick[] = [];
-  const parts = new Set((i.takenParts ?? []).flatMap((n) => key(n).split(" ").map(partKey)));
+  const parts = (i.takenParts ?? []).flatMap((n) => key(n).split(" ").map(partKey));
   const take = (source: InitialsSource, rows: { id?: string; name: string; meaning: string; parts?: [string, string]; origin?: string | null }[]) => {
     for (const r of rows) {
       if (picks.length >= i.want) return;
       const words = key(r.name).split(" ").filter(Boolean).map(partKey);
-      if (!words.length || !r.meaning.trim() || words.some((w) => parts.has(w))) continue;
-      for (const w of words) parts.add(w);
+      if (!words.length || !r.meaning.trim() || words.some((w) => parts.some((p) => nearSame(p, w)))) continue;
+      parts.push(...words);
       picks.push({ source, name_id: source === "new" ? null : r.id ?? null, name: r.name.trim(), meaning: r.meaning.trim(),
         ...(r.parts ? { parts: r.parts } : {}), ...(r.origin ? { origin: r.origin } : {}) });
     }
