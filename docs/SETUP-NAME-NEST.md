@@ -85,6 +85,11 @@ Then run `supabase/migrations/017_initials_posts.sql` once (safe to run again) f
 with two chosen initials, like A·R): it stores the post's **A·R** label and picks unused names first, then new AI names
 (US English, Claude Sonnet; well-loved US names are fine, never the same first or middle name twice in a post), then names used before, in one safe step. A new pair's card shows its parts' origins from your names (like "English · Latin") and no US rank. Before it runs, initials posts are made without names used before
 and without the label. A project set up from `supabase/schema.sql` after 2026-10-11 already has it.
+Then run `supabase/migrations/018_names_pdf.sql` once (safe to run again) for **Names > Export PDF**, the sellable names
+PDF (US Letter, strawberry branding, a new password per buyer): it stores each name's meaning group and the **Past
+exports** log. How to use it and how to send the file and its password to a buyer: `docs/SETUP.md` > "The names PDF to
+sell" and "Selling the names PDF". A project set up from a `supabase/schema.sql` that has the `exports` table already
+has it.
 
 ## Updating the names later
 When SSA publishes a new year (each May): `npx tsx scripts/import-ssa.ts`, then
