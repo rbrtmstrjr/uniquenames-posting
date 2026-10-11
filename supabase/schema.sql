@@ -220,10 +220,26 @@ create table if not exists public.names (
   origin text constraint names_origin_len check (origin is null or char_length(origin) between 1 and 40),
   us_rank int constraint names_us_rank_check check (us_rank is null or us_rank between 1 and 100000),
   us_year int constraint names_us_year_check check (us_year is null or us_year between 1880 and 2100),
+  -- the names PDF (018): the meaning group the name is listed under ('nature' = Nature & Flowers, …); null = not sorted yet
+  meaning_category text constraint names_meaning_category_check check (meaning_category is null or meaning_category in
+    ('nature', 'light', 'water', 'strength', 'faith', 'love', 'wisdom', 'royal', 'peace', 'gems', 'earth', 'more')),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
 create unique index if not exists names_lower_name on public.names (lower(name));
+
+-- the names PDF (018): one row per PDF made for a buyer; the password is kept so the owner can send it again (owner only)
+create table if not exists public.exports (
+  id uuid primary key default gen_random_uuid(),
+  created_at timestamptz not null default now(),
+  buyer text not null constraint exports_buyer_len check (char_length(buyer) between 1 and 120),
+  gender text not null constraint exports_gender_check check (gender in ('girl', 'boy', 'both')),
+  name_count int not null constraint exports_name_count_check check (name_count >= 0),
+  password text not null constraint exports_password_len check (char_length(password) between 8 and 64),
+  file_name text not null constraint exports_file_name_len check (char_length(file_name) between 1 and 200),
+  pack text not null constraint exports_pack_len check (char_length(pack) between 1 and 40)
+);
+create index if not exists exports_created on public.exports (created_at desc);
 
 create table if not exists public.cards (
   id uuid primary key default gen_random_uuid(),
@@ -1112,9 +1128,10 @@ alter table public.reels enable row level security;
 alter table public.reel_scenes enable row level security;
 alter table public.reel_voices enable row level security;
 alter table public.reel_themes enable row level security;
+alter table public.exports enable row level security;
 
 do $$ declare t text; begin
-  foreach t in array array['settings', 'themes', 'posts', 'names', 'cards', 'reels', 'reel_scenes', 'reel_voices', 'reel_themes'] loop
+  foreach t in array array['settings', 'themes', 'posts', 'names', 'cards', 'reels', 'reel_scenes', 'reel_voices', 'reel_themes', 'exports'] loop
     execute format('drop policy if exists owner_all on public.%I', t);
     execute format('create policy owner_all on public.%I for all to authenticated using (true) with check (true)', t);
   end loop;

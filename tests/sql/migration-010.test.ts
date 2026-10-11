@@ -26,6 +26,7 @@ const m013 = stripSupabase(read("supabase", "migrations", "013_letter_posts.sql"
 const m014 = stripSupabase(read("supabase", "migrations", "014_reel_formats.sql"));
 const m015 = stripSupabase(read("supabase", "migrations", "015_name_nest.sql"));
 const m017 = stripSupabase(read("supabase", "migrations", "017_initials_posts.sql"));
+const m018 = stripSupabase(read("supabase", "migrations", "018_names_pdf.sql"));
 
 async function liveDb() {
   const db = new PGlite();
@@ -120,7 +121,7 @@ describe("010_cta_card.sql on the live schema (v1 + 002..009)", () => {
   });
 });
 
-describe("fresh schema.sql matches v1 + 002..010 (+ 011)", () => {
+describe("fresh schema.sql matches v1 + 002..010 (+ 011..018)", () => {
   const TABLES = "('settings','cards','posts','reels','reel_scenes','themes','names')";
   const shape = async (db: PGlite) => ({
     columns: (await db.query(`select table_name, column_name, data_type, is_nullable, column_default from information_schema.columns
@@ -138,6 +139,7 @@ describe("fresh schema.sql matches v1 + 002..010 (+ 011)", () => {
     await migrated.exec(m014);
     await migrated.exec(m015);
     await migrated.exec(m017);
+    await migrated.exec(m018);
     const want = await shape(migrated);
     const cols = (want.columns as { table_name: string; column_name: string }[]).map((c) => `${c.table_name}.${c.column_name}`);
     expect(cols).toEqual(expect.arrayContaining(["settings.cta_enabled", "settings.cta_messages"]));
