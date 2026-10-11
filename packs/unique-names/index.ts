@@ -1,6 +1,7 @@
 import type { NichePack } from "../types";
 import { UNIQUE_NAMES_CAPTIONS } from "./captions";
 import { UNIQUE_NAMES_CARDS } from "./cards";
+import { UNIQUE_NAMES_PDF } from "./pdf";
 import { UNIQUE_NAMES_REELS } from "./reels";
 import { UNIQUE_NAMES_SHARED } from "./shared";
 import { UNIQUE_NAMES_SUGGEST } from "./suggest";
@@ -12,4 +13,5 @@ export const UNIQUE_NAMES: NichePack = {
   captions: UNIQUE_NAMES_CAPTIONS,
   suggest: UNIQUE_NAMES_SUGGEST,
   reels: UNIQUE_NAMES_REELS,
+  pdf: UNIQUE_NAMES_PDF,
 };

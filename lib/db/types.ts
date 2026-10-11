@@ -1,3 +1,5 @@
+import type { MeaningCategory } from "@/lib/names/categories";
+
 export type Gender = "boy" | "girl";
 export type NameStyle = "two-word" | "single";
 // "pending" = suggested by AI, waiting for the owner's approval. Never planned or counted as stock.
@@ -23,6 +25,8 @@ export interface NameRow {
   post_id: string | null; position: number | null; created_at: string; updated_at: string;
   /** Name Nest (migration 015; absent before it runs): the origin, and the US SSA rank for its gender + that list's year. */
   origin?: string | null; us_rank?: number | null; us_year?: number | null;
+  /** The names PDF (migration 018; absent before it runs): the meaning group the name is listed under; null = not sorted yet. */
+  meaning_category?: MeaningCategory | null;
 }
 export interface ThemeRow {
   id: string; title: string; gender: Gender; backdrop: string; outfit: string; props: string; lighting: string; palette: string;

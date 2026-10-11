@@ -75,4 +75,10 @@ export const NAME_NEST_SHARED: PackShared = {
   // A warm serif name over a clean rounded sans (Unique Names: Poppins), stamped in the Name Nest layout.
   cardText: { titleFont: "dmserif", meaningFont: "nunito", markFont: "nunito", layout: "name-nest" },
   namePicker: { order: "us-rank" },
+  // The names PDF's meaning groups (migration 018), in warm US English.
+  nameCategories: {
+    nature: "Nature & Blossoms", light: "Light, Sun & Stars", water: "Water & Sea", strength: "Strength & Courage",
+    faith: "Faith & Blessings", love: "Love & Joy", wisdom: "Wisdom & Grace", royal: "Royal & Noble", peace: "Peace & Calm",
+    gems: "Gems & Beauty", earth: "Earth & Seasons", more: "More Names We Love",
+  },
 };

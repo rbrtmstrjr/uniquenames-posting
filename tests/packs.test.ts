@@ -41,9 +41,9 @@ describe("NICHE selects the pack", () => {
       const full = packById(id);
       const shared = sharedPack();
       expect(full.id).toBe(id);
-      const { cards: _c, captions: _p, suggest: _s, reels: _r, ...clientPart } = full;
+      const { cards: _c, captions: _p, suggest: _s, reels: _r, pdf: _d, ...clientPart } = full;
       expect(clientPart).toEqual(shared);
-      expect([_c, _p, _s, _r].every(Boolean)).toBe(true);
+      expect([_c, _p, _s, _r, _d].every(Boolean)).toBe(true);
     }
   });
 });
