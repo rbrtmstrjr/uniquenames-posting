@@ -1,6 +1,7 @@
 import "server-only";
 import { askCaption, firstWord, openers, sanitizeText, type AiCaption } from "./caption-core";
 import { FORMAT_SPECS, isReelFormat } from "@/lib/reels/formats";
+import { activePack } from "@/packs";
 
 /** A reel caption: 1–3 short sentences (the hashtags go after it, from pickReelTags). */
 export const REEL_CAPTION_MAX = 300;
@@ -23,19 +24,7 @@ export interface ReelCaptionInput {
   keyPhrase?: string | null;
 }
 
-export const REEL_CAPTION_SYSTEM = [
-  "You write the Facebook post caption for a narrated parenting reel on a page for moms of babies and young kids (0-7) around the world (most are in the Philippines, others in the US, Africa, Australia and beyond).",
-  `Write 1 to 3 short sentences (at most ${REEL_CAPTION_MAX - 20} characters in total): echo the reel's hook in fresh words, give one concrete, useful takeaway from the script, and end with one genuine open question moms would want to answer from their own life.`,
-  "When the prompt gives a key phrase, repeat it word for word (without quotation marks, e.g. after a colon) or name the method's name, so the post is worth saving; if the phrase uses I, me, my, we, us or our, name the method's name or the takeaway instead. The question is honest and about this topic, never bait.",
-  "Simple, warm English anyone understands, with normal capitalization and no region-specific slang, in everyday words a busy mom gets at a glance. Not salesy, no cliches, no lecturing, no jargon (never name a technique, therapy, study or brain part such as affect labeling, PCIT, serve and return, co-regulation, amygdala or cortisol).",
-  "Never a Filipino or Tagalog word or Taglish (no anak, lola, naman, talaga, kasi, lang, mga, OFW): say Grandma, not lola.",
-  "This is a brand page, not a person: speak to the mom in the second person (\"you\", \"your little one\"). Never claim personal experience or feelings (no \"I really felt that\", no \"it helped us\"): never use the words I, me, my, we, us or our.",
-  "Exactly one question, at the very end. Never engagement bait: no \"comment YES\", \"tag a friend\" or \"tag a mom\", \"share if\", \"like if\", \"drop a heart\", \"in the comments\"; never \"follow us\", \"follow for more\" or any other call to follow, like or share.",
-  "It must read clearly different from the recent captions in the prompt: a different opening word, a different sentence shape and a different question. Never reuse their phrases.",
-  "At most one emoji, or none. No hashtags in the caption, no @mentions, no links, no quotation marks.",
-  "Also suggest 3 to 5 hashtags about this reel's specific topic, best first (for example #toddlertantrums, #gentleparenting, #momtips): lowercase letters and digits only, at most 24 characters each, never #fyp, #foryou, #follow..., #viral or other bait, no other platforms' tags (#momsoftiktok, #instagood...), and different from the recent hashtags.",
-  "Return JSON: {\"caption\": \"...\", \"tags\": [\"#...\"]}.",
-].join("\n");
+export const REEL_CAPTION_SYSTEM = activePack().captions.reelSystem(REEL_CAPTION_MAX);
 
 const t = (s: string) => s.replace(/\s+/g, " ").trim();
 

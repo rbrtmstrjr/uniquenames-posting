@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 import { createClient, realtimeAuthReady } from "@/lib/supabase/client";
 import type { CardRow, PostRow, WorkerStatusRow } from "@/lib/db/types";
-import { lastSeenText, workerHealth } from "@/lib/status/worker-health";
+import { busyElsewhere, lastSeenText, workerHealth } from "@/lib/status/worker-health";
 import { etaSeconds, formatEta } from "@/lib/status/eta";
 import { decideLoad } from "@/lib/status/activity-decision";
 import { useRealtimeRows } from "./use-table";
@@ -26,7 +26,7 @@ export function useWorker(initial: WorkerStatusRow | null) {
   });
   const now = useNow(5000);
   const row = rows[0] ?? null;
-  return { row, health: workerHealth(row, now), lastSeen: lastSeenText(row, now) };
+  return { row, health: workerHealth(row, now), lastSeen: lastSeenText(row, now), busyElsewhere: busyElsewhere(row, now) };
 }
 
 export async function recentDurations(): Promise<number[]> {

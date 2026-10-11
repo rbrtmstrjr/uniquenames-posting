@@ -13,6 +13,8 @@ vi.mock("@/lib/actions/suggest", () => ({ cardNameIdeasAction }));
 const regenerateCardAction = vi.fn(async (..._a: unknown[]) => ({ ok: true as const }));
 vi.mock("@/lib/actions/cards", () => ({ regenerateCardAction, restampCardAction: vi.fn() }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+// No name of the Names page fits: the dialog opens on AI ideas.
+vi.mock("@/lib/actions/swap-name", () => ({ listSwapNamesAction: vi.fn(async () => ({ ok: true, names: [], next: null })), swapCardNameAction: vi.fn() }));
 const { CardDialog } = await import("@/components/cards/card-dialog");
 
 beforeAll(polyfillRadix);
@@ -29,7 +31,7 @@ const field = (label: string) => screen.getByLabelText(label) as HTMLInputElemen
 
 describe("CardDialog: Suggest names", () => {
   it("asks for ideas, and a picked idea fills Name + Meaning so New picture uses it", async () => {
-    render(<CardDialog card={card()} health="ready" onClose={() => {}} onDelete={() => {}} />);
+    await act(async () => { render(<CardDialog card={card()} health="ready" onClose={() => {}} onDelete={() => {}} />); });
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Suggest names/ })); });
     expect(cardNameIdeasAction).toHaveBeenCalledWith("c1");
     const list = screen.getByRole("list", { name: "Name ideas" });
@@ -44,7 +46,7 @@ describe("CardDialog: Suggest names", () => {
 
   it("shows the error when Gemini has nothing new", async () => {
     cardNameIdeasAction.mockResolvedValueOnce({ ok: false, error: "Every idea Gemini had is already one of your names. Try again." } as never);
-    render(<CardDialog card={card()} health="ready" onClose={() => {}} onDelete={() => {}} />);
+    await act(async () => { render(<CardDialog card={card()} health="ready" onClose={() => {}} onDelete={() => {}} />); });
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Suggest names/ })); });
     expect(screen.getByRole("alert").textContent).toMatch(/already one of your names/);
   });

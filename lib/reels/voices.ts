@@ -1,4 +1,6 @@
 import type { ReelVoiceRow, VoiceSampleStatus } from "@/lib/db/types";
+import { sharedPack } from "@/packs/shared";
+import type { HouseVoice } from "@/packs/types";
 
 // Pure helpers for the narrator voices (no React, no server): the house voices, the Chatterbox delivery, the
 // sample key (what a sample was made with), speed / volume limits, and which voices need work.
@@ -11,15 +13,10 @@ import type { ReelVoiceRow, VoiceSampleStatus } from "@/lib/db/types";
 export const DELIVERY = { exaggeration: 0.6, temperature: 0.8, cfg_weight: 0.3 } as const;
 
 /**
- * The house voices (worker voice.HOUSE_VOICES): the only narrators offered in Settings, on the review page and in
+ * The house voices (the active pack's; worker voice.HOUSE_VOICES): the only narrators offered in Settings, on the review page and in
  * Set up voices / Make samples. The other Gemini voices (and the built-in one) stay in the database, hidden.
  */
-export const HOUSE_VOICES = [
-  { id: "gacrux", label: "Gacrux", tone: "Mature" },
-  { id: "sulafat", label: "Sulafat", tone: "Warm" },
-  { id: "vindemiatrix", label: "Vindemiatrix", tone: "Gentle" },
-  { id: "achernar", label: "Achernar", tone: "Soft" },
-] as const;
+export const HOUSE_VOICES: readonly HouseVoice[] = sharedPack().voices.house;
 const HOUSE_IDS: readonly string[] = HOUSE_VOICES.map((v) => v.id);
 
 /** Narration speed (ffmpeg atempo). */
@@ -33,8 +30,8 @@ export const VOLUME_MIN = 5;
 export const VOLUME_MAX = 40;
 export const VOLUME_DEFAULT = 18;
 export const MUSIC_DEFAULT = true;
-/** The default narrator (a Settings narrator outside the house voices counts as this one). */
-export const VOICE_DEFAULT = "gacrux";
+/** The default narrator, the active pack's (a Settings narrator outside the house voices counts as this one). */
+export const VOICE_DEFAULT = sharedPack().voices.default;
 export const BUILTIN = "builtin";
 
 /** Two decimals, like the numeric(3,2) column (a slider step of 0.01 can give 1.1300000000000001). */

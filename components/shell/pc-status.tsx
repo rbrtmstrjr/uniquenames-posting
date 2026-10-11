@@ -1,5 +1,5 @@
 "use client";
-import type { WorkerHealth } from "@/lib/status/worker-health";
+import { BUSY_ELSEWHERE, type WorkerHealth } from "@/lib/status/worker-health";
 import { cn } from "@/lib/utils/cn";
 
 const TEXT: Record<WorkerHealth, { label: string; fix: string; dot: string }> = {
@@ -9,11 +9,15 @@ const TEXT: Record<WorkerHealth, { label: string; fix: string; dot: string }> = 
   unknown: { label: "PC not seen yet", fix: "Start the card worker on your PC.", dot: "bg-muted" },
 };
 
-export function PcStatus({ health, lastSeen, compact }: { health: WorkerHealth; lastSeen: string; compact?: boolean }) {
-  const t = TEXT[health];
+/** The PC is up but working for the other page (worker 2.7.1 serves several pages): shown instead of "PC ready". */
+const BUSY = { label: BUSY_ELSEWHERE, fix: "It's making the other page's job; this page's jobs wait their turn.", dot: "bg-warn" };
+
+export function PcStatus({ health, lastSeen, compact, busyElsewhere }: { health: WorkerHealth; lastSeen: string; compact?: boolean; busyElsewhere?: boolean }) {
+  const busy = health === "ready" && !!busyElsewhere;
+  const t = busy ? BUSY : TEXT[health];
   return (
     <div className="flex items-center gap-2" title={`${t.label}. ${t.fix}`} role="status" aria-live="polite">
-      <span className={cn("size-2.5 shrink-0 rounded-full", t.dot, health === "ready" && "shadow-[0_0_0_4px_color-mix(in_oklab,var(--ok)_20%,transparent)]")} />
+      <span className={cn("size-2.5 shrink-0 rounded-full", t.dot, health === "ready" && !busy && "shadow-[0_0_0_4px_color-mix(in_oklab,var(--ok)_20%,transparent)]")} />
       {!compact && (
         <div className="min-w-0 text-xs leading-tight">
           <div className="font-semibold text-ink">{t.label}</div>

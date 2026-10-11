@@ -12,9 +12,9 @@ type Idea = { name: string; meaning: string };
 /**
  * "Suggest names" in the card dialog: Gemini offers 5 new names for this post (none of them
  * already in the list). Tapping one fills the Name and Meaning fields; the owner then saves the
- * text or makes a new picture with it. Nothing is stored until then.
+ * text or makes a new picture with it. Nothing is stored until then. `bare`: no box of its own (inside the name picker).
  */
-export function NameIdeas({ cardId, current, onPick }: { cardId: string; current: string; onPick: (idea: Idea) => void }) {
+export function NameIdeas({ cardId, current, onPick, bare }: { cardId: string; current: string; onPick: (idea: Idea) => void; bare?: boolean }) {
   const [ideas, setIdeas] = useState<Idea[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -29,7 +29,7 @@ export function NameIdeas({ cardId, current, onPick }: { cardId: string; current
   };
 
   return (
-    <div className="rounded-xl border border-line p-3">
+    <div className={bare ? undefined : "rounded-xl border border-line p-3"}>
       <div className="flex items-center justify-between gap-2">
         <span className="min-w-0 text-xs font-semibold text-muted">{ideas.length ? "Tap one, then save or make a new picture" : "Want a different name?"}</span>
         <Button size="sm" variant="ghost" onClick={ask} loading={loading} className="-my-1 shrink-0 whitespace-nowrap">

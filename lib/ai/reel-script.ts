@@ -11,6 +11,9 @@ import { FORMAT_SPECS, isReelFormat, QUOTE_RE, quoteCount, REEL_FORMATS, type Re
 import type { GeminiSchema } from "./gemini";
 import { plainWordsProblem } from "./plain-words";
 import { aiJson } from "./provider";
+import { activePack } from "@/packs";
+
+const REELS = activePack().reels;
 
 /** Same model as the n8n Knitted Doll storyboard. */
 export const REEL_SCRIPT_MODEL = "gemini-3.1-pro-preview";
@@ -103,21 +106,8 @@ export type ReelScriptResult = { ok: true; script: ReelScript } | { ok: false; e
 
 const BEATS = ["hook", "build", "turn", "close"];
 
-export const REEL_SCRIPT_SYSTEM = [
-  "You write short, useful narrated vertical reels for a Facebook page whose audience is moms of babies and young kids (0-7) around the world; most are in the Philippines, others in the US, Africa, Australia and beyond. Every reel teaches ONE thing a mom can use tonight, with the exact words to say, spoken straight to her ('you', 'your toddler') like a warm friend who read the research. Warm and practical, never a lecture, never a sad story. Simple, warm English anyone understands, no emojis, no hashtags.",
-  "",
-  "HUMAN, NATURAL TONE (very important): Write the way a real, warm person actually TALKS. Use contractions (you're, don't, it's). Short spoken sentences, concrete details (an age, a time, an object, an exact phrase) over abstractions. Validate the parent first, never shame her. STRICTLY AVOID AI-sounding tells and clichés: no 'in today's world', 'let's dive in', 'when it comes to', 'simply', 'furthermore', 'moreover', 'journey', 'it is important to note', stiff listy phrasing or formal transitions.",
-  "",
-  "WHO YOU'RE TALKING TO: a busy, tired mom who loves her kids fiercely, in everyday family life anywhere (home, bedtime, bath time, mealtime, the park, the store, drop-off, a family visit). Give her something she can do, in words she can say, and leave her feeling capable. At most ONE everyday detail, one that families everywhere know (the bath, the dinner table, the shoes by the door); nothing tied to one country (no holidays, store names, money amounts or local customs).",
-  "",
-  "SIMPLE GLOBAL ENGLISH (CRITICAL): never a Filipino or Tagalog word or Taglish (no anak, lola, lolo, nanay, tatay, kuya, ate as a title, bunso, po, opo, salamat, mahal, ingat, naman, talaga, diba, kasi, lang, mga), no Filipino-only places, foods or customs (sala, jeepney, palengke, merienda, mano, pamahiin, kulob, usog, hamog), no abbreviations for overseas workers (say 'a parent working abroad'), and no slang from any one region. Grandparents are Grandma and Grandpa; the room is the living room; a snack is a snack.",
-  "",
-  "PLAIN, SIMPLE LESSONS (CRITICAL): write so a busy mom gets it on the first listen: everyday words, about a 5th-6th grade reading level, short concrete sentences, one idea per line. No jargon and no clinical or academic words. If research backs a tip, say it plainly ('Child experts say naming the feeling helps kids calm down.'); never name a technique, study, therapy, program or brain part (no affect labeling, Parent-Child Interaction Therapy, PCIT, serve and return, co-regulation, executive function, amygdala, prefrontal cortex, cortisol, dopamine, attachment theory, nervous system, Harvard). Your own catchy tip names ('the Two-Choice Rule') are fine. Practical and concrete, never deep or abstract: say what to do and what happens next, not what it 'means'.",
-  "- Bad: 'Affect labeling calms the amygdala and builds emotional regulation.' Good: 'Name the feeling out loud. It helps her calm down faster.'",
-  "- Bad: 'The bond you share transcends every mile between you.' Good: 'Call at the same time every night. He'll start waiting for it.'",
-  "",
-  "AGE FOCUS (CRITICAL): ONLY the early years — newborns (0-3 months), babies (3-12 months), toddlers (1-3 years) and young children (3-5 years). Never a tween or teenager.",
-].join("\n");
+/** The active niche pack's audience, tone, language and age focus (packs/<id>/reels.ts). */
+export const REEL_SCRIPT_SYSTEM = REELS.scriptSystem;
 
 /** An on-screen label pattern per format (each format labels its own key lines). */
 const LABEL_PATTERN: Record<ReelFormat, string> = {
@@ -137,7 +127,7 @@ const HOOK_CARD: Record<ReelFormat, string> = {
   problem_fix: "the problem or the fix's name (pattern: 'BEDTIME TAKES AN HOUR?')",
 };
 
-const AUTO_TOPIC = "Topic: (none given) — CHOOSE one specific, useful topic from early parenting (0-5 years) that suits the format: a concrete problem, method, myth or phrase, never a vague one, and clearly different from the already-made reels.";
+const AUTO_TOPIC = REELS.autoTopic;
 
 /** Health topics (fever, illness, sleep, feeding, development): research §6.2 / §10.4 + the bank's vetted facts. */
 function healthRules(facts?: string[], safety?: string): string {
@@ -153,18 +143,10 @@ function healthRules(facts?: string[], safety?: string): string {
 }
 
 /** Claims the script may state as fact (research §10.4 S3, in plain words since 2026-10-10); anything else is a tip many parents find helps. */
-const VETTED_CLAIMS = [
-  "naming a feeling out loud helps a child calm down",
-  "talking back and forth with a baby (you answer their sounds and looks) helps their brain grow",
-  "a baby's brain grows faster in the first few years than at any other time",
-  "picky eaters often need 8-15 low-pressure tries of a new food",
-  "watching shows together and talking about them helps kids learn words",
-  "pediatricians now look at what kids watch and whether you watch together, not only the hours",
-  "praise that names exactly what your child did, and a few minutes a day of play your child leads, can help behavior",
-  "the parent decides what, when and where food is served; the child decides how much",
-];
+const VETTED_CLAIMS = REELS.vettedClaims;
 
 const oneLine = (s: string) => s.replace(/\s+/g, " ").trim();
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 /**
  * Spoken-word budget for a 60-90 s reel: seconds × 2.67 words/s × the narration speed (a sped-up voice fits more words),
@@ -199,9 +181,7 @@ const GREY_CAST_RULE = "- RED THREAD STYLE: the pictures are black-and-white lin
 
 /** The cast block: crocheted dolls for Knitted Doll, people for every other theme (the style turns them into clay, paper, …). */
 function castRules(dolls: boolean): string {
-  return dolls
-    ? "- The art is a HANDMADE KNITTED-TEXTILE DOLL style (amigurumi crochet dolls of soft wool and yarn), so describe the recurring cast AS TEXTILE DOLLS. \"adult\" / \"child\": a short name, then exact fixed details — e.g. \"the mom doll: a crocheted mother doll with chunky dark-brown yarn hair in a low bun, warm tan wool skin, a mustard-yellow cable-knit cardigan over a cream knitted dress\". \"adult_tag\" / \"child_tag\": the SAME doll in at most 7 words, in the form '<who>, <skin> skin, <hair>, <outfit>' — e.g. \"mom doll, tan wool skin, yarn bun, mustard cardigan\" and \"baby doll, tan wool skin, rust romper\". \"child_age\": the child's exact age + noun, fixed for the whole reel (e.g. \"a 10-month-old baby boy\")."
-    : "- The art style is added later, so describe the recurring cast as REAL PEOPLE. \"adult\" / \"child\": a short name, then exact fixed details — e.g. \"the mom: a young Filipino mother in her early thirties with warm tan skin and dark-brown hair in a low bun, wearing a mustard-yellow cardigan over a cream dress\". \"adult_tag\" / \"child_tag\": the SAME person in at most 7 words, in the form '<who>, <skin> skin, <hair>, <outfit>' — e.g. \"Filipino mom, tan skin, low bun, mustard cardigan\" and \"chubby baby, tan skin, rust romper\". \"child_age\": the child's exact age + noun, fixed for the whole reel and matching the stage (e.g. \"a 10-month-old baby boy\", \"a 2-year-old toddler girl\"). Clothing in warm earthy colours (mustard, cream, rust, oatmeal, sage) so the same two people appear in every image.";
+  return dolls ? REELS.castDolls : REELS.castPeople;
 }
 
 /** Feeling + pose rules: faceless themes (Knitted Doll, Paper Craft) show the feeling through body language only. */
@@ -212,9 +192,9 @@ function feelingRule(dolls: boolean, faces: boolean): string {
 }
 
 /** Crayon: what the style wants from the story (owner guide: big emotions, a gesture between the characters). */
-const CRAYON_STORY = "THIS STYLE (the owner's Crayon guide): every picture is a rough wax crayon drawing with BIG, warm, exaggerated feelings on the faces. Choose moments where the feeling shows clearly (laughing together, happy tears, comfort after a long day, first steps, a hug that fixes everything).";
+const CRAYON_STORY = REELS.crayonStory;
 /** Red Thread: the page's trademark, and the stories it suits (connection and distance; many of the page's parents work abroad). */
-const RED_THREAD_STORY = "THIS STYLE (the owner's Red Thread guide): every picture is black-and-white storybook line art where ONE bright red thread ties the parent's wrist to the child's wrist — the page's trademark, in every picture. Stories where connection and distance matter are especially welcome: a parent working abroad or far away (away for work, deployed) and the child waiting at home, the first day apart, a reunion at the airport, a small fight that cannot break the bond, a hard season the bond survives. The bond holds in every picture; the thread itself is drawn automatically.";
+const RED_THREAD_STORY = REELS.redThreadStory;
 
 /**
  * Crayon / Red Thread: each line's [SCENE] is written to the owner's guide (the art style, the shot, the cast sentence,
@@ -229,7 +209,7 @@ function guidePictureRules(red: boolean): string[] {
       : `- "scene": the picture in 2-3 plain sentences (25-60 words) that MATCH the line and move the story: ${who} and what they are doing together, with BIG, exaggerated facial expressions (eyes crinkled shut from smiling, an open-mouth laugh, tears streaming, bright rosy scribbled cheeks, big glossy eyes) and exactly ONE gesture between the characters (a hug, a hand reaching, a head on a shoulder, holding hands). When two characters are in the picture they look at EACH OTHER. Then name a few foreground objects (toys, flowers, cups, a blanket) and a simple background (a window, the sky, a room): that is where the place and the time of day go. A one-person picture: that person, their big expression and what they hold or reach for; they look at something IN the picture, never looking off-screen (an off-screen look makes the drawing add a stranger). An object / none picture: only the objects and the simple background.`,
     "- In \"scene\" leave out framing words (close-up, wide shot, view), art-style words, lighting and lenses. Describe only what IS in the picture (never what is absent). Pictures carry no writing: never signs, labels, books with words, screens with text, letters or numbers. The last line's scene happens in the SAME place as line 1's.",
     "- \"feeling\": the picture's feeling in 2-8 words that complete 'The feeling is …' (e.g. 'pure love and warmth', 'comfort after a long day', 'missing someone you love', 'letting go while still holding on'). Fresh words per line; never the narration.",
-    ...(red ? [`- "thread": the red thread between the parent's and the child's wrists in this picture, exactly one of ${REEL_THREADS.join("|")}: tight = closeness, a hug; stretched = distance (a parent working abroad, leaving for work, the first day apart); tangled = a conflict or a misunderstanding; loose = hard times, the bond still holds; plain = an ordinary tender moment.`] : []),
+    ...(red ? [`- "thread": the red thread between the parent's and the child's wrists in this picture, exactly one of ${REEL_THREADS.join("|")}: tight = closeness, a hug; stretched = distance (${REELS.threadDistance ?? "a parent working abroad, leaving for work, the first day apart"}); tangled = a conflict or a misunderstanding; loose = hard times, the bond still holds; plain = an ordinary tender moment.`] : []),
     "- PEOPLE, NOT DOLLS: write every scene and cast line with real people and real things.",
   ];
 }
@@ -393,8 +373,8 @@ const words = (s: string) => s.split(" ").filter(Boolean).length;
 const norm = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
 // "camera" in an image prompt summons one: the usual "looks at the camera" becomes "toward the viewer".
 export const lightClean = (s: string) => s.replace(/\b(?:at|into|towards?) (?:the |a )?camera\b/gi, "toward the viewer");
-/** Line 1 (and the hook card) must stop the scroll: no greeting, intro or page name. */
-export const GREETING_RE = /^(?:hi|hello|hey|hiya|welcome|greetings|good (?:morning|afternoon|evening|day)|kumusta|mabuhay|today (?:i|we)(?:'m| am| want| will|'ll)?|in (?:this|today's) (?:video|reel)|let me tell you|so,? today|unique names)\b/i;
+/** Line 1 (and the hook card) must stop the scroll: no greeting, intro or page name (the active pack's). */
+export const GREETING_RE = new RegExp(String.raw`^(?:hi|hello|hey|hiya|welcome|greetings|good (?:morning|afternoon|evening|day)|kumusta|mabuhay|today (?:i|we)(?:'m| am| want| will|'ll)?|in (?:this|today's) (?:video|reel)|let me tell you|so,? today|${escapeRe(REELS.greetingName)})\b`, "i");
 /**
  * A spoken call to action (the playbook bans them: no follow / comment / tag / share / save / subscribe / vote / like).
  * "Like this" only at the start of a sentence or before video / reel / post: "Say it like this:" introduces the words.

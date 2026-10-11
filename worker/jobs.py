@@ -1,5 +1,6 @@
 # The worker's job loop: claim one card at a time from Supabase, make it with
 # ComfyUI + Pillow, upload it, keep a backup copy on the PC, and heartbeat.
+import contextlib
 import datetime
 import io
 import json
@@ -12,16 +13,20 @@ import urllib.parse
 
 from PIL import Image
 
-from render import JobError, slugify, text_style
+import photo_look
+from render import JobError, card_layout, detail_line, slugify, text_style
 from supa import SupaError
 
-VERSION = "2.6.0"
+VERSION = "2.7.2"
 BUCKET = "cards"
 COMFY_CLOSED = "ComfyUI is closed. Open ComfyUI Desktop on your PC, then press Retry."
 NO_NET_SAVE = "Couldn't reach the internet to save this card. Press Retry."
 NO_NET_LOAD = "Couldn't reach the internet to load this card's photo. Press Retry."
 NO_NET_SETTINGS = "Couldn't reach the internet to load your settings. Press Retry."
 STALE = "stale result dropped (card changed while it was being made)"
+# worker_status.message of a page while the shared PC works for another page (2.7.1). The website shows it instead
+# of "PC ready" (lib/status/worker-health.ts BUSY_ELSEWHERE: the same words).
+BUSY_ELSEWHERE = "PC busy with your other page"
 
 
 CTA_FILENAME = "99-follow.jpg"  # the closing card's PC backup name (migration 010)
@@ -137,7 +142,7 @@ def with_post_fonts(settings, fonts):
 
 class Runner:
     def __init__(self, supa, renderer, output_root, cache_dir, poll_seconds=3.0, heartbeat_seconds=15.0, log=print,
-                 reels=None):
+                 reels=None, look=None):
         self.supa = supa
         self.renderer = renderer
         self.output_root = output_root
@@ -148,6 +153,7 @@ class Runner:
         self.current = None
         self.stop_event = threading.Event()
         self.reels = reels             # reels.ReelRunner, or None (cards only)
+        self.look = look               # (vibrance, texture) for new card photos (photo_look, 2.7.2); None/0,0 = off
         self.reels_off_until = 0.0     # the reel functions are missing (migration 005 not run): re-check later
         self.reels_missing_logged = False
         self.music_off_until = 0.0     # the 006 functions are missing: claim without music, no voice samples
@@ -155,13 +161,26 @@ class Runner:
         self.themes_off_until = 0.0    # claim_next_theme_preview is missing (007 not run): re-check later
         self.themes_state = None       # None = not known yet, True = 007 there, False = 007 missing
         self.next_preview_sweep = 0.0
+        self.busy = False              # a job of this page is running (a card, a reel step, a sample, a preview)
+        self.busy_elsewhere = None     # set by pages.MultiRunner: () -> True while another page's job runs
+
+    @contextlib.contextmanager
+    def _working(self):
+        self.busy = True
+        try:
+            yield
+        finally:
+            self.busy = False
 
     # ------------------------------------------------------------ heartbeat
     def heartbeat_once(self):
         h = self.renderer.health()
+        message = h.get("error")
+        if not message and not self.busy and self.busy_elsewhere and self.busy_elsewhere():
+            message = BUSY_ELSEWHERE
         self.supa.update("worker_status", "id=eq.1", {
             "last_seen": now_iso(), "comfyui_ok": bool(h["ok"]), "gpu": h.get("gpu"),
-            "current_card_id": self.current, "worker_version": VERSION, "message": h.get("error"),
+            "current_card_id": self.current, "worker_version": VERSION, "message": message,
         })
 
     def _heartbeat_loop(self):
@@ -185,6 +204,7 @@ class Runner:
             return self._reel_tick(comfy_ok) if self.reels else False
         card = job["card"]
         self.current = card["id"]
+        self.busy = True
         self.log("%s: %s (%s)" % (job["job"], card["name"], card["id"]))
         try:
             settings = with_post_fonts(self._settings(), job.get("fonts"))
@@ -204,6 +224,7 @@ class Runner:
             self._fail(card, e)
         finally:
             self.current = None
+            self.busy = False
         return True
 
     def _reel_tick(self, comfy_ok):
@@ -230,7 +251,8 @@ class Runner:
         scene = step.get("scene") or {}
         self.log("reel %s: %s%s (%s)" % (step.get("step"), reel.get("title"),
                                          " image %s" % scene.get("position") if scene else "", reel.get("id")))
-        self.reels.run_step(step)
+        with self._working():
+            self.reels.run_step(step)
         return True
 
     def _claim_reel_step(self, comfy_ok):
@@ -273,7 +295,8 @@ class Runner:
         if not isinstance(job, dict) or not job.get("voice"):
             return False
         self.log("voice sample: %s" % (job["voice"].get("id")))
-        self.reels.run_sample(job)
+        with self._working():
+            self.reels.run_sample(job)
         return True
 
     def _preview_tick(self):
@@ -297,7 +320,8 @@ class Runner:
         if not isinstance(job, dict) or not job.get("theme"):
             return False
         self.log("theme preview: %s" % job["theme"].get("id"))
-        self.reels.run_theme_preview(job)
+        with self._working():
+            self.reels.run_theme_preview(job)
         return True
 
     def _settings(self):
@@ -324,6 +348,9 @@ class Runner:
         if not self.renderer.health()["ok"]:
             raise JobError(COMFY_CLOSED)
         photo = self.renderer.generate_photo(card["prompt"], int(card["seed"]), int(s["width"]), int(s["height"]))
+        if self.look and any(self.look):
+            # 2.7.2: once, on the new photo, before it is stored and stamped (a restamp reuses the stored photo)
+            photo = photo_look.apply_look(photo, vibrance=self.look[0], texture=self.look[1])
         photo_bytes = to_jpeg(photo, 92)
         card_bytes = to_jpeg(self._compose(card, photo, s), 93)
         v = int(card["version"])
@@ -352,10 +379,33 @@ class Runner:
 
     def _compose(self, card, photo, s):
         """The stamped card: the closing card (kind 'cta', migration 010) gets its message lines
-        (name = the message, "/" = a line break) and no meaning; every other card its name + meaning."""
+        (name = the message, "/" = a line break) and no meaning; every other card its name + meaning.
+        The Name Nest layout (settings.card_layout, migration 015) also gets the name's US rank / origin line."""
+        layout = card_layout(s)
+        if layout == "classic":  # Unique Names: exactly the calls from before 015
+            if card.get("kind") == "cta":
+                return self.renderer.compose_cta(photo, card["name"], s["handle"], s["style"])
+            return self.renderer.compose(photo, card["name"], card["meaning"], s["handle"], s["style"])
         if card.get("kind") == "cta":
-            return self.renderer.compose_cta(photo, card["name"], s["handle"], s["style"])
-        return self.renderer.compose(photo, card["name"], card["meaning"], s["handle"], s["style"])
+            return self.renderer.compose_cta(photo, card["name"], s["handle"], s["style"], layout=layout)
+        return self.renderer.compose(photo, card["name"], card["meaning"], s["handle"], s["style"], layout=layout,
+                                     detail=self._name_detail(card))
+
+    def _name_detail(self, card):
+        """"#38 in the US · Greek" from the card's name row, or None: no name row, a card whose text was changed to
+        another name, a name with neither, or a read that failed (logged; the card is stamped without the line)."""
+        if not card.get("name_id"):
+            return None
+        try:
+            rows = self._retry(lambda: self.supa.select(
+                "names", "id=eq.%s&select=name,origin,us_rank,us_year" % urllib.parse.quote(str(card["name_id"]), safe="")))
+        except SupaError as e:
+            self.log("could not read the name's US rank / origin (stamping without it): %s" % str(e)[:160])
+            return None
+        row = (rows or [None])[0]
+        if not row or str(row.get("name") or "").strip().lower() != str(card.get("name") or "").strip().lower():
+            return None
+        return detail_line(row.get("us_rank"), row.get("origin"))
 
     # ------------------------------------------------------------ results
     def _match(self, card):

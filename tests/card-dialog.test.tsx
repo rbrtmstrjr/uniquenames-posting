@@ -9,6 +9,7 @@ const regenerateCardAction = vi.fn(async (..._a: unknown[]) => ({ ok: true as co
 const restampCardAction = vi.fn(async (..._a: unknown[]) => ({ ok: true as const, mode: "restamp" as const }));
 vi.mock("@/lib/actions/cards", () => ({ regenerateCardAction, restampCardAction }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+vi.mock("@/lib/actions/swap-name", () => ({ listSwapNamesAction: vi.fn(async () => ({ ok: true, names: [], next: null })), swapCardNameAction: vi.fn() }));
 const { CardDialog } = await import("@/components/cards/card-dialog");
 
 beforeAll(polyfillRadix);

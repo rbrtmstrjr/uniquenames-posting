@@ -52,18 +52,19 @@ body { font-family: var(--font-sans); -webkit-font-smoothing: antialiased; }
 /* In the base layer so a shadcn control's own focus ring (outline-none + ring) can replace it. */
 @layer base { :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; } }
 
-/* Login: an empty baby-photoshoot set (public/login). Wide photos keep the props at the
+/* Login: an empty baby-photoshoot set (the active pack's photos, set as --login-* variables by
+   app/login/page.tsx; the fallbacks are Unique Names' public/login). Wide photos keep the props at the
    sides; tall photos (portrait phones) keep them low in the corners. */
 .studio-backdrop {
-  background-color: #EFE3D2;
-  background-image: url("/login/light-wide.webp");
+  background-color: var(--login-light-color, #EFE3D2);
+  background-image: var(--login-light-wide, url("/login/light-wide.webp"));
   background-size: cover;
   background-position: center bottom;
 }
-.dark .studio-backdrop { background-color: #3A2418; background-image: url("/login/dark-wide.webp"); }
+.dark .studio-backdrop { background-color: var(--login-dark-color, #3A2418); background-image: var(--login-dark-wide, url("/login/dark-wide.webp")); }
 @media (max-aspect-ratio: 4/5) {
-  .studio-backdrop { background-image: url("/login/light-tall.webp"); }
-  .dark .studio-backdrop { background-image: url("/login/dark-tall.webp"); }
+  .studio-backdrop { background-image: var(--login-light-tall, url("/login/light-tall.webp")); }
+  .dark .studio-backdrop { background-image: var(--login-dark-tall, url("/login/dark-tall.webp")); }
 }
 /* A soft light falloff keeps the card legible without hiding the set. */
 .studio-vignette { background: radial-gradient(ellipse 70% 55% at 50% 42%, rgba(255, 250, 243, .28), transparent 70%); }

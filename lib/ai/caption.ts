@@ -7,6 +7,7 @@ import { NAME_STYLES, pickStyle, type CaptionName, type CaptionStyle } from "@/l
 import { askCaption, firstWord, openers, sanitizeText, type AiCaption } from "./caption-core";
 import { AZ_SERIES_TAG, partRange, type AzPart } from "@/lib/series/az";
 import { isLetter, letterTag } from "@/lib/series/letter";
+import { activePack } from "@/packs";
 
 export type { AiCaption } from "./caption-core";
 
@@ -44,35 +45,21 @@ export interface CaptionSeries { part: AzPart }
 /** `caption_ai` is undefined until migration 002 runs; treat that as the column default. */
 export const captionAiOn = (s: { caption_ai?: boolean | null }) => s.caption_ai ?? TEXT_SETTINGS_DEFAULTS.caption_ai;
 
-export const CAPTION_SYSTEM = [
-  "You write the Facebook post caption for @unique_names, a warm, friendly page that shares unique baby names.",
-  "Each post is a themed baby photoshoot: a set of photo cards, each showing one baby name and its meaning on the picture.",
-  `Write 1 or 2 short, natural sentences (at most ${CAPTION_MAX - 20} characters in total) in the caption style the prompt asks for.`,
-  "Sound like a real person who loves baby names talking to parents-to-be: warm, plain everyday words, normal capitalization, not salesy or flowery.",
-  "The readers are parents around the world (most in the Philippines, others in the US, Africa, Australia and beyond): write simple, warm English anyone understands, with no region-specific slang, and never a Filipino or Tagalog word or Taglish (no anak, mahal, ganda, salamat, naman, lang, mga), even next to a Filipino name; a name's meaning is given in plain English.",
-  "Every caption must read clearly different from the recent captions in the prompt: a different opening word, a different sentence shape and a different question. Never reuse their phrases.",
-  "Avoid stock openers and cliches such as \"Get ready\", \"Look no further\", \"Introducing\", \"These lovely\", \"Calling all\" or \"swoon\".",
-  "Say \"baby boy names\" or \"baby girl names\" (or close wording) once so readers know what the post is.",
-  "Only mention a name when the style asks for one, and then only names from the list in the prompt, spelled exactly. When you say what a name means, use only the meaning given for it: never invent a meaning, an origin or a fact.",
-  "Do not mention how many names there are.",
-  "The photos are a styled photoshoot set for name ideas, not a real family: never write as if a real baby or family exists (no \"our little one\", \"we loved watching\", \"my baby\"); talk about the set, the mood and the names.",
-  "At most one question, and it must be genuine and open. Never engagement bait: no \"comment YES\", \"tag a friend\", \"share if\", \"like if\", \"in the comments\", and never ask anyone to follow, like or share.",
-  "Use at most one emoji, or none. No hashtags in the caption, no @mentions, no links, no quotation marks.",
-  "Also suggest 1 or 2 hashtags specific to this photoshoot's theme (e.g. #autumnbaby, #oceanbaby), not generic baby-name tags like #babynames or #babyboynames: lowercase letters and digits only, at most 24 characters, right for the post's gender, never #fyp, #foryou, #follow..., #viral or other bait, no other platforms' tags (#tiktok...), and not one of the recent hashtags.",
-  "Return JSON: {\"caption\": \"...\", \"tags\": [\"#...\"]}.",
-].join("\n");
+export const CAPTION_SYSTEM = activePack().captions.postSystem(CAPTION_MAX);
 
-/** How each style is written (the names in the prompt are the post's own, with their real meanings). */
-export const STYLE_GUIDE: Record<CaptionStyle, (g: Gender) => string> = {
-  story: (g) => `Story moment. Open inside the photoshoot with one small, concrete moment or detail (a prop, the outfit, the light), then tie it to these baby ${g} names. You may end with a short open question. Do not name any names.`,
-  spotlight: (g) => `Name spotlight. Feature 1 or 2 names from the list with their given meanings, woven into a warm sentence about these baby ${g} names. You may end with a short open question.`,
-  question: (g) => `Gentle question. Open with a soft, genuine question to parents-to-be about choosing a name (the question is the first sentence), then one short line tying in the photoshoot and these baby ${g} names. No second question. Do not name any names.`,
-  choice: (g) => `A or B. Pick two names from the list and ask, naturally, which one readers would choose (for example "Name or Name for ...?"), with a short line about the photoshoot and these baby ${g} names. You may add the meaning of one or both.`,
-  fact: (g) => `Fun name fact. Share one small fact that follows directly from a given meaning (what the meaning brings to mind, or an origin only if the meaning states it), naming that name, then tie in these baby ${g} names. No outside facts. You may end with a short open question.`,
-  compliment: (g) => `Warm compliment. Open with a kind, specific line to moms and moms-to-be (for example the love and care that goes into choosing a name), then these baby ${g} names and the photoshoot's mood. A question is optional. Do not name any names.`,
-};
+/** How each style is written (the active pack's wording; the names in the prompt are the post's own, with their real meanings). */
+export const STYLE_GUIDE: Record<CaptionStyle, (g: Gender) => string> = activePack().captions.styleGuide;
 
 const t = (s: string) => s.replace(/\s+/g, " ").trim();
+
+/** " (origin: Latin; #3 in the US)" when a name has an origin or a US rank (Name Nest); "" otherwise (Unique Names). */
+function nameFacts(n: CaptionName): string {
+  const facts = [
+    n.origin && t(n.origin) ? `origin: ${t(n.origin)}` : "",
+    typeof n.usRank === "number" && n.usRank > 0 ? `#${n.usRank} in the US` : "",
+  ].filter(Boolean);
+  return facts.length ? ` (${facts.join("; ")})` : "";
+}
 
 export function captionPrompt(input: CaptionInput): string {
   const { theme, gender, style, captionStyle } = input;
@@ -88,7 +75,7 @@ export function captionPrompt(input: CaptionInput): string {
   ];
   const names = (input.names ?? []).filter((n) => n.name.trim() && n.meaning.trim()).slice(0, NAMES_SHOWN);
   if (NAME_STYLES.includes(captionStyle) && names.length) {
-    lines.push("", "Names in this post with their real meanings (use only these, spelled exactly):", ...names.map((n) => `- ${t(n.name)}: ${t(n.meaning)}`));
+    lines.push("", "Names in this post with their real meanings (use only these, spelled exactly):", ...names.map((n) => `- ${t(n.name)}: ${t(n.meaning)}${nameFacts(n)}`));
   }
   if (input.series) {
     const { part } = input.series;
@@ -134,6 +121,8 @@ const letterRe = (l: string) => new RegExp([
 export function captionProblem(line: string, input: Pick<CaptionInput, "captionStyle" | "names" | "recent" | "series" | "letter">): string | null {
   const w = firstWord(line);
   if (w && openers(input.recent ?? []).includes(w)) return `starts with "${w}" like a recent caption`;
+  const own = activePack().captions.postProblem?.(line);
+  if (own) return own;
   if (input.series && !partRe(input.series.part).test(line)) return `does not say it is Part ${input.series.part} of the A to Z series`;
   if (isLetter(input.letter) && !letterRe(input.letter).test(line)) return `does not say the names start with the letter ${input.letter}`;
   const need = input.captionStyle === "choice" ? 2 : NAME_STYLES.includes(input.captionStyle) ? 1 : 0;

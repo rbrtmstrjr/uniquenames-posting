@@ -1,4 +1,5 @@
 import type { Gender } from "@/lib/db/types";
+import { sharedPack } from "@/packs/shared";
 
 /**
  * Hashtags per post / reel (migration 009). Facebook asks for fewer than 5 hashtags and demotes
@@ -6,9 +7,9 @@ import type { Gender } from "@/lib/db/types";
  * rotated from the pool (least recently used), at most 4, and never the exact set of one of the
  * last 10 posts. Pure: shared by the server actions and the Settings form.
  */
-export const HASHTAGS_ALWAYS_DEFAULT = "#uniquenames";
-export const HASHTAG_POOL_DEFAULT =
-  "#babynames #babygirlnames #babyboynames #uniquebabynames #namemeaning #momlife #newmom #pregnancy #momtobe #babynameideas";
+/** Used when the settings row has none: the active pack's (the database defaults are the Unique Names values). */
+export const HASHTAGS_ALWAYS_DEFAULT = sharedPack().hashtags.always;
+export const HASHTAG_POOL_DEFAULT = sharedPack().hashtags.pool;
 export const MAX_TAGS = 4;
 export const TAG_MAX_LEN = 24;
 export const ALWAYS_MAX = 2;

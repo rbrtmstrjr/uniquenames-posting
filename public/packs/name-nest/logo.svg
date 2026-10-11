@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 104" role="img" aria-labelledby="t">
+<title id="t">Name Nest</title>
+<!-- The mark: a small woven nest holding a heart-shaped strawberry (berry red, cream, leaf green), then the wordmark. -->
+<g transform="translate(6 4)">
+<defs><clipPath id="bowl"><path d="M5 57 C7 80 26 89 48 89 C70 89 89 80 91 57 C77 64 19 64 5 57 Z"/></clipPath></defs>
+<path d="M9 57 C20 47 76 47 87 57" fill="none" stroke="#8E272F" stroke-width="4" stroke-linecap="round"/>
+<path d="M48 72 C33 63 25 50 27 39 C29 30 38 26 48 32 C58 26 67 30 69 39 C71 50 63 63 48 72 Z" fill="#A8323A"/>
+<path d="M37 37 C40 34 43 34 45 36" fill="none" stroke="#F6EEE4" stroke-width="2.2" stroke-linecap="round" opacity=".6"/>
+<g fill="#F6EEE4"><ellipse cx="39" cy="44" rx="1.5" ry="2.3" transform="rotate(-20 39 44)"/><ellipse cx="48" cy="43" rx="1.5" ry="2.3"/><ellipse cx="57" cy="44" rx="1.5" ry="2.3" transform="rotate(20 57 44)"/><ellipse cx="43" cy="52" rx="1.5" ry="2.3" transform="rotate(-12 43 52)"/><ellipse cx="53" cy="52" rx="1.5" ry="2.3" transform="rotate(12 53 52)"/></g>
+<path d="M48 32 C44 23 36 22 31 25 C36 26 41 29 44 32 Z" fill="#4F7A4A"/>
+<path d="M48 32 C52 23 60 22 65 25 C60 26 55 29 52 32 Z" fill="#4F7A4A"/>
+<path d="M48 33 C46 26 47 20 51 16" fill="none" stroke="#4F7A4A" stroke-width="3" stroke-linecap="round"/>
+<path d="M5 57 C7 80 26 89 48 89 C70 89 89 80 91 57 C77 64 19 64 5 57 Z" fill="#F6EEE4"/>
+<g clip-path="url(#bowl)" fill="none" stroke-linecap="round"><g stroke="#8E272F" stroke-width="2.4"><path d="M-6 58 C-1 68 3 78 6 92"/><path d="M6 58 C1 68 -3 78 -6 92"/><path d="M4 58 C9 68 13 78 16 92"/><path d="M16 58 C11 68 7 78 4 92"/><path d="M14 58 C19 68 23 78 26 92"/><path d="M26 58 C21 68 17 78 14 92"/><path d="M24 58 C29 68 33 78 36 92"/><path d="M36 58 C31 68 27 78 24 92"/><path d="M34 58 C39 68 43 78 46 92"/><path d="M46 58 C41 68 37 78 34 92"/><path d="M44 58 C49 68 53 78 56 92"/><path d="M56 58 C51 68 47 78 44 92"/><path d="M54 58 C59 68 63 78 66 92"/><path d="M66 58 C61 68 57 78 54 92"/><path d="M64 58 C69 68 73 78 76 92"/><path d="M76 58 C71 68 67 78 64 92"/><path d="M74 58 C79 68 83 78 86 92"/><path d="M86 58 C81 68 77 78 74 92"/><path d="M84 58 C89 68 93 78 96 92"/><path d="M96 58 C91 68 87 78 84 92"/><path d="M94 58 C99 68 103 78 106 92"/><path d="M106 58 C101 68 97 78 94 92"/></g>
+<g stroke="#A8323A" stroke-width="2.2" opacity=".85"><path d="M4 68 C30 76 66 76 92 67"/><path d="M10 78 C34 85 62 85 86 77"/></g></g>
+<path d="M5 57 C7 80 26 89 48 89 C70 89 89 80 91 57 C77 64 19 64 5 57 Z" fill="none" stroke="#8E272F" stroke-width="3.6" stroke-linejoin="round"/>
+<g fill="none" stroke="#8E272F" stroke-width="3" stroke-linecap="round"><path d="M6 58 L-1 53"/><path d="M8 63 L0 65"/><path d="M90 58 L97 52"/><path d="M88 64 L96 66"/></g>
+</g>
+<text x="114" y="64" font-family="'DM Serif Display', 'Fraunces', Georgia, 'Times New Roman', serif" font-size="50" fill="#2B1E1E" letter-spacing=".5">Name <tspan fill="#A8323A">Nest</tspan></text>
+<text x="116" y="88" font-family="'Nunito', 'Segoe UI', system-ui, sans-serif" font-size="13.5" font-weight="700" letter-spacing="2.6" fill="#4F7A4A">BABY NAMES &amp; PARENTING</text>
+</svg>

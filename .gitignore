@@ -9,6 +9,7 @@ node_modules/
 next-env.d.ts
 *.tsbuildinfo
 worker/worker.env
+worker/pages/*.env
 worker/fonts/
 worker/cache/
 worker/worker.log

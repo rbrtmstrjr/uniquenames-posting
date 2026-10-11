@@ -11,13 +11,14 @@ import { GenerateLockNote } from "@/components/shell/generate-lock-note";
 import type { CardRow } from "@/lib/db/types";
 import { canGenerate, type WorkerHealth } from "@/lib/status/worker-health";
 import { dialogStatus, newPictureAction, textChanged } from "@/lib/status/card-dialog";
-import { restampMode } from "@/lib/actions/helpers";
+import { nameKey, restampMode } from "@/lib/actions/helpers";
 import { ctaTextAction, regenerateCardAction, restampCardAction } from "@/lib/actions/cards";
+import { swapCardNameAction } from "@/lib/actions/swap-name";
 import { CTA_MAX_LINES, ctaLines } from "@/lib/cta/messages";
 import { callAction, optimistic } from "@/lib/actions/call";
 import { useNow } from "@/lib/realtime/hooks";
 import { CardTile } from "./card-tile";
-import { NameIdeas } from "./name-ideas";
+import { NamePicker } from "./name-picker";
 
 type Base = { id: string; name: string; meaning: string };
 
@@ -31,12 +32,16 @@ export function CardDialog({ card, url, health, queuePos = 0, onClose, onDelete,
   const [name, setName] = useState("");
   const [meaning, setMeaning] = useState("");
   const [busy, setBusy] = useState<"text" | "regen" | null>(null);
+  // A name picked in "My names": Save text / New picture then swap it in (it is reserved, the old name freed).
+  const [picked, setPicked] = useState<{ id: string; name: string } | null>(null);
+  const [refreshKey, setRefreshKey] = useState(0);
   const now = useNow(1000);
   // Seed the fields when a card opens; when its saved text changes underneath (realtime),
   // follow it unless the owner has unsaved edits (adjust state during render).
   const [base, setBase] = useState<Base | null>(null);
   if (card && (card.id !== base?.id || card.name !== base.name || card.meaning !== base.meaning)) {
     const clean = !base || card.id !== base.id || !textChanged(base, name, meaning);
+    if (base && card.id !== base.id) setPicked(null);
     setBase({ id: card.id, name: card.name, meaning: card.meaning });
     if (clean) { setName(card.name); setMeaning(card.meaning); }
   }
@@ -57,11 +62,17 @@ export function CardDialog({ card, url, health, queuePos = 0, onClose, onDelete,
   // save never rolls the name back over the owner's edit in the field.
   const before: Partial<CardRow> = { status: card.status, claimed_at: card.claimed_at, error: card.error, started_at: card.started_at, finished_at: card.finished_at };
   const patch = (p: Partial<CardRow>) => onPatch?.(card.id, p);
+  // The picked name counts while the Name field still holds it (typing over it = a typed name, today's path).
+  const swapId = !isCta && picked && picked.id !== card.name_id && nameKey(picked.name) === nameKey(name) ? picked.id : null;
+  // After a swap the My names list reloads: the name now on the card (or one just used elsewhere) leaves it.
+  const reloadNames = () => setRefreshKey((k) => k + 1);
 
   const saveText = async () => {
     setBusy("text");
-    const r = await callAction(() => (isCta ? ctaTextAction(card.id, name) : restampCardAction(card.id, name, meaning)));
+    const r = await callAction(() => (isCta ? ctaTextAction(card.id, name)
+      : swapId ? swapCardNameAction(card.id, swapId, meaning) : restampCardAction(card.id, name, meaning)));
     setBusy(null);
+    if (swapId) reloadNames();
     if (!r.ok) { toast.error(r.error); return; }
     toast.success(r.mode === "restamp" ? "Updating the text… (about a second once your PC picks it up)" : "This older card has no clean photo, so it is being remade with the new text.");
   };
@@ -71,9 +82,11 @@ export function CardDialog({ card, url, health, queuePos = 0, onClose, onDelete,
     const r = await optimistic(
       () => patch({ status: "queued", claimed_at: null, error: null, started_at: null, finished_at: null }),
       () => patch(before),
-      () => (choice.kind === "regenerate" ? regenerateCardAction(card.id)
+      () => (swapId ? swapCardNameAction(card.id, swapId, meaning, { newPicture: true })
+        : choice.kind === "regenerate" ? regenerateCardAction(card.id)
         : isCta ? ctaTextAction(card.id, choice.name, true) : regenerateCardAction(card.id, { name: choice.name, meaning: choice.meaning })));
     setBusy(null);
+    if (swapId) reloadNames();
     if (!r.ok) { toast.error(r.error); return; }
     toast.success(choice.kind === "edit-regenerate" ? "Saved the new text. Making a new picture with it…" : "Making a new picture for this card…");
   };
@@ -106,7 +119,11 @@ export function CardDialog({ card, url, health, queuePos = 0, onClose, onDelete,
                 <span className="text-xs font-semibold text-muted">Meaning</span>
                 <Input value={meaning} onChange={(e) => setMeaning(e.target.value)} className="mt-1" />
               </label>
-              {card.post_id && <NameIdeas cardId={card.id} current={name} onPick={(i) => { setName(i.name); setMeaning(i.meaning); }} />}
+              {card.post_id && (
+                <NamePicker key={card.id} cardId={card.id} current={name} pickedId={swapId} refreshKey={refreshKey}
+                  onPickMine={(n) => { setName(n.name); setMeaning(n.meaning); setPicked({ id: n.id, name: n.name }); }}
+                  onPickIdea={(i) => { setName(i.name); setMeaning(i.meaning); setPicked(null); }} />
+              )}
             </>
           )}
           <div className="flex flex-wrap gap-2">

@@ -1,5 +1,5 @@
 -- Unique Names posting: database. Paste the whole file into the Supabase SQL editor and run it once.
--- A project created before v2 runs supabase/migrations/002_v2.sql, 003_post_fonts.sql, 004_subject_age.sql, 005_reels.sql, 006_reel_voices.sql, 007_reel_themes.sql, 008_reel_playbook.sql, 009_captions.sql, 010_cta_card.sql, 011_az_series.sql, 012_two_styles.sql, 013_letter_posts.sql then 014_reel_formats.sql instead (this file already includes them).
+-- A project created before v2 runs supabase/migrations/002_v2.sql, 003_post_fonts.sql, 004_subject_age.sql, 005_reels.sql, 006_reel_voices.sql, 007_reel_themes.sql, 008_reel_playbook.sql, 009_captions.sql, 010_cta_card.sql, 011_az_series.sql, 012_two_styles.sql, 013_letter_posts.sql, 014_reel_formats.sql, 015_name_nest.sql then 016_swap_card_name.sql instead (this file already includes them).
 -- Status 'pending' = an AI-suggested name/theme waiting for approval; nothing here ever plans it (only 'available').
 
 -- ---------------------------------------------------------------- tables
@@ -138,6 +138,8 @@ create table if not exists public.settings (
     E'Follow for more / baby name ideas.\nFollow us for a new / name list every day.\nStill searching? Follow for / more unique names.\nSave this post and follow / for more name ideas.\nMore {gender} names tomorrow. / Follow so you don''t miss them.\nFound a favorite? / Follow for more like it.\nFollow for a fresh list / of unique {gender} names.\nNew names every day. / Follow along!',
   -- reels (014): draw the on-screen step labels
   reel_labels boolean not null default true,
+  -- Name Nest (015): how the PC stamps a card ('classic' = Unique Names; 'name-nest' = brand colours + the US rank / origin line)
+  card_layout text not null default 'classic' constraint settings_card_layout_check check (card_layout in ('classic', 'name-nest')),
   updated_at timestamptz not null default now(),
   check (min_images <= max_images)
 );
@@ -211,6 +213,10 @@ create table if not exists public.names (
   status text not null default 'available' check (status in ('available', 'reserved', 'used', 'skip', 'pending')),
   post_id uuid references public.posts (id) on delete set null,
   position int,
+  -- Name Nest (015): the origin, and the rank for its gender + the year in the US SSA baby-name data (null = not known)
+  origin text constraint names_origin_len check (origin is null or char_length(origin) between 1 and 40),
+  us_rank int constraint names_us_rank_check check (us_rank is null or us_rank between 1 and 100000),
+  us_year int constraint names_us_year_check check (us_year is null or us_year between 1880 and 2100),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -538,6 +544,60 @@ begin
   return jsonb_build_object('status', 'ok', 'paths', v_paths);
 end $$;
 
+-- ---------------------------------------------------------------- swap_card_name (016)
+-- swap_card_name: in ONE transaction, a post card takes an available name from the names table:
+--   * the card (locked, version-guarded, never while it is being made) gets the name, the meaning, name_id and is
+--     queued again: p_mode 'restamp' keeps the photo (Pillow only), 'regenerate' makes a new photo with p_seed;
+--   * the new name is reserved for the post at the card's position ('used' straight away on a posted post, which
+--     refresh_post never touches; a ready post flips it to 'used' through the card trigger as usual);
+--   * the old name goes back to 'available' when it came from the names table and no other card uses it.
+-- Answers {status: ok, mode} | {status: stale} (the card changed) | {status: taken} (the name is no longer available or
+-- doesn't fit the post) | {status: error, reason}. Calling it again after it succeeded answers ok.
+create or replace function public.swap_card_name(p_card uuid, p_name uuid, p_version int, p_meaning text, p_mode text, p_seed bigint)
+returns jsonb language plpgsql as $$
+declare v_card public.cards%rowtype; v_post public.posts%rowtype; v_name public.names%rowtype;
+begin
+  if p_mode not in ('restamp', 'regenerate') then
+    return jsonb_build_object('status', 'error', 'reason', 'Unknown mode.');
+  end if;
+  select * into v_card from public.cards where id = p_card for update;
+  if not found then return jsonb_build_object('status', 'error', 'reason', 'Card not found.'); end if;
+  if v_card.kind <> 'post' or v_card.post_id is null then
+    return jsonb_build_object('status', 'error', 'reason', 'Only the name cards of a post take a name.');
+  end if;
+  if v_card.name_id = p_name then return jsonb_build_object('status', 'ok', 'mode', p_mode); end if;
+  if v_card.version <> p_version or v_card.status = 'generating' then return jsonb_build_object('status', 'stale'); end if;
+
+  select * into v_post from public.posts where id = v_card.post_id for update;
+  if not found then return jsonb_build_object('status', 'error', 'reason', 'Post not found.'); end if;
+  select * into v_name from public.names
+    where id = p_name and status = 'available' and gender = v_post.gender and style = v_post.style for update;
+  if not found then return jsonb_build_object('status', 'taken'); end if;
+
+  if v_card.name_id is not null then
+    update public.names set status = 'available', post_id = null, position = null
+      where id = v_card.name_id and status in ('reserved', 'used')
+        and not exists (select 1 from public.cards where name_id = v_card.name_id and id <> p_card);
+  end if;
+  update public.names
+    set status = case when v_post.status = 'posted' then 'used' else 'reserved' end,
+        post_id = v_card.post_id, position = v_card.position,
+        meaning = coalesce(nullif(btrim(p_meaning), ''), meaning)
+    where id = p_name;
+
+  if p_mode = 'restamp' then
+    update public.cards set name = v_name.name, meaning = coalesce(nullif(btrim(p_meaning), ''), v_name.meaning), name_id = p_name,
+      status = 'restamp', claimed_at = null, error = null, version = v_card.version + 1, queued_at = now()
+      where id = p_card;
+  else
+    update public.cards set name = v_name.name, meaning = coalesce(nullif(btrim(p_meaning), ''), v_name.meaning), name_id = p_name,
+      status = 'queued', claimed_at = null, started_at = null, finished_at = null, error = null, attempts = 0,
+      version = v_card.version + 1, seed = p_seed, queued_at = now()
+      where id = p_card;
+  end if;
+  return jsonb_build_object('status', 'ok', 'mode', p_mode);
+end $$;
+
 -- ---------------------------------------------------------------- worker: claim + stuck recovery
 drop function if exists public.claim_next_card();
 create or replace function public.claim_next_card(p_restamp_only boolean default false) returns jsonb language plpgsql as $$
@@ -863,8 +923,10 @@ revoke execute on function public.delete_card(uuid) from public, anon;
 revoke execute on function public.delete_post(uuid) from public, anon;
 revoke execute on function public.refresh_post(uuid) from public, anon;
 revoke execute on function public.create_series(jsonb) from public, anon;
+revoke execute on function public.swap_card_name(uuid, uuid, int, text, text, bigint) from public, anon;
 grant execute on function public.create_post(jsonb), public.add_card(uuid, jsonb), public.delete_card(uuid),
-  public.delete_post(uuid), public.refresh_post(uuid), public.create_series(jsonb) to authenticated, service_role;
+  public.delete_post(uuid), public.refresh_post(uuid), public.create_series(jsonb),
+  public.swap_card_name(uuid, uuid, int, text, text, bigint) to authenticated, service_role;
 
 -- ---------------------------------------------------------------- storage
 insert into storage.buckets (id, name, public) values ('cards', 'cards', false) on conflict (id) do nothing;

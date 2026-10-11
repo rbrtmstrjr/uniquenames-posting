@@ -1,4 +1,4 @@
-import { NO_TEXT } from "@/lib/planner/prompt";
+import { NO_TEXT } from "@/lib/planner/no-text";
 import type { ReelCast } from "@/lib/db/types";
 import { emotionOf, shotOf, type ReelEmotion, type ReelShot } from "./motion";
 import { hasFace, isFaceFree, sizeOf, subjectOf, type ReelShotSize, type ReelSubject } from "./shots";
