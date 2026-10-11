@@ -13,10 +13,11 @@ import urllib.parse
 
 from PIL import Image
 
+import photo_look
 from render import JobError, card_layout, detail_line, slugify, text_style
 from supa import SupaError
 
-VERSION = "2.7.1"
+VERSION = "2.7.2"
 BUCKET = "cards"
 COMFY_CLOSED = "ComfyUI is closed. Open ComfyUI Desktop on your PC, then press Retry."
 NO_NET_SAVE = "Couldn't reach the internet to save this card. Press Retry."
@@ -141,7 +142,7 @@ def with_post_fonts(settings, fonts):
 
 class Runner:
     def __init__(self, supa, renderer, output_root, cache_dir, poll_seconds=3.0, heartbeat_seconds=15.0, log=print,
-                 reels=None):
+                 reels=None, look=None):
         self.supa = supa
         self.renderer = renderer
         self.output_root = output_root
@@ -152,6 +153,7 @@ class Runner:
         self.current = None
         self.stop_event = threading.Event()
         self.reels = reels             # reels.ReelRunner, or None (cards only)
+        self.look = look               # (vibrance, texture) for new card photos (photo_look, 2.7.2); None/0,0 = off
         self.reels_off_until = 0.0     # the reel functions are missing (migration 005 not run): re-check later
         self.reels_missing_logged = False
         self.music_off_until = 0.0     # the 006 functions are missing: claim without music, no voice samples
@@ -346,6 +348,9 @@ class Runner:
         if not self.renderer.health()["ok"]:
             raise JobError(COMFY_CLOSED)
         photo = self.renderer.generate_photo(card["prompt"], int(card["seed"]), int(s["width"]), int(s["height"]))
+        if self.look and any(self.look):
+            # 2.7.2: once, on the new photo, before it is stored and stamped (a restamp reuses the stored photo)
+            photo = photo_look.apply_look(photo, vibrance=self.look[0], texture=self.look[1])
         photo_bytes = to_jpeg(photo, 92)
         card_bytes = to_jpeg(self._compose(card, photo, s), 93)
         v = int(card["version"])

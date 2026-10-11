@@ -5,6 +5,7 @@ import socket
 import sys
 import time
 
+import photo_look
 from jobs import VERSION, prune_cache, prune_render_temps, rotate_log, sweep_parts
 from pages import MultiRunner, build_runner, discover_pages
 from render import HERE, ensure_fonts_in_background, load_env
@@ -49,6 +50,8 @@ def main():
             log("[%s] %s -> %s, cards in %s (%s)" % (page.id, page.label, page.url, page.output_root, page.source))
     # Fonts download in the background: the heartbeat must start at once, or a slow GitHub on
     # the first start after an update would make the PC look offline (and lock Generate).
+    for r in runners:  # once at start, per page: "photo look: vibrance +20, texture +15"
+        r.log(photo_look.describe(r.look))
     ensure_fonts_in_background(runners[0].renderer, log=log if multi else runners[0].log)
     if not multi:
         runners[0].run_forever()

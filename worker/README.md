@@ -14,6 +14,13 @@ Sends a heartbeat every 15 s so the website can show "PC ready / ComfyUI closed 
 - Text settings (fonts, sizes, position) come from the `settings` row; a post's own fonts (migration 003: `claim_next_card` returns them as `fonts`) win over the settings fonts, per font, when set. The rules and the font list live in `../lib/text/layout.json` and `../lib/fonts/catalog.json`, shared with the website's Settings preview. Fonts download on first use from github.com/google/fonts; if one can't be fetched the card is stamped in Poppins.
 - Needs: Python 3.12 + Pillow, ComfyUI Desktop with `z_image_turbo_bf16`, `qwen_3_4b_fp8_mixed` (fast fp8 text encoder, run with
   `fp8_e4m3fn` weights; if the file is missing the worker falls back to `qwen_3_4b` + default weights), `ae`.
+  numpy is needed too (the photo look below; already installed for the reel voice).
+- Photo look (2.7.2, `photo_look.py`): every NEW card photo (post, closing and theme-preview cards) gets a light
+  Camera Raw-style finish right after Z-Image, before it is stored and stamped: vibrance +20 (muted colours lifted,
+  greys stay neutral, skin tones protected) and texture +15 (mid-detail like knits and wood grain, luminance only, no
+  halos). Restamps reuse the stored photo, so it is never applied twice; reels never get it. About 0.3 s a square photo.
+  Tune with `PHOTO_VIBRANCE` / `PHOTO_TEXTURE` (0-100, 0 = off) in `worker.env`, or per page in `pages/<id>.env`
+  (wins over `worker.env`); the log says `photo look: vibrance +20, texture +15` at start.
 
 ## Several pages (2.7.0)
 

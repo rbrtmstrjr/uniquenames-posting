@@ -528,7 +528,7 @@ class BusyElsewhereTest(unittest.TestCase):
         self.assertIsNone(ru.busy_elsewhere)
 
     def test_version(self):
-        self.assertEqual(jobs.VERSION, "2.7.1")
+        self.assertEqual(jobs.VERSION, "2.7.2")
 
 
 class ReelsFolderTest(unittest.TestCase):

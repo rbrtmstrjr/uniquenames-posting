@@ -15,12 +15,14 @@
 # heartbeat thread (worker_status in its own project) and its own log prefix ("[name-nest] ...").
 # 2.7.1: while one page's job runs, every other page's heartbeat sets worker_status.message to jobs.BUSY_ELSEWHERE,
 # which the website shows as "PC busy with your other page" instead of "PC ready" (one page alone never sets it).
+# 2.7.2: the card photo look (photo_look.py): PHOTO_VIBRANCE / PHOTO_TEXTURE from the page's own file, else worker.env.
 import glob
 import os
 import re
 import threading
 import time
 
+import photo_look
 from jobs import Runner
 from reels import ReelRunner
 from render import ComfyRenderer, default_output_root, load_env
@@ -33,7 +35,7 @@ REQUIRED = ("SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY")
 
 
 class Page:
-    def __init__(self, id, label, url, key, output_root, reels_dir, cache_dir, preview_cast, source):
+    def __init__(self, id, label, url, key, output_root, reels_dir, cache_dir, preview_cast, source, look_cfg=None):
         self.id = id                      # also the ComfyUI namespace: <id>/raw..., client id <id>-worker
         self.label = label
         self.url = url
@@ -43,6 +45,7 @@ class Page:
         self.cache_dir = cache_dir
         self.preview_cast = preview_cast  # theme-preview moment / cast (None = today's)
         self.source = source              # "worker.env" or "pages\<file>.env"
+        self.look_cfg = look_cfg or {}    # this page's own PHOTO_VIBRANCE / PHOTO_TEXTURE (2.7.2; unset = worker.env's)
 
     def __repr__(self):
         return "Page(%s, %s)" % (self.id, self.source)
@@ -65,7 +68,8 @@ def _page(cfg, page_id, here, source):
     cache = os.path.join(here, "cache") if page_id == DEFAULT_PAGE else os.path.join(here, "cache", page_id)
     return Page(page_id, label, cfg["SUPABASE_URL"].strip(), cfg["SUPABASE_SERVICE_ROLE_KEY"].strip(),
                 (cfg.get("OUTPUT_ROOT") or "").strip() or default_output_root(label),
-                (cfg.get("REELS_OUTPUT") or "").strip() or None, cache, cast or None, source)
+                (cfg.get("REELS_OUTPUT") or "").strip() or None, cache, cast or None, source,
+                {k: cfg[k] for k in photo_look.KEYS if (cfg.get(k) or "").strip()})
 
 
 def discover_pages(here, base_cfg):
@@ -120,7 +124,7 @@ def build_runner(page, base_cfg, log, prefix=False):
                        preview_cast=page.preview_cast)
     return Runner(supa, renderer, page.output_root, page.cache_dir,
                   float(base_cfg.get("POLL_SECONDS", "3")), float(base_cfg.get("HEARTBEAT_SECONDS", "15")),
-                  log=plog, reels=reels)
+                  log=plog, reels=reels, look=photo_look.settings(page.look_cfg, base_cfg, log=plog))
 
 
 class _Slot:
