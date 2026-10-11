@@ -287,3 +287,20 @@ describe("renderNamesPdf (Unique Names, Girl)", async () => {
     expect(onPage(r, r.pages, "thanks")).toContain("Follow @unique_names on Facebook for new names every day.");
   });
 });
+
+describe("sample render (the shop's preview pictures)", () => {
+  it("sample: true leaves the name count and the month off the cover (they would go stale); the buyer stamp stays", async () => {
+    const sections = planSections(FIX, "girl", UN.pdf, UN.nameCategories);
+    const base = { sections, gender: "girl" as const, buyer: "Your Name", edition: new Date("2026-10-11T00:00:00Z"),
+      pack: { pdf: UN.pdf, name: UN.brand.name, handle: UN.brand.handle }, passwords: { user: "Kp7m-Xr4d-Tq9w", owner: "owner-pw-different-1234" } };
+    const normal = await renderNamesPdf(base);
+    const sample = await renderNamesPdf({ ...base, sample: true });
+    expect(onPage(normal, 1, "cover")).toEqual(expect.arrayContaining(["130 NAMES · GROUPED BY MEANING", "October 2026 edition"]));
+    const cover = onPage(sample, 1, "cover");
+    expect(cover).toContain("GROUPED BY MEANING");
+    expect(cover.join(" ")).not.toMatch(/\d+ NAMES|edition/i);
+    expect(cover).toEqual(expect.arrayContaining(["PREPARED FOR", "Your Name"]));
+    expect(onPage(sample, 1, "footer")).toEqual(["Prepared for Your Name · page 1 of " + sample.pages]);
+    expect(onPage(sample, 1, "watermark")).toEqual(["Prepared for Your Name"]);
+  }, 60_000);
+});
