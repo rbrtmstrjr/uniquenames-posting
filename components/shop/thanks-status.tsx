@@ -72,7 +72,7 @@ export function ThanksStatus({ token, initial, copy, messenger, supportLine }: {
     return (
       <div className="space-y-5" aria-live="polite">
         <div className="flex items-center gap-3">
-          <span className="grid size-11 place-items-center rounded-full bg-accent text-accent-ink"><Check className="size-6" strokeWidth={3} aria-hidden /></span>
+          <span className="grid size-11 shrink-0 place-items-center rounded-full bg-accent text-accent-ink"><Check className="size-6" strokeWidth={3} aria-hidden /></span>
           <h1 className="font-display text-3xl text-ink">{copy.paidTitle}</h1>
         </div>
         <p className="text-muted">{copy.paidText}</p>

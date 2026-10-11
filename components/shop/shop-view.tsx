@@ -19,7 +19,7 @@ export interface ShopViewProps {
 
 export function ShopShell({ brandName, logo, children }: { brandName: string; logo: string | null; children: React.ReactNode }) {
   return (
-    <div className="min-h-dvh bg-bg text-ink">
+    <div className="min-h-dvh overflow-x-clip bg-bg text-ink">
       <header className="mx-auto flex max-w-5xl items-center gap-2 px-4 pt-5 sm:px-6">
         {/* eslint-disable-next-line @next/next/no-img-element -- a tiny static SVG from public/ */}
         {logo ? <img src={logo} alt="" className="size-8 rounded-lg" /> : <BookHeart className="size-6 text-accent" aria-hidden />}
@@ -49,13 +49,13 @@ export function ShopView(p: ShopViewProps) {
         </div>
         {p.previews && (
           <figure className="relative mx-auto w-full max-w-sm">
-            <div className="relative aspect-[4/5]">
+            <div className="relative aspect-[20/19]">
               {/* eslint-disable-next-line @next/next/no-img-element -- small static WebP previews from public/ (images are unoptimized here) */}
               <img src={p.previews.page} alt="A sample page of names with their meanings" width={640} height={905}
-                className="absolute right-0 top-6 w-[62%] rotate-[4deg] rounded-lg border border-line shadow-lg" />
+                className="absolute right-2 top-6 w-[60%] rotate-[4deg] rounded-lg border border-line shadow-lg" />
               {/* eslint-disable-next-line @next/next/no-img-element -- as above */}
               <img src={p.previews.cover} alt={`The cover of ${c.eyebrow}`} width={640} height={905}
-                className="absolute left-0 top-0 w-[66%] -rotate-[3deg] rounded-lg border border-line shadow-xl" />
+                className="absolute left-2 top-0 w-[64%] -rotate-[3deg] rounded-lg border border-line shadow-xl" />
             </div>
             <figcaption className="mt-1 text-center text-xs text-muted">Sample pages. Your copy shows your own name.</figcaption>
           </figure>
