@@ -10,8 +10,10 @@ import { PROMPT_NAMES_CAP } from "./suggest";
 // asks for a few more than missing; the deterministic filter keeps only valid, new, kind names with the right initials
 // and a card meaning grounded in the two parts' standard meanings (unique pages: no very common names either).
 
-/** A plan waits on this with a spinner on Today; past it the plan goes on without AI names. */
-export const INITIALS_TIMEOUT_MS = 30000;
+/** A plan waits on this with a spinner on Today (both AI calls together, well inside the page's 60 s); past it the plan goes on without AI names. */
+export const INITIALS_TIMEOUT_MS = 45000;
+/** The rewrite of stiff meanings is only tried with at least this much of the budget left. */
+export const REWRITE_MIN_MS = 6000;
 
 export const INITIALS_SYSTEM = activePack().suggest.initialsSystem;
 /** Unique Names: very common names are out for both parts (rare initials excepted). */
@@ -77,10 +79,10 @@ const namesOf = (raw: unknown): InitialsCandidate[] | null => {
 };
 
 /** The AI's two-word names for these initials (unfiltered). Never throws. */
-export function suggestInitialsNames(i: SuggestInitialsInput): Promise<GenerateJsonResult<InitialsCandidate[]>> {
+export function suggestInitialsNames(i: SuggestInitialsInput, timeoutMs = INITIALS_TIMEOUT_MS): Promise<GenerateJsonResult<InitialsCandidate[]>> {
   return aiJson<InitialsCandidate[]>({
     task: "small", system: INITIALS_SYSTEM, prompt: initialsPrompt(i), schema: INITIALS_SCHEMA, temperature: 0.6, thinkingBudget: 2048,
-    timeoutMs: INITIALS_TIMEOUT_MS, parse: namesOf,
+    timeoutMs, parse: namesOf,
   });
 }
 
@@ -121,6 +123,7 @@ export async function suggestForInitials(i: {
   gender: Gender; initials: string; want: number; need?: number; ask: number; allNames: string[]; existing: string[]; skip?: string[];
   examples?: string[]; knownParts?: Map<string, string>;
 }): Promise<{ ok: true; result: InitialsFilterResult } | { ok: false; error: string }> {
+  const deadline = Date.now() + INITIALS_TIMEOUT_MS;
   const ai = await suggestInitialsNames({
     gender: i.gender, initials: i.initials, count: i.ask, existing: [...i.existing, ...(i.skip ?? [])], examples: i.examples,
     partHints: partHintsFor(i.knownParts, i.initials),
@@ -129,10 +132,11 @@ export async function suggestForInitials(i: {
   const filter = (cands: InitialsCandidate[]) => filterInitialsCombos(cands, [...i.allNames, ...(i.skip ?? [])],
     { initials: i.initials, want: i.want, need: i.need, unique: INITIALS_UNIQUE, knownParts: i.knownParts }, i.gender);
   const first = filter(ai.data);
-  if (!first.stiffNames.length) return { ok: true, result: first };
+  const left = deadline - Date.now();
+  if (!first.stiffNames.length || left < REWRITE_MIN_MS) return { ok: true, result: first };
   // One retry for stiff meanings only: the AI rewrites them as natural phrases, then the whole batch is checked again.
   const fix = await aiJson<{ name: string; meaning: string }[]>({
-    task: "small", system: INITIALS_SYSTEM, prompt: rewritePrompt(first.stiffNames), schema: REWRITE_SCHEMA, temperature: 0.4, timeoutMs: INITIALS_TIMEOUT_MS,
+    task: "small", system: INITIALS_SYSTEM, prompt: rewritePrompt(first.stiffNames), schema: REWRITE_SCHEMA, temperature: 0.4, timeoutMs: left,
     parse: (raw) => namesOf(raw) as { name: string; meaning: string }[] | null,
   });
   if (!fix.ok) return { ok: true, result: first };

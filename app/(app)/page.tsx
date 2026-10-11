@@ -9,7 +9,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { brand } from "@/packs/shared";
 
 // Create post waits on Gemini for the caption (9 s budget) plus a few DB round trips;
-// By letter > Suggest with AI waits on Gemini for name ideas (up to ~50 s); an Initials plan waits on one AI call (up to 30 s).
+// By letter > Suggest with AI waits on Gemini for name ideas (up to ~50 s); an Initials plan waits on its AI calls (up to 45 s in all).
 export const maxDuration = 60;
 
 export default async function TodayPage() {
