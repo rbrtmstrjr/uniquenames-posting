@@ -5,6 +5,8 @@ import { nameKey, normalizeName, styleOf } from "@/lib/actions/helpers";
 import { validateName, validateTheme, type ThemeInput } from "@/lib/actions/validate";
 import { letterOf } from "@/lib/series/az";
 import { isCommonName, negativeMeaning, notAGivenName, otherGenderName } from "./common-names";
+import { plainWordsProblem } from "./plain-words";
+import { initialsOf } from "@/lib/series/initials";
 
 export interface NameSuggestion { name: string; meaning: string }
 export type ThemeFields = Omit<ThemeInput, "gender">;
@@ -179,4 +181,51 @@ export function filterLetterSuggestions(cands: LetterCandidate[], existing: Iter
     kept.push({ ...s, letter: need.letter });
   }
   return { fresh: kept, duplicates, invalid, offLetter, blocked, wrongGender, negative };
+}
+
+// ---------------------------------------------------------------- posts by initials (017): fresh AI combos
+/** What the AI returns for initials: the full name, each part's accepted meaning, the blended card meaning, the gender. */
+export interface InitialsCandidate extends NameSuggestion { gender?: string; first_meaning?: string; second_meaning?: string }
+export interface InitialsFilterResult extends FilterResult<NameSuggestion> {
+  /** Valid and new, but other initials, or more than wanted. */
+  offInitials: number;
+  /** Not a given name (a brand, a coinage) or a Filipino / Tagalog word or jargon in the name or meaning. */
+  blocked: number;
+  /** Said (by the AI, or by the common lists) to be the other gender's name. */
+  wrongGender: number;
+  /** A sad or harsh meaning (the card meaning or a part's). */
+  negative: number;
+}
+
+/**
+ * Fresh two-word names for a post by initials: the usual name filter (a valid two-word name, a meaning of 2 to 6
+ * lowercase words, new against `existing` = every name in the database plus any to skip, and earlier in the batch,
+ * case-insensitive), then out go hedged meanings ("x or y"), non-names, Filipino / Tagalog words and jargon, the other
+ * gender's names and unkind meanings; of the rest, names with exactly these initials (first name, middle name; accents
+ * dropped), at most `want`, in the AI's order (best first). Common names are allowed here: the follower asked for a
+ * pair of initials, so a well-loved first name is fine (rare letters would starve otherwise).
+ */
+export function filterInitialsCombos(cands: InitialsCandidate[], existing: Iterable<string>, need: { initials: string; want: number }, gender: Gender): InitialsFilterResult {
+  const list = Array.isArray(cands) ? cands.filter((c) => c && typeof c === "object") : [];
+  const said = new Map(list.map((c) => [typeof c.name === "string" ? nameKey(c.name) : "", c]));
+  const other = gender === "boy" ? "girl" : "boy";
+  const { fresh, duplicates, invalid: bad } = filterNameSuggestions(list, existing, "two-word");
+  let invalid = bad;
+  let left = need.want;
+  const kept: NameSuggestion[] = [];
+  let offInitials = 0, blocked = 0, wrongGender = 0, negative = 0;
+  const str = (v: unknown) => (typeof v === "string" ? v : "");
+  for (const s of fresh) {
+    const words = s.name.split(" ");
+    const c = said.get(nameKey(s.name));
+    const parts = [str(c?.first_meaning), str(c?.second_meaning)];
+    if (s.name.length > 40 || s.meaning.length > 80 || HEDGE.test(s.meaning)) { invalid++; continue; }
+    if (words.some(notAGivenName) || plainWordsProblem(s.name) || plainWordsProblem(s.meaning)) { blocked++; continue; }
+    if (str(c?.gender).trim().toLowerCase() === other || words.some((w) => otherGenderName(w, gender))) { wrongGender++; continue; }
+    if (negativeMeaning(s.meaning) || parts.some(negativeMeaning)) { negative++; continue; }
+    if (initialsOf(s.name) !== need.initials || left <= 0) { offInitials++; continue; }
+    left--;
+    kept.push(s);
+  }
+  return { fresh: kept, duplicates, invalid, offInitials, blocked, wrongGender, negative };
 }
