@@ -17,6 +17,7 @@ export const NAME_NEST_SHOP: PackShop = {
   messenger: null,
   delivery: { email: true, messenger: false },
   previews: null,
+  gallery: null, // no photos yet: the shop shows its plain background
   copy: {
     metaTitle: "The Name Nest Collection (PDF)",
     metaDescription: "Hand-picked baby names with meanings and origins, in one cozy printable PDF. Instant download.",

@@ -184,6 +184,13 @@ export interface PackPdf {
 /** What the shop sells: one edition of the names PDF (girl, boy or both). */
 export type ShopProduct = PdfGender;
 
+/** A shop gallery folder: `dir` is its public URL path; `images` and `alt` come from its manifest.json. */
+export interface ShopGallery {
+  dir: string;
+  alt: string;
+  images: readonly { src: string; width: number; height: number }[];
+}
+
 /**
  * The public names PDF shop (/shop, migration 019, docs/SHOP.md): on or off for this page, the prices and every text
  * the buyer reads. Server only (the pages pass what they need to the browser). Prices are in the currency's smallest
@@ -208,6 +215,9 @@ export interface PackShop {
   delivery: { email: boolean; messenger: false };
   /** Preview images under public/ (the PDF's cover and a names page, made with the real PDF builder). */
   previews: { cover: string; page: string } | null;
+  /** The slow-moving photo wall behind /shop (decorative): the page's clean card photos (no name text on them), small
+   *  WebP files under public/ (`dir`) listed in that folder's manifest.json. null = no gallery (a plain background). */
+  gallery: ShopGallery | null;
   copy: {
     /** <title> and the share text. */
     metaTitle: string;

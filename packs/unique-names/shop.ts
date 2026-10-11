@@ -1,4 +1,5 @@
 import type { PackShop } from "../types";
+import galleryManifest from "../../public/packs/unique-names/shop-gallery/manifest.json";
 
 // Unique Names (@unique_names): the public names PDF shop (/shop, docs/SHOP.md). Simple global English for moms around
 // the world, most in the Philippines: short sentences, no slang, no Tagalog. Pay with QR Ph (GCash, Maya, bank apps).
@@ -19,6 +20,8 @@ export const UNIQUE_NAMES_SHOP: PackShop = {
   messenger: "https://m.me/61572452954153",
   delivery: { email: true, messenger: false },
   previews: { cover: "/packs/unique-names/shop/cover.webp", page: "/packs/unique-names/shop/names-page.webp" },
+  // 28 clean photoshoot photos from our cards (no names on them), 480 px WebP, for the moving wall behind the page.
+  gallery: { dir: "/packs/unique-names/shop-gallery", ...galleryManifest },
   copy: {
     metaTitle: "The Unique Names Collection (PDF)",
     metaDescription: "Every unique baby name from our page, with simple meanings, in one lovely PDF. Instant download after payment.",
