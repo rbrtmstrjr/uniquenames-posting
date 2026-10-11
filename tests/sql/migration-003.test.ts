@@ -128,6 +128,7 @@ describe("fresh schema.sql matches v1 + 002..009", () => {
     await migrated.exec(m014);
     await migrated.exec(m015);
     await migrated.exec(m017);
+    await migrated.exec(stripSupabase(read("supabase", "migrations", "019_shop.sql"))); // 019: settings.shop_enabled
     const want = await shape(migrated);
     expect(want.functions).toHaveLength(2);
     expect(await shape(await freshDb())).toEqual(want);

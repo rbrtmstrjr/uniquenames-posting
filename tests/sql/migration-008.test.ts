@@ -115,6 +115,7 @@ describe("fresh schema.sql matches v1 + 002..008 (+ 009)", () => {
     await migrated.exec(m014);
     await migrated.exec(m015);
     await migrated.exec(m017);
+    await migrated.exec(stripSupabase(read("supabase", "migrations", "019_shop.sql"))); // 019: settings.shop_enabled
     const want = await shape(migrated);
     const names = (want.constraints as { conname: string }[]).map((c) => c.conname);
     expect(names).toEqual(expect.arrayContaining(["reel_scenes_shot_size_check", "reel_scenes_subject_check", "reel_scenes_motion_check"]));

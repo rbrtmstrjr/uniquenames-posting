@@ -199,6 +199,7 @@ describe("fresh schema.sql matches v1 + 002..011 (+ 012..018)", () => {
     await db.exec(stripSupabase(read("supabase", "migrations", "015_name_nest.sql")));
     await db.exec(stripSupabase(read("supabase", "migrations", "017_initials_posts.sql")));
     await db.exec(stripSupabase(read("supabase", "migrations", "018_names_pdf.sql")));
+    await db.exec(stripSupabase(read("supabase", "migrations", "019_shop.sql"))); // 019: settings.shop_enabled
     const want = await shape(db);
     const cols = (want.columns as { table_name: string; column_name: string }[]).map((c) => `${c.table_name}.${c.column_name}`);
     expect(cols).toEqual(expect.arrayContaining(["posts.series", "posts.series_id", "posts.series_part"]));

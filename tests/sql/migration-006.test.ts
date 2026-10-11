@@ -331,6 +331,7 @@ describe("fresh schema.sql matches v1 + 002..006 (+ 007, 008)", () => {
     await migrated.exec(m014);
     await migrated.exec(m015);
     await migrated.exec(m017);
+    await migrated.exec(stripSupabase(read("supabase", "migrations", "019_shop.sql"))); // 019: settings.shop_enabled
     const want = await shape(migrated);
     expect(want.functions).toHaveLength(7);
     expect(want.voices).toHaveLength(31);

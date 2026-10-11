@@ -88,6 +88,7 @@ describe("fresh schema.sql matches v1 + 002..014 (reels, reel_scenes, settings)"
   it("has the same columns, constraints and settings row", async () => {
     const migrated = await migratedDb();
     await migrated.exec(m015);
+    await migrated.exec(stripSupabase(read("supabase", "migrations", "019_shop.sql"))); // 019: settings.shop_enabled
     const want = await shape(migrated);
     const cols = (want.columns as { table_name: string; column_name: string }[]).map((c) => `${c.table_name}.${c.column_name}`);
     expect(cols).toEqual(expect.arrayContaining(["reels.format", "reels.topic_id", "reel_scenes.on_screen", "settings.reel_labels"]));

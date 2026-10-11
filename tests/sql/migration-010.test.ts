@@ -140,6 +140,7 @@ describe("fresh schema.sql matches v1 + 002..010 (+ 011..018)", () => {
     await migrated.exec(m015);
     await migrated.exec(m017);
     await migrated.exec(m018);
+    await migrated.exec(stripSupabase(read("supabase", "migrations", "019_shop.sql"))); // 019: settings.shop_enabled
     const want = await shape(migrated);
     const cols = (want.columns as { table_name: string; column_name: string }[]).map((c) => `${c.table_name}.${c.column_name}`);
     expect(cols).toEqual(expect.arrayContaining(["settings.cta_enabled", "settings.cta_messages"]));
