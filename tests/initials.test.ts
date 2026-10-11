@@ -57,12 +57,13 @@ describe("initials helpers", () => {
     expect(plan.short).toBe(8);
   });
 
-  it("asks the AI for a few more than missing, within a cap; none when nothing is missing", () => {
+  it("asks the AI for about 1.5x the missing names, within a cap; none when nothing is missing", () => {
     expect(initialsAiWanted(0)).toBe(0);
     expect(initialsAiWanted(-2)).toBe(0);
     expect(initialsAiWanted(1)).toBe(4);
-    expect(initialsAiWanted(7)).toBe(10);
-    expect(initialsAiWanted(40)).toBe(16);
+    expect(initialsAiWanted(7)).toBe(11);
+    expect(initialsAiWanted(10)).toBe(15);
+    expect(initialsAiWanted(40)).toBe(20);
   });
 
   it("Auto picks a stable count in min–max per date, gender and initials", () => {
@@ -122,36 +123,39 @@ describe("filterInitialsCombos", () => {
     expect(r.ungrounded).toBe(1);
   });
 
-  it("unique pages: very common names are out for either part while enough uncommon ones pass", () => {
+  it("unique pages: very common names (either part) are set apart as `relaxed`, never mixed with the uncommon ones", () => {
     const list = [
       cand("Aaron Rhett", "lofty advice", "lofty", "advice"), cand("Alaric Ryan", "ruler and king", "ruler of all", "little king"),
       cand("Ansel Roan", "divine red", "divine helmet", "red"), cand("Amos Rhodes", "carried by roses", "carried by god", "roses"),
     ];
-    const strict = filterInitialsCombos(list, [], opts({ unique: true, need: 2 }), "boy");
+    const strict = filterInitialsCombos(list, [], opts({ unique: true }), "boy");
     expect(strict.fresh.map((f) => f.name)).toEqual(["Ansel Roan", "Amos Rhodes"]);
+    expect(strict.relaxed.map((f) => f.name)).toEqual(["Aaron Rhett", "Alaric Ryan"]);
     expect(strict.common).toBe(2);
     // name-nest (not unique): common names are fine
     expect(filterInitialsCombos(list, [], opts(), "boy").fresh).toHaveLength(4);
   });
 
-  it("too few uncommon: relaxes only the part that blocked, uncommon ones first", () => {
+  it("relaxed names: common only in the part that blocked the most first, then the other part", () => {
     const list = [
       cand("Aaron Rhett", "lofty advice", "lofty", "advice"), cand("Adam Reed", "earth and red", "earth", "red"),
       cand("Alaric Ryan", "ruler and king", "ruler of all", "little king"), cand("Ansel Roan", "divine red", "divine helmet", "red"),
     ];
-    const r = filterInitialsCombos(list, [], opts({ unique: true, need: 3 }), "boy");
-    expect(r.fresh.map((f) => f.name)).toEqual(["Ansel Roan", "Aaron Rhett", "Adam Reed"]);
-    expect(r.common).toBe(1); // Alaric Ryan: the middle name's rule never had to relax
+    const r = filterInitialsCombos(list, [], opts({ unique: true }), "boy");
+    expect(r.fresh.map((f) => f.name)).toEqual(["Ansel Roan"]);
+    expect(r.relaxed.map((f) => f.name)).toEqual(["Aaron Rhett", "Adam Reed", "Alaric Ryan"]);
+    expect(r.common).toBe(3);
   });
 
   it("rare initials (Q, U, X, Y, Z) relax the rule for that part only", () => {
     const r = filterInitialsCombos([
       cand("Xavier Zion", "new house of zion", "new house", "zion"), cand("Xavier Zeke", "new house of god", "new house", "god strengthens"),
-    ], [], opts({ initials: "XZ", unique: true, need: 1 }), "boy");
+    ], [], opts({ initials: "XZ", unique: true }), "boy");
     expect(r.fresh.map((f) => f.name)).toEqual(["Xavier Zion", "Xavier Zeke"]);
     const a = filterInitialsCombos([cand("Aaron Zion", "lofty zion", "lofty", "zion"), cand("Alaric Zev", "ruler of the wolf", "ruler of all", "wolf")],
-      [], opts({ initials: "AZ", unique: true, need: 1 }), "boy");
+      [], opts({ initials: "AZ", unique: true }), "boy");
     expect(a.fresh.map((f) => f.name)).toEqual(["Alaric Zev"]);
+    expect(a.relaxed.map((f) => f.name)).toEqual(["Aaron Zion"]);
   });
 
   it("drops wrong initials, one-word or three-word names, hedges, repeats in the batch", () => {
@@ -192,6 +196,12 @@ describe("meaning grounding", () => {
 });
 
 describe("one use of each part per post", () => {
+  it("common AI names (late) come only after the names used before", () => {
+    const plan = pickInitialsNames({ want: 3, available: [], fresh: [{ name: "Alaric Rhys", meaning: "x y" }], late: [{ name: "Aaron Rhett", meaning: "x y" }],
+      used: [{ id: "u1", name: "Amos Ross", meaning: "x y" }] });
+    expect(plan.picks.map((p) => `${p.name} [${p.source}]`)).toEqual(["Alaric Rhys [new]", "Amos Ross [used]", "Aaron Rhett [new]"]);
+  });
+
   it("skips a name whose first or middle name is already in the post (or on it)", () => {
     const plan = pickInitialsNames({
       want: 5, takenParts: ["Amos Jude"],

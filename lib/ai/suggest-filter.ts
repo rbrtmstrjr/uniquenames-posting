@@ -194,8 +194,10 @@ export interface InitialsFilterResult extends FilterResult<InitialsSuggestion> {
   offInitials: number;
   /** Not a given name (a brand, a coinage) or a Filipino / Tagalog word or jargon in the name or meaning. */
   blocked: number;
-  /** A very common name for one part (US / PH top 100, classics) on a page of unique names. */
+  /** A very common name for one part (US / PH top 100, classics) on a page of unique names: in `relaxed`, not `fresh`. */
   common: number;
+  /** Otherwise valid names that only pass with the common-name rule relaxed (the plan takes them after names used before). */
+  relaxed: InitialsSuggestion[];
   /** Said (by the AI, or by the common lists) to be the other gender's name. */
   wrongGender: number;
   /** A sad or harsh meaning (the card meaning or a part's). */
@@ -218,10 +220,8 @@ export interface InitialsFilterOptions {
   initials: string;
   /** At most this many are kept (in the AI's order). */
   want: number;
-  /** Unique names (Unique Names): very common names are out for BOTH parts, except a rare initial's part. */
+  /** Unique names (Unique Names): very common names go to `relaxed` for BOTH parts, except a rare initial's part. */
   unique?: boolean;
-  /** When fewer than this pass the common-name rule, it is relaxed for the part(s) that blocked (default `want`). */
-  need?: number;
   /** The owner's own meanings of single names (lowercase name → meaning): a part found here uses this meaning. */
   knownParts?: Map<string, string>;
 }
@@ -240,7 +240,7 @@ export function filterInitialsCombos(cands: InitialsCandidate[], existing: Itera
   const said = new Map(list.map((c) => [typeof c.name === "string" ? nameKey(c.name) : "", c]));
   const other = gender === "boy" ? "girl" : "boy";
   const { fresh, duplicates, invalid: bad } = filterNameSuggestions(list, existing, "two-word", INITIALS_MEANING_MAX_WORDS);
-  const r: InitialsFilterResult = { fresh: [], duplicates, invalid: bad, offInitials: 0, blocked: 0, common: 0, wrongGender: 0, negative: 0, ungrounded: 0, stiff: 0, stiffNames: [] };
+  const r: InitialsFilterResult = { fresh: [], duplicates, invalid: bad, offInitials: 0, blocked: 0, common: 0, wrongGender: 0, negative: 0, ungrounded: 0, stiff: 0, stiffNames: [], relaxed: [] };
   const str = (v: unknown) => (typeof v === "string" ? v.replace(/\s+/g, " ").trim().toLowerCase().replace(/[.!]+$/, "") : "");
   const strictPart = o.initials.split("").map((l) => !!o.unique && !(RARE_INITIALS as readonly string[]).includes(l));
   type Ok = InitialsSuggestion & { commonParts: boolean[] };
@@ -260,22 +260,19 @@ export function filterInitialsCombos(cands: InitialsCandidate[], existing: Itera
   }
   const allowed = (x: Ok, relax: boolean[]) => x.commonParts.every((isCommon, i) => !isCommon || !strictPart[i] || relax[i]);
   const strict = passed.filter((x) => allowed(x, [false, false]));
-  let kept = strict;
-  const need = o.need ?? o.want;
-  if (strict.length < need) {
-    // Relax one part at a time, the part that blocked the most names first, until enough pass.
-    const blockedBy = [0, 1].map((i) => passed.filter((x) => !allowed(x, [false, false]) && x.commonParts[i] && strictPart[i]).length);
-    const relax = [false, false];
-    for (const i of [0, 1].sort((a, b) => blockedBy[b] - blockedBy[a])) {
-      if (!blockedBy[i] || kept.length >= need) continue;
-      relax[i] = true;
-      kept = [...strict, ...passed.filter((x) => !strict.includes(x) && allowed(x, relax))];
-    }
-  }
-  r.common = passed.length - kept.length;
-  for (const x of kept) {
+  // Common only: relaxing the part that blocked the most names comes first (names common in that part only), then the
+  // other part, then both. The plan takes these last, after the owner's names used before.
+  const blocked = passed.filter((x) => !strict.includes(x));
+  const blockedBy = [0, 1].map((i) => blocked.filter((x) => x.commonParts[i] && strictPart[i]).length);
+  const top = blockedBy[0] >= blockedBy[1] ? [true, false] : [false, true];
+  const rank = (x: Ok) => (allowed(x, top) ? 0 : allowed(x, [!top[0], !top[1]]) ? 1 : 2);
+  const relaxed = [...blocked].sort((a, b) => rank(a) - rank(b));
+  r.common = relaxed.length;
+  const out = (x: Ok) => ({ name: x.name, meaning: x.meaning, parts: x.parts });
+  for (const x of strict) {
     if (r.fresh.length >= o.want) { r.offInitials++; continue; }
-    r.fresh.push({ name: x.name, meaning: x.meaning, parts: x.parts });
+    r.fresh.push(out(x));
   }
+  r.relaxed = relaxed.slice(0, o.want).map(out);
   return r;
 }

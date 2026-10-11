@@ -108,7 +108,7 @@ describe("planInitialsAction (the preview)", () => {
     expect(r.ok && [r.want, r.short, r.aiNote, r.reuse]).toEqual([6, 0, null, true]);
     expect(generateJson).toHaveBeenCalledTimes(1);
     const call = generateJson.mock.calls[0][0] as { prompt: string; system: string };
-    expect(call.prompt).toMatch(/^Suggest 7 two-word baby boy names with the initials A and R: the first name starts with A and the middle name starts with R\./);
+    expect(call.prompt).toMatch(/^Suggest 6 two-word baby boy names with the initials A and R: the first name starts with A and the middle name starts with R\./);
     // the AI never repeats a name it can see: every A·R name in the database, any status or gender
     expect(call.prompt).toContain("Arlo Reed, Ansel Roan, Amos Rhett, Abel Ross, Ava Rose, Ari Rune, Axel Ryder");
     expect(call.system).toContain("@unique_names");
@@ -128,10 +128,16 @@ describe("planInitialsAction (the preview)", () => {
     ]);
   });
 
-  it("only common names offered: the rule relaxes for the part that blocked, so the plan is not short", async () => {
-    generateJson.mockResolvedValueOnce(combos(["Aaron Rhett", "lofty advice", "lofty", "advice"]));
+  it("only common names offered: the owner's used names come first, the common AI names only after them", async () => {
+    generateJson.mockResolvedValueOnce(combos(["Aaron Rhys", "lofty ardor", "lofty", "ardor"]));
     const r = await planInitialsAction({ ...base, count: 3 });
-    expect(r.ok && r.names.map((n) => n.name)).toEqual(["Ansel Roan", "Arlo Reed", "Aaron Rhett"]);
+    expect(r.ok && r.names.map((n) => `${n.name} [${n.source}]`)).toEqual(["Ansel Roan [available]", "Arlo Reed [available]", "Amos Rhett [used]"]);
+    generateJson.mockResolvedValueOnce(combos(["Aaron Rhys", "lofty ardor", "lofty", "ardor"]));
+    const more = await planInitialsAction({ ...base, count: 5 });
+    expect(more.ok && more.names.map((n) => `${n.name} [${n.source}]`)).toEqual([
+      "Ansel Roan [available]", "Arlo Reed [available]", "Amos Rhett [used]", "Abel Ross [used]", "Aaron Rhys [new]",
+    ]);
+    expect(more.ok && more.fresh.map((f) => f.name)).toEqual(["Aaron Rhys"]);
   });
 
   it("stiff meanings get ONE corrective rewrite call; the rewrite is checked again (grounded + natural)", async () => {

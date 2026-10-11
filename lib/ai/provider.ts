@@ -2,8 +2,11 @@ import "server-only";
 import { generateJson, type GenerateJsonInput, type GenerateJsonResult } from "./gemini";
 import { claudeJson, CLAUDE_HAIKU, CLAUDE_OPUS, CLAUDE_SONNET, type ClaudeEffort } from "./claude";
 
-/** "script" = a reel script (long, careful); "small" = captions and name / theme / letter suggestions. */
-export type AiTask = "script" | "small";
+/**
+ * "script" = a reel script (long, careful); "small" = captions and name / theme / letter suggestions; "initials" = the
+ * fresh two-word names of a post by initials (017) and their one rewrite: true meanings matter, so Claude Sonnet.
+ */
+export type AiTask = "script" | "small" | "initials";
 export type AiJsonInput<T> = GenerateJsonInput<T> & { task: AiTask };
 
 /** Which AI writes the text: Gemini unless AI_PROVIDER=claude (explicit only; no automatic fallback). */
@@ -13,6 +16,7 @@ export function aiProvider(): "gemini" | "claude" {
 
 /** The Claude model for a task: Haiku, except scripts with AI_SCRIPT_MODEL=sonnet / opus (or the full model id). */
 export function claudeModelFor(task: AiTask): string {
+  if (task === "initials") return CLAUDE_SONNET;
   if (task !== "script") return CLAUDE_HAIKU;
   const want = process.env.AI_SCRIPT_MODEL?.trim().toLowerCase();
   if (want === "sonnet" || want === CLAUDE_SONNET) return CLAUDE_SONNET;

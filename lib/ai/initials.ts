@@ -81,7 +81,7 @@ const namesOf = (raw: unknown): InitialsCandidate[] | null => {
 /** The AI's two-word names for these initials (unfiltered). Never throws. */
 export function suggestInitialsNames(i: SuggestInitialsInput, timeoutMs = INITIALS_TIMEOUT_MS): Promise<GenerateJsonResult<InitialsCandidate[]>> {
   return aiJson<InitialsCandidate[]>({
-    task: "small", system: INITIALS_SYSTEM, prompt: initialsPrompt(i), schema: INITIALS_SCHEMA, temperature: 0.6, thinkingBudget: 2048,
+    task: "initials", system: INITIALS_SYSTEM, prompt: initialsPrompt(i), schema: INITIALS_SCHEMA, temperature: 0.6, thinkingBudget: 2048,
     timeoutMs, parse: namesOf,
   });
 }
@@ -120,7 +120,7 @@ export function rewritePrompt(stiff: { name: string; meaning: string; parts: [st
  * many the plan is missing (the common-name rule relaxes below it). Never throws.
  */
 export async function suggestForInitials(i: {
-  gender: Gender; initials: string; want: number; need?: number; ask: number; allNames: string[]; existing: string[]; skip?: string[];
+  gender: Gender; initials: string; want: number; ask: number; allNames: string[]; existing: string[]; skip?: string[];
   examples?: string[]; knownParts?: Map<string, string>;
 }): Promise<{ ok: true; result: InitialsFilterResult } | { ok: false; error: string }> {
   const deadline = Date.now() + INITIALS_TIMEOUT_MS;
@@ -130,13 +130,13 @@ export async function suggestForInitials(i: {
   });
   if (!ai.ok) return { ok: false, error: ai.error };
   const filter = (cands: InitialsCandidate[]) => filterInitialsCombos(cands, [...i.allNames, ...(i.skip ?? [])],
-    { initials: i.initials, want: i.want, need: i.need, unique: INITIALS_UNIQUE, knownParts: i.knownParts }, i.gender);
+    { initials: i.initials, want: i.want, unique: INITIALS_UNIQUE, knownParts: i.knownParts }, i.gender);
   const first = filter(ai.data);
   const left = deadline - Date.now();
   if (!first.stiffNames.length || left < REWRITE_MIN_MS) return { ok: true, result: first };
   // One retry for stiff meanings only: the AI rewrites them as natural phrases, then the whole batch is checked again.
   const fix = await aiJson<{ name: string; meaning: string }[]>({
-    task: "small", system: INITIALS_SYSTEM, prompt: rewritePrompt(first.stiffNames), schema: REWRITE_SCHEMA, temperature: 0.4, timeoutMs: left,
+    task: "initials", system: INITIALS_SYSTEM, prompt: rewritePrompt(first.stiffNames), schema: REWRITE_SCHEMA, temperature: 0.4, timeoutMs: left,
     parse: (raw) => namesOf(raw) as { name: string; meaning: string }[] | null,
   });
   if (!fix.ok) return { ok: true, result: first };

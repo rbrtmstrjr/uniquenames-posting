@@ -69,11 +69,15 @@ const key = (s: string) => s.replace(/\s+/g, " ").trim().toLowerCase();
 
 /**
  * The names of a post by initials, strictly new first: unused names (in the order given), then fresh AI names, then
- * names used before (pass them least recently used first), `want` at most. Each first name and each middle name is
+ * names used before (pass them least recently used first), then `late` fresh names (common ones), `want` at most. Each first name and each middle name is
  * used once per post (no two "June"s), never one of `takenParts` (the names already on the post), so a name is never
  * there twice either. `short` = how many the post lacks when all three run out.
  */
-export function pickInitialsNames(i: { want: number; available: InitialsName[]; fresh: InitialsCombo[]; used: InitialsName[]; takenParts?: string[] }): InitialsNamesPlan {
+export function pickInitialsNames(i: {
+  want: number; available: InitialsName[]; fresh: InitialsCombo[]; used: InitialsName[]; takenParts?: string[];
+  /** Fresh AI names that are common (a unique page relaxed its rule for them): only after the names used before. */
+  late?: InitialsCombo[];
+}): InitialsNamesPlan {
   const picks: InitialsPick[] = [];
   const parts = new Set((i.takenParts ?? []).flatMap((n) => key(n).split(" ")));
   const take = (source: InitialsSource, rows: { id?: string; name: string; meaning: string; parts?: [string, string] }[]) => {
@@ -88,6 +92,7 @@ export function pickInitialsNames(i: { want: number; available: InitialsName[]; 
   take("available", i.available);
   take("new", i.fresh);
   take("used", i.used);
+  take("new", i.late ?? []);
   const counts: SourceCounts = { available: 0, new: 0, used: 0 };
   for (const p of picks) counts[p.source]++;
   return { picks, counts, short: Math.max(0, i.want - picks.length) };
@@ -96,9 +101,9 @@ export function pickInitialsNames(i: { want: number; available: InitialsName[]; 
 /** "3 unused · 7 new AI · 0 reused". */
 export const sourceSummary = (c: SourceCounts) => (["available", "new", "used"] as const).map((s) => `${c[s]} ${SOURCE_LABEL[s]}`).join(" · ");
 
-/** Fresh AI names asked for when `need` are missing: a few more than needed (the checks drop some), within a cap. */
-export const INITIALS_AI = { extra: 3, min: 4, max: 16 } as const;
-export const initialsAiWanted = (need: number) => (need <= 0 ? 0 : Math.min(INITIALS_AI.max, Math.max(INITIALS_AI.min, need + INITIALS_AI.extra)));
+/** Fresh AI names asked for when `need` are missing: about 1.5 times as many (the checks drop some), within a cap. */
+export const INITIALS_AI = { factor: 1.5, min: 4, max: 20 } as const;
+export const initialsAiWanted = (need: number) => (need <= 0 ? 0 : Math.min(INITIALS_AI.max, Math.max(INITIALS_AI.min, Math.ceil(need * INITIALS_AI.factor))));
 
 /** Cards for a post by initials: the chosen count, or for Auto a stable pick in min–max for this date, gender and initials. */
 export function initialsWanted(count: number | null, s: { min_images: number; max_images: number }, k: { postDate: string; gender: Gender; initials: string }): number {

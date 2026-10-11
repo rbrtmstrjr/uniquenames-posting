@@ -116,27 +116,31 @@ export async function planInitialsNames(sb: SB, i: {
   const skip = i.skip ?? [];
   const known = [...stock.allNames, ...skip];
   // Names already shown are checked again (still new, still grounded in their part meanings).
-  const kept = filterInitialsCombos((i.keep ?? []).map((c) => ({ name: c.name, meaning: c.meaning, gender: i.gender, part1_meaning: c.parts?.[0], part2_meaning: c.parts?.[1] })),
-    known, { initials: i.initials, want: i.want, unique: INITIALS_UNIQUE, knownParts: stock.knownParts }, i.gender).fresh;
-  let fresh = kept;
+  const keptAll = filterInitialsCombos((i.keep ?? []).map((c) => ({ name: c.name, meaning: c.meaning, gender: i.gender, part1_meaning: c.parts?.[0], part2_meaning: c.parts?.[1] })),
+    known, { initials: i.initials, want: i.want, unique: INITIALS_UNIQUE, knownParts: stock.knownParts }, i.gender);
+  const kept = [...keptAll.fresh, ...keptAll.relaxed];
+  let fresh: InitialsCombo[] = keptAll.fresh;
+  // Common AI names (a unique page relaxed its rule for them) come only after the names used before.
+  let late: InitialsCombo[] = keptAll.relaxed;
   let aiError: string | undefined;
-  const need = i.want - stock.available.length - kept.length;
+  const need = i.want - stock.available.length - keptAll.fresh.length;
   if (i.ai && need > 0) {
     const ask = initialsAiWanted(need);
     // Every valid one is kept (a name whose first or middle name repeats another's is skipped when picking).
     const ai = await suggestForInitials({
-      gender: i.gender, initials: i.initials, want: ask, need, ask, examples: stock.examples, knownParts: stock.knownParts,
+      gender: i.gender, initials: i.initials, want: ask, ask, examples: stock.examples, knownParts: stock.knownParts,
       allNames: [...known, ...kept.map((k) => k.name)], existing: [...stock.seen, ...kept.map((k) => k.name)], skip,
     });
     if (!ai.ok) aiError = ai.error;
     else {
-      fresh = [...kept, ...ai.result.fresh];
-      if (!ai.result.fresh.length) aiError = `The AI had no new ${initialsText(i.initials)} names this time.`;
+      fresh = [...keptAll.fresh, ...ai.result.fresh];
+      late = [...keptAll.relaxed, ...ai.result.relaxed];
+      if (!ai.result.fresh.length && !ai.result.relaxed.length) aiError = `The AI had no new ${initialsText(i.initials)} names this time.`;
     }
   }
-  const plan = pickInitialsNames({ want: i.want, available: stock.available, fresh, used: i.reuse === false ? [] : stock.used, takenParts: i.onPost?.names });
+  const plan = pickInitialsNames({ want: i.want, available: stock.available, fresh, late, used: i.reuse === false ? [] : stock.used, takenParts: i.onPost?.names });
   const taken = new Set(plan.picks.filter((p) => p.source === "new").map((p) => nameKey(p.name)));
-  return { ok: true, result: { plan, fresh: fresh.filter((f) => taken.has(nameKey(f.name))), aiError, stock } };
+  return { ok: true, result: { plan, fresh: [...fresh, ...late].filter((f) => taken.has(nameKey(f.name))), aiError, stock } };
 }
 
 /** Does the database have migration 017 (posts.initials and its functions)? A read error other than "no such column" counts as yes. */

@@ -93,8 +93,8 @@ export async function cardNameIdeasAction(cardId: string): Promise<CardNameIdeas
     const ai = await suggestForInitials({ gender, initials, want: CARD_IDEAS, ask: CARD_IDEAS + 3, allNames: rows.map((n) => n.name), knownParts,
       existing: rows.filter((n) => hasInitials(n.name, initials)).map((n) => n.name) });
     if (!ai.ok) return fail(`The AI could not suggest names: ${ai.error}`);
-    if (!ai.result.fresh.length) return fail(`The AI had no new ${initialsText(initials)} names this time. Try again.`);
-    return { ok: true, ideas: ai.result.fresh.map((n) => ({ name: n.name, meaning: n.meaning })) };
+    if (!ai.result.fresh.length && !ai.result.relaxed.length) return fail(`The AI had no new ${initialsText(initials)} names this time. Try again.`);
+    return { ok: true, ideas: [...ai.result.fresh, ...ai.result.relaxed].slice(0, CARD_IDEAS).map((n) => ({ name: n.name, meaning: n.meaning })) };
   }
   // A post by letter: the ideas start with its letter too (the hardened letter prompt and checks).
   if (isLetter(letter)) {
