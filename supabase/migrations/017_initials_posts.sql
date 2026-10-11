@@ -1,7 +1,7 @@
 -- Unique Names posting: posts by initials (Today > Initials: two-word names whose first name starts with one chosen
 -- letter and whose middle name starts with another, like "A·R" for Arjay Royce). Paste the whole file into the
 -- Supabase SQL editor and run it. Safe to run more than once. Needs 016_swap_card_name.sql first (015_name_nest.sql is
--- not needed). A fresh project gets all of this from supabase/schema.sql already. One new nullable column and three
+-- not needed). A fresh project gets all of this from supabase/schema.sql already. One new nullable column and four
 -- new functions; nothing the worker reads (no restart). Until this runs, a post by initials is still made from the
 -- unused names and new AI names only (no names used before), without its "A·R" label.
 --
@@ -15,6 +15,17 @@
 alter table public.posts add column if not exists initials text;
 alter table public.posts drop constraint if exists posts_initials_check;
 alter table public.posts add constraint posts_initials_check check (initials is null or initials ~ '^[A-Z]{2}$');
+
+-- set_name_origin: a fresh two-word name's origin ("Latin · Irish", the Name Nest card's chip; no US rank for a pair).
+-- Only when the names.origin column exists (015_name_nest.sql): a project without it simply has no origins.
+create or replace function public.set_name_origin(p_name uuid, p_origin text) returns void language plpgsql as $$
+begin
+  if nullif(btrim(coalesce(p_origin, '')), '') is null then return; end if;
+  if not exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'names' and column_name = 'origin') then
+    return;
+  end if;
+  execute 'update public.names set origin = $1 where id = $2' using left(btrim(p_origin), 40), p_name;
+end $$;
 
 -- create_initials_post: a whole post by initials in ONE transaction, idempotent per request_id (a double press makes one
 -- post). Each card says where its name comes from: source 'available' (name_id: locked, reserved like create_post),
@@ -92,6 +103,7 @@ begin
       insert into public.names (name, meaning, gender, style, status, post_id, position)
       values (btrim(v_c->>'name'), btrim(v_c->>'meaning'), v_gender, 'two-word', 'reserved', v_post, v_pos)
       returning id into v_name;
+      perform public.set_name_origin(v_name, v_c->>'origin');
     elsif v_c->>'source' = 'available' then
       v_name := (v_c->>'name_id')::uuid;
       update public.names set status = 'reserved', post_id = v_post, position = v_pos where id = v_name;
@@ -146,6 +158,7 @@ begin
     insert into public.names (name, meaning, gender, style, status, post_id, position)
     values (btrim(c->>'name'), btrim(c->>'meaning'), v_post.gender, 'two-word', 'reserved', p_post, v_pos)
     returning id into v_name;
+    perform public.set_name_origin(v_name, c->>'origin');
   elsif v_src = 'available' then
     v_name := (c->>'name_id')::uuid;
     update public.names set status = 'reserved', post_id = p_post, position = v_pos where id = v_name;
@@ -225,9 +238,10 @@ begin
 end $$;
 
 -- @supabase-only begin
+revoke execute on function public.set_name_origin(uuid, text) from public, anon;
 revoke execute on function public.create_initials_post(jsonb) from public, anon;
 revoke execute on function public.add_initials_card(uuid, jsonb) from public, anon;
 revoke execute on function public.swap_initials_card_name(uuid, uuid, int, text, text, bigint) from public, anon;
-grant execute on function public.create_initials_post(jsonb), public.add_initials_card(uuid, jsonb),
+grant execute on function public.set_name_origin(uuid, text), public.create_initials_post(jsonb), public.add_initials_card(uuid, jsonb),
   public.swap_initials_card_name(uuid, uuid, int, text, text, bigint) to authenticated, service_role;
 -- @supabase-only end

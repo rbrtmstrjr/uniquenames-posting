@@ -76,7 +76,8 @@ describe("017_initials_posts.sql on the live schema (v1 + 002..016)", () => {
     await db.exec(m017);
     const theme = await addTheme(db);
     const a = await addName(db, "Arlo Rhys");
-    expect((await create(db, plan(theme, [{ source: "available", name: "Arlo Rhys", name_id: a }]))).status).toBe("ok");
+    // a fresh name's origin is simply left out without 015's names.origin column
+    expect((await create(db, plan(theme, [{ source: "available", name: "Arlo Rhys", name_id: a }, { source: "new", name: "Asher Rowan", origin: "Hebrew · Irish" } as Card])))).toMatchObject({ status: "ok" });
   });
 
   it("stores two capitals A–Z, nothing else", async () => {
@@ -94,7 +95,7 @@ describe("017_initials_posts.sql on the live schema (v1 + 002..016)", () => {
     await db.exec("create role anon; create role authenticated; create role service_role;");
     await db.exec(m017raw);
     await db.exec(m017raw);
-    for (const fn of ["create_initials_post(jsonb)", "add_initials_card(uuid, jsonb)", "swap_initials_card_name(uuid, uuid, int, text, text, bigint)"]) {
+    for (const fn of ["set_name_origin(uuid, text)", "create_initials_post(jsonb)", "add_initials_card(uuid, jsonb)", "swap_initials_card_name(uuid, uuid, int, text, text, bigint)"]) {
       const can = async (role: string) => (await one<{ ok: boolean }>(db, `select has_function_privilege($1, $2, 'execute') ok`, [role, `public.${fn}`])).ok;
       expect(await can("authenticated")).toBe(true);
       expect(await can("anon")).toBe(false);
@@ -103,7 +104,7 @@ describe("017_initials_posts.sql on the live schema (v1 + 002..016)", () => {
 
   it("changes no existing function", async () => {
     const defs = async (db: PGlite) => (await db.query(`select p.proname, pg_get_functiondef(p.oid) def from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-      where n.nspname='public' and p.proname not in ('create_initials_post','add_initials_card','swap_initials_card_name') order by 1`)).rows;
+      where n.nspname='public' and p.proname not in ('create_initials_post','add_initials_card','swap_initials_card_name','set_name_origin') order by 1`)).rows;
     const db = await liveDb();
     const want = await defs(db);
     await db.exec(m017);
@@ -113,7 +114,7 @@ describe("017_initials_posts.sql on the live schema (v1 + 002..016)", () => {
 
 describe("fresh schema.sql matches v1 + 002..017", () => {
   const TABLES = "('settings','cards','posts','themes','names')";
-  const FUNCS = "('create_initials_post','add_initials_card','swap_initials_card_name')";
+  const FUNCS = "('create_initials_post','add_initials_card','swap_initials_card_name','set_name_origin')";
   const shape = async (db: PGlite) => ({
     columns: (await db.query(`select table_name, column_name, data_type, is_nullable, column_default from information_schema.columns
       where table_schema='public' and table_name in ${TABLES} order by table_name, column_name`)).rows,
@@ -124,10 +125,10 @@ describe("fresh schema.sql matches v1 + 002..017", () => {
       where n.nspname='public' and p.proname in ${FUNCS} order by 1`)).rows.map((r) => ({ ...r, def: r.def.replace(/\r\n/g, "\n") })),
   });
 
-  it("has the same tables and the same three functions", async () => {
+  it("has the same tables and the same four functions", async () => {
     const want = await shape(await migratedDb());
     expect((want.columns as { column_name: string }[]).map((c) => c.column_name)).toContain("initials");
-    expect(want.functions).toHaveLength(3);
+    expect(want.functions).toHaveLength(4);
     expect(await shape(await freshDb())).toEqual(want);
   });
 });
@@ -226,6 +227,18 @@ describe("create_initials_post (fresh schema.sql)", () => {
     await db.query(`select delete_post($1)`, [r.post_id]);
     expect(await nameRow(db, avail)).toMatchObject({ status: "available", post_id: null });
     expect(await nameRow(db, old.id)).toMatchObject({ status: "used", post_id: old.post });
+  });
+});
+
+describe("origins of fresh names (Name Nest chip)", () => {
+  it("a fresh name keeps its origin (create and add card); blank or missing = none, never longer than 40", async () => {
+    const db = await freshDb();
+    const theme = await addTheme(db);
+    const r = await create(db, plan(theme, [{ source: "new", name: "Hazel June", origin: " English · Latin " } as Card, { source: "new", name: "Holly Jane" }]));
+    expect(await one(db, `select origin from names where name='Hazel June'`)).toEqual({ origin: "English · Latin" });
+    expect(await one(db, `select origin from names where name='Holly Jane'`)).toEqual({ origin: null });
+    await addCard(db, r.post_id!, { source: "new", name: "Hope Juniper", origin: "x".repeat(60) } as Card);
+    expect(await one(db, `select length(origin) n from names where name='Hope Juniper'`)).toEqual({ n: 40 });
   });
 });
 
