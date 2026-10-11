@@ -14,6 +14,8 @@ export interface ShopViewProps {
   previews: PackShop["previews"];
   messenger: string | null;
   open: boolean;
+  /** Test keys: only the signed-in owner sees the shop; payments are not real. */
+  testMode?: boolean;
   cancelled: boolean;
 }
 
@@ -36,6 +38,11 @@ export function ShopView(p: ShopViewProps) {
   const c = p.copy;
   return (
     <ShopShell brandName={p.brandName} logo={p.logo}>
+      {p.testMode && (
+        <p role="status" className="mb-5 rounded-2xl border border-warn bg-warn/15 px-4 py-3 text-sm font-semibold text-warn-text">
+          Test mode — only you can see this. Payments here are not real (PayMongo test keys). Buyers see “Coming soon”.
+        </p>
+      )}
       <section className="grid items-center gap-8 md:grid-cols-[1.1fr_1fr]">
         <div>
           <p className="text-xs font-bold uppercase tracking-[.18em] text-accent">{c.eyebrow}</p>

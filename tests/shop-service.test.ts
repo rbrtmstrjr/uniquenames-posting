@@ -11,7 +11,11 @@ import { one } from "./helpers/pglite";
 // The shop end to end on the real migration 019 functions (PGlite) with a fake PayMongo.
 const UN = packById("unique-names");
 const WEBHOOK = "whsk_test_unit_secret";
+// test keys: the shop is the signed-in owner's only (the checkout helper below is the owner unless told otherwise)
 const ENV = shopEnv(UN.shop, { PAYMONGO_SECRET_KEY: "sk_test_unit", PAYMONGO_WEBHOOK_SECRET: WEBHOOK, SHOP_BASE_URL: "https://shop.example.com" });
+const LIVE = shopEnv(UN.shop, { PAYMONGO_SECRET_KEY: "sk_live_unit", PAYMONGO_WEBHOOK_SECRET: WEBHOOK, SHOP_BASE_URL: "https://shop.example.com" });
+const OWNER = async () => true;
+const VISITOR = async () => false;
 const KEY = shopKey(WEBHOOK);
 const NAMES: [string, "girl" | "boy", "single" | "two-word"][] = [["Wren", "girl", "single"], ["Ivy Rose", "girl", "two-word"], ["Ash", "boy", "single"]];
 const FORM = { product: "girl", buyerName: "Maria Santos", email: "Maria@Example.com", fbName: "" };
@@ -35,13 +39,15 @@ function fakePaymongo(o: { create?: (n: number) => Response; get?: (id: string) 
   return { f, calls };
 }
 
-async function setup(o: { linked?: boolean } = {}) {
+async function setup(o: { linked?: boolean; open?: boolean } = {}) {
   const { db, rpc } = await shopDb({ key: o.linked === false ? undefined : KEY, names: NAMES });
+  if (o.open) await db.exec(`update settings set shop_enabled = true`);
   return { db, rpc };
 }
-async function checkout(rpc: ShopDb, body: unknown = FORM, f = fakePaymongo()) {
+async function checkout(rpc: ShopDb, body: unknown = FORM, f = fakePaymongo(), o: { env?: typeof ENV; owner?: () => Promise<boolean> } = {}) {
   const r = await startCheckout({
-    db: rpc, pack: UN, env: ENV, body, headers: new Headers({ "x-forwarded-for": "203.0.113.9" }), requestUrl: "https://evil.example/api/shop/checkout", fetch: f.f,
+    db: rpc, pack: UN, env: o.env ?? ENV, body, headers: new Headers({ "x-forwarded-for": "203.0.113.9" }), requestUrl: "https://evil.example/api/shop/checkout",
+    owner: o.owner ?? OWNER, fetch: f.f,
   });
   return { r, calls: f.calls };
 }
@@ -66,20 +72,33 @@ const signed = (raw: string, o: { secret?: string; at?: Date; live?: boolean } =
 const webhook = (rpc: ShopDb, raw: string, signature: string | null, env = ENV) => handleWebhook({ db: rpc, pack: UN, env, rawBody: raw, signature, now: NOW });
 
 describe("shopState", () => {
-  it("open only with the pack on, the keys set, 019 run, the key linked and the switch on", async () => {
+  it("live: open only with the pack on, the keys set, 019 run, THIS server's key linked and the switch on", async () => {
     const { db, rpc } = await setup({ linked: false });
-    expect(await shopState(rpc, UN, ENV)).toMatchObject({ open: false, reason: "unlinked", counts: { girl_single: 1, girl_combo: 1, boy_single: 1, boy_combo: 0 } });
+    const pub = { owner: false };
+    expect(await shopState(rpc, UN, LIVE, pub)).toMatchObject({ open: false, reason: "unlinked", counts: { girl_single: 1, girl_combo: 1, boy_single: 1, boy_combo: 0 } });
+    // a key linked from ANOTHER webhook secret (stale after test -> live) is not this server's: still unlinked
+    await db.query(`select set_shop_secret($1)`, [shopKey("whsk_old_secret")]);
+    expect(await shopState(rpc, UN, LIVE, pub)).toMatchObject({ open: false, reason: "unlinked" });
     await db.query(`select set_shop_secret($1)`, [KEY]);
-    expect(await shopState(rpc, UN, ENV)).toMatchObject({ open: true });
-    expect(await shopState(rpc, UN, shopEnv(UN.shop, {}))).toMatchObject({ open: false, reason: "keys" });
-    expect(await shopState(rpc, packById("name-nest"), ENV)).toMatchObject({ open: false, reason: "pack" });
-    await db.exec(`update settings set shop_enabled = false`);
-    expect(await shopState(rpc, UN, ENV)).toMatchObject({ open: false, reason: "paused" });
+    // the switch is OFF until the owner opens the shop
+    expect(await shopState(rpc, UN, LIVE, pub)).toMatchObject({ open: false, reason: "paused" });
+    await db.exec(`update settings set shop_enabled = true`);
+    expect(await shopState(rpc, UN, LIVE, pub)).toEqual({ open: true, testMode: false, counts: expect.any(Object) });
+    expect(await shopState(rpc, UN, shopEnv(UN.shop, {}), pub)).toMatchObject({ open: false, reason: "keys" });
+    expect(await shopState(rpc, packById("name-nest"), LIVE, pub)).toMatchObject({ open: false, reason: "pack" });
+  });
+
+  it("test keys: never public; only the signed-in owner sees it (test mode), even while the switch is off", async () => {
+    const { db, rpc } = await setup();
+    expect(await shopState(rpc, UN, ENV, { owner: false })).toMatchObject({ open: false, reason: "test" });
+    expect(await shopState(rpc, UN, ENV, { owner: true })).toMatchObject({ open: true, testMode: true });
+    await db.exec(`update settings set shop_enabled = true`);
+    expect(await shopState(rpc, UN, ENV, { owner: false })).toMatchObject({ open: false, reason: "test" });
   });
 
   it("before migration 019: 'migration' (the page shows Coming soon)", async () => {
     const missing: ShopDb = { rpc: async () => ({ data: null, error: { code: "PGRST202", message: "Could not find the function public.shop_info" } }) };
-    expect(await shopState(missing, UN, ENV)).toEqual({ open: false, reason: "migration", counts: null });
+    expect(await shopState(missing, UN, ENV, { owner: true })).toEqual({ open: false, reason: "migration", counts: null });
   });
 });
 
@@ -108,7 +127,7 @@ describe("startCheckout", () => {
     const { rpc } = await setup();
     const env = shopEnv(UN.shop, { PAYMONGO_SECRET_KEY: "sk_test_unit", PAYMONGO_WEBHOOK_SECRET: WEBHOOK, SHOP_PAYMENT_METHODS: "qrph,gcash,paymaya" });
     const f = fakePaymongo();
-    await startCheckout({ db: rpc, pack: UN, env, body: FORM, headers: new Headers(), requestUrl: "https://x.example/api", fetch: f.f });
+    await startCheckout({ db: rpc, pack: UN, env, body: FORM, headers: new Headers(), requestUrl: "https://x.example/api", owner: OWNER, fetch: f.f });
     expect((f.calls[0].body as { data: { attributes: { payment_method_types: string[] } } }).data.attributes.payment_method_types).toEqual(["qrph", "gcash", "paymaya"]);
   });
 
@@ -119,11 +138,35 @@ describe("startCheckout", () => {
     expect(rpc.calls).toEqual([]);
   });
 
-  it("closed without keys or before the key is linked", async () => {
-    const { rpc } = await setup({ linked: false });
-    expect((await checkout(rpc)).r).toMatchObject({ ok: false, status: 409 });
-    const r2 = await startCheckout({ db: rpc, pack: UN, env: shopEnv(UN.shop, {}), body: FORM, headers: new Headers(), requestUrl: "https://x.example/" });
+  it("without keys: closed; before the key is linked (or with a stale key): temporarily unavailable, no PayMongo call", async () => {
+    const { db, rpc } = await setup({ linked: false });
+    const first = await checkout(rpc);
+    expect(first.r).toMatchObject({ ok: false, status: 503, error: "The shop is temporarily unavailable. Please try again later." });
+    expect(first.calls).toEqual([]);
+    const r2 = await startCheckout({ db: rpc, pack: UN, env: shopEnv(UN.shop, {}), body: FORM, headers: new Headers(), requestUrl: "https://x.example/", owner: OWNER });
     expect(r2).toMatchObject({ ok: false, status: 409 });
+    expect(await one(db, `select count(*)::int n from shop_orders`)).toEqual({ n: 0 });
+  });
+
+  it("test keys: a visitor cannot order (closed), only the signed-in owner; live keys: anyone, once the shop is open", async () => {
+    const { db, rpc } = await setup();
+    const visitor = await checkout(rpc, FORM, fakePaymongo(), { owner: VISITOR });
+    expect(visitor.r).toMatchObject({ ok: false, status: 409 });
+    expect(visitor.calls).toEqual([]);
+    expect((await checkout(rpc, FORM, fakePaymongo(), { owner: OWNER })).r.ok).toBe(true); // switch still off: owner test is allowed
+    // live: the switch decides, nobody's login is asked
+    const askOwner = async () => { throw new Error("live mode must not ask"); };
+    expect((await checkout(rpc, { ...FORM, email: "jo@example.com" }, fakePaymongo(), { env: LIVE, owner: askOwner })).r).toMatchObject({ ok: false, status: 409 });
+    await db.exec(`update settings set shop_enabled = true`);
+    expect((await checkout(rpc, { ...FORM, email: "jo@example.com" }, fakePaymongo(), { env: LIVE, owner: askOwner })).r.ok).toBe(true);
+  });
+
+  it("if the database refuses to keep the checkout id (stale key), the buyer is NOT sent to pay (503)", async () => {
+    const { db, rpc } = await setup();
+    const refusing: ShopDb = { rpc: (fn, args) => (fn === "attach_shop_checkout" ? Promise.resolve({ data: false, error: null }) : rpc.rpc(fn, args)) };
+    const r = await checkout(refusing);
+    expect(r.r).toEqual({ ok: false, status: 503, error: "The shop is temporarily unavailable. Please try again later." });
+    expect((await orderRow(db)).checkout_id).toBeNull();
   });
 
   it("rate limit -> 429; PayMongo down -> 502 with a friendly message", async () => {
@@ -226,6 +269,11 @@ describe("thanks page status + PayMongo check", () => {
     const unpaid = fakePaymongo({ get: () => Response.json({ data: { ...paidSession(o.id), attributes: { ...paidSession(o.id).attributes, payments: [] } } }) });
     expect(await orderStatus({ db: rpc, pack: UN, env: ENV, token: o.token, check: true, now: later, fetch: unpaid.f })).toMatchObject({ view: { status: "pending" } });
     expect(unpaid.calls[0].url).toBe("https://api.paymongo.com/v1/checkout_sessions/cs_test_1");
+    // the next PayMongo read-back is allowed 10 s later (the database keeps the pace)
+    const tooSoon = fakePaymongo({ get: () => Response.json({ data: paidSession(o.id) }) });
+    expect(await orderStatus({ db: rpc, pack: UN, env: ENV, token: o.token, check: true, now: later, fetch: tooSoon.f })).toMatchObject({ view: { status: "pending" } });
+    expect(tooSoon.calls).toEqual([]);
+    await db.exec(`update shop_orders set last_checked_at = now() - interval '11 seconds'`);
     // now paid
     const paidPm = fakePaymongo({ get: () => Response.json({ data: paidSession(o.id) }) });
     const r = await orderStatus({ db: rpc, pack: UN, env: ENV, token: o.token, check: true, now: later, fetch: paidPm.f });
@@ -282,20 +330,27 @@ describe("delivery + download", () => {
     const { db, rpc } = await setup();
     await checkout(rpc);
     const o = await orderRow(db);
-    expect(await downloadOrder({ db: rpc, pack: UN, token: o.token, now: NOW })).toEqual({ ok: false, reason: "unpaid" });
-    expect(await downloadOrder({ db: rpc, pack: UN, token: "../x", now: NOW })).toEqual({ ok: false, reason: "not_found" });
+    expect(await downloadOrder({ db: rpc, pack: UN, env: ENV, token: o.token, now: NOW })).toEqual({ ok: false, reason: "unpaid" });
+    expect(await downloadOrder({ db: rpc, pack: UN, env: ENV, token: "../x", now: NOW })).toEqual({ ok: false, reason: "not_found" });
   });
+
+  it("a PDF that cannot be made does not use up a download", async () => {
+    const { db, rpc, o } = await paidOrder();
+    await db.exec(`update names set status = 'pending'`); // nothing left to put in the PDF
+    expect(await downloadOrder({ db: rpc, pack: UN, env: ENV, token: o.token, now: NOW })).toEqual({ ok: false, reason: "empty" });
+    expect(await one(db, `select downloads from shop_orders`)).toEqual({ downloads: 0 });
+  }, 60_000);
 
   it("a paid order downloads its own encrypted PDF up to 5 times, for 7 days", async () => {
     const { db, rpc, o } = await paidOrder();
-    const d = await downloadOrder({ db: rpc, pack: UN, token: o.token, now: NOW });
+    const d = await downloadOrder({ db: rpc, pack: UN, env: ENV, token: o.token, now: NOW });
     if (!d.ok) throw new Error(d.reason);
     expect(d.pdf.subarray(0, 5).toString()).toBe("%PDF-");
     expect(d.pdf.toString("latin1")).toMatch(/\/Encrypt/);
     expect(d.fileName).toMatch(/^unique-names-girl-names-\d{4}-\d{2}-\d{2}-[0-9a-f]{6}\.pdf$/);
-    for (let i = 2; i <= 5; i++) expect((await downloadOrder({ db: rpc, pack: UN, token: o.token, now: NOW })).ok).toBe(true);
-    expect(await downloadOrder({ db: rpc, pack: UN, token: o.token, now: NOW })).toEqual({ ok: false, reason: "limit" });
+    for (let i = 2; i <= 5; i++) expect((await downloadOrder({ db: rpc, pack: UN, env: ENV, token: o.token, now: NOW })).ok).toBe(true);
+    expect(await downloadOrder({ db: rpc, pack: UN, env: ENV, token: o.token, now: NOW })).toEqual({ ok: false, reason: "limit" });
     await db.exec(`update shop_orders set downloads = 0, paid_at = now() - interval '8 days'`);
-    expect(await downloadOrder({ db: rpc, pack: UN, token: o.token, now: NOW })).toEqual({ ok: false, reason: "expired" });
+    expect(await downloadOrder({ db: rpc, pack: UN, env: ENV, token: o.token, now: NOW })).toEqual({ ok: false, reason: "expired" });
   }, 60_000);
 });

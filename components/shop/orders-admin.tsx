@@ -65,7 +65,7 @@ export function OrdersAdmin({ orders, totals, setup, money, now }: {
 
   const checks: { ok: boolean; label: string; hint?: string }[] = [
     { ok: setup.packSells, label: "This page sells the PDF", hint: "Turned off in the pack (packs/<id>/shop.ts)." },
-    { ok: setup.keys, label: `PayMongo keys${setup.mode ? ` (${setup.mode} mode)` : ""}`, hint: "Add PAYMONGO_SECRET_KEY and PAYMONGO_PUBLIC_KEY in Vercel." },
+    { ok: setup.keys, label: `PayMongo keys${setup.mode === "test" ? " (test mode: only you, signed in, can see /shop)" : setup.mode === "live" ? " (live)" : ""}`, hint: "Add PAYMONGO_SECRET_KEY and PAYMONGO_PUBLIC_KEY in Vercel." },
     { ok: setup.webhookSecret, label: "PayMongo webhook", hint: `Add a webhook for ${setup.webhookUrl} (event checkout_session.payment.paid) and put its secret in PAYMONGO_WEBHOOK_SECRET.` },
     { ok: setup.linked, label: "Payments linked to the database", hint: "Press Link payments (again after changing the webhook secret)." },
     { ok: setup.email, label: "Email delivery (Gmail)", hint: "Optional: SMTP_USER + SMTP_PASS (an app password). Without it buyers still get the PDF on the page." },

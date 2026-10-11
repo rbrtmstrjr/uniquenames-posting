@@ -2,23 +2,25 @@
 -- Maya and bank apps) on the public /shop page and download their own password-protected PDF. Paste the whole file
 -- into the Supabase SQL editor and run it. Safe to run more than once. Needs 018_names_pdf.sql first. A fresh project
 -- gets all of this from supabase/schema.sql already. Nothing the worker reads (no restart).
--- * settings.shop_enabled: the owner's on/off switch for the shop (Orders page). On by default; the shop also stays
---   closed until the payment keys are set and linked (shop_secrets).
+-- * settings.shop_enabled: the owner's on/off switch for the shop (Orders page). OFF until the owner opens it at go-live;
+--   the shop also stays closed until the payment keys are set and linked (shop_secrets). With TEST keys only the
+--   signed-in owner can use /shop (the app checks that).
 -- * shop_orders: one row per order: the buyer, the product (girl / boy / both), the price, the PayMongo ids, its PDF
 --   password (kept so the owner can resend it) and how often it was downloaded. Owner only, like exports.
 -- * shop_secrets: the hash of the server's shop key (derived from PAYMONGO_WEBHOOK_SECRET). Nobody can read it, not
 --   even the owner's app; only the shop functions below compare against it.
 -- * The public pages never read a table: they call these narrow SECURITY DEFINER functions with the anon key
 --   (the service-role key is never on Vercel):
---     shop_info()                          is the shop open? + how many names are inside
---     create_shop_order(...)               a pending order (validated, rate-limited) -> its id + a random token
+--     shop_info(key)                       is the shop open (switch on, THIS server's key linked)? + name counts
 --     get_shop_order_status(token)         what the thanks page shows (the password only once paid)
---     download_shop_order(token)           the names for the buyer's PDF: paid, < 7 days, < 5 downloads (counts one)
---     attach_shop_checkout / mark_shop_order_paid / note_shop_order_email   the server only: they need the shop key
+--     download_shop_order(token)           the names for the buyer's PDF: paid, < 7 days, < 5 downloads (reserves one)
+--     create_shop_order / attach_shop_checkout / claim_shop_check / mark_shop_order_paid / note_shop_order_email /
+--     release_shop_download                the server only: each needs the shop key
 --   and two for the owner's app (authenticated): set_shop_secret, shop_secret_matches.
 -- Until this runs, /shop shows "Coming soon" and the Orders page explains how to add it.
 
-alter table public.settings add column if not exists shop_enabled boolean not null default true;
+alter table public.settings add column if not exists shop_enabled boolean not null default false;
+alter table public.settings alter column shop_enabled set default false;
 
 create table if not exists public.shop_orders (
   id uuid primary key default gen_random_uuid(),
@@ -41,10 +43,15 @@ create table if not exists public.shop_orders (
   password text constraint shop_orders_password_len check (password is null or char_length(password) between 8 and 64),
   downloads int not null default 0 constraint shop_orders_downloads_check check (downloads between 0 and 1000),
   last_download_at timestamptz,
+  -- the server's own payment check with PayMongo (thanks page): at most one every 10 s, 60 per order
+  checks int not null default 0 constraint shop_orders_checks_check check (checks between 0 and 1000),
+  last_checked_at timestamptz,
   emailed_at timestamptz,
   email_error text constraint shop_orders_email_error_len check (email_error is null or char_length(email_error) <= 300),
   constraint shop_orders_paid_check check (status <> 'paid' or (paid_at is not null and password is not null and payment_id is not null))
 );
+alter table public.shop_orders add column if not exists checks int not null default 0 constraint shop_orders_checks_check check (checks between 0 and 1000);
+alter table public.shop_orders add column if not exists last_checked_at timestamptz;
 create unique index if not exists shop_orders_token on public.shop_orders (token);
 create unique index if not exists shop_orders_payment on public.shop_orders (payment_id) where payment_id is not null;
 create index if not exists shop_orders_created on public.shop_orders (created_at desc);
@@ -60,6 +67,11 @@ create table if not exists public.shop_secrets (
 );
 
 -- ---------------------------------------------------------------- shop functions
+-- earlier drafts of these functions had other arguments
+drop function if exists public.shop_info();
+drop function if exists public.create_shop_order(text, text, int, text, text, text, text, text);
+drop function if exists public.mark_shop_order_paid(uuid, text, text, int, text, text, text);
+
 -- The server's shop key, checked against the stored hash (never callable from outside: the functions below use it).
 create or replace function public.shop_secret_ok(p_secret text) returns boolean
 language sql stable security definer set search_path = public, pg_temp as $$
@@ -67,12 +79,13 @@ language sql stable security definer set search_path = public, pg_temp as $$
     and exists (select 1 from public.shop_secrets where id = 1 and key_hash = sha256(convert_to(p_secret, 'UTF8')));
 $$;
 
--- Is the shop open (the owner's switch on, the shop key linked), and how many approved names each edition has.
-create or replace function public.shop_info() returns jsonb
+-- Is the shop open (the owner's switch on, and the key linked is THIS server's key), and how many approved names each
+-- edition has.
+create or replace function public.shop_info(p_secret text) returns jsonb
 language sql stable security definer set search_path = public, pg_temp as $$
   select jsonb_build_object(
     'enabled', coalesce((select shop_enabled from public.settings where id = 1), false),
-    'ready', exists (select 1 from public.shop_secrets where id = 1),
+    'ready', public.shop_secret_ok(p_secret),
     'counts', jsonb_build_object(
       'girl_single', (select count(*) from public.names where gender = 'girl' and style = 'single' and status in ('available', 'reserved', 'used')),
       'girl_combo', (select count(*) from public.names where gender = 'girl' and style = 'two-word' and status in ('available', 'reserved', 'used')),
@@ -80,11 +93,14 @@ language sql stable security definer set search_path = public, pg_temp as $$
       'boy_combo', (select count(*) from public.names where gender = 'boy' and style = 'two-word' and status in ('available', 'reserved', 'used'))));
 $$;
 
--- A pending order. The price comes from the server's pack config (the webhook checks the paid amount against both).
--- Rate limits: 5 orders per email and 10 per network (hashed IP) an hour, 120 in any 10 minutes for the whole shop.
--- Answers {status: ok, id, token} | {status: error, reason: closed | invalid | rate_limited | busy}.
+-- A pending order, made by our server only (it needs the shop key, so the honeypot and the network limit cannot be
+-- skipped by calling this directly). The price comes from the server's pack config (the webhook checks the paid amount
+-- against both). p_ignore_pause: the server's owner-only TEST mode may order while the shop switch is off.
+-- Rate limits: 5 orders per email and 10 per network (hashed IP) an hour, 120 in any 10 minutes for the whole shop,
+-- counted under a lock so calls at the same moment cannot pass them together.
+-- Answers {status: ok, id, token} | {status: error, reason: forbidden | closed | invalid | rate_limited | busy}.
 create or replace function public.create_shop_order(p_pack text, p_product text, p_amount int, p_currency text,
-  p_buyer text, p_email text, p_fb text, p_ip_hash text) returns jsonb
+  p_buyer text, p_email text, p_fb text, p_ip_hash text, p_ignore_pause boolean, p_secret text) returns jsonb
 language plpgsql volatile security definer set search_path = public, pg_temp as $$
 declare
   v_buyer text := regexp_replace(btrim(coalesce(p_buyer, '')), '\s+', ' ', 'g');
@@ -94,8 +110,8 @@ declare
   v_token text;
   v_id uuid;
 begin
-  if not coalesce((select shop_enabled from public.settings where id = 1), false)
-    or not exists (select 1 from public.shop_secrets where id = 1) then
+  if not public.shop_secret_ok(p_secret) then return jsonb_build_object('status', 'error', 'reason', 'forbidden'); end if;
+  if not coalesce(p_ignore_pause, false) and not coalesce((select shop_enabled from public.settings where id = 1), false) then
     return jsonb_build_object('status', 'error', 'reason', 'closed');
   end if;
   if coalesce(p_product, '') not in ('girl', 'boy', 'both') or p_amount is null or p_amount not between 100 and 10000000
@@ -106,6 +122,8 @@ begin
     or (v_ip is not null and v_ip !~ '^[0-9a-f]{32,64}$') then
     return jsonb_build_object('status', 'error', 'reason', 'invalid');
   end if;
+  -- one order at a time from here on (until this transaction ends), so the limits below hold
+  perform pg_advisory_xact_lock(hashtext('public.create_shop_order'));
   -- unpaid orders older than a day are over (a PayMongo checkout lasts 24 hours)
   update public.shop_orders set status = 'expired' where status = 'pending' and created_at < now() - interval '1 day';
   if (select count(*) from public.shop_orders where email = v_email and created_at > now() - interval '1 hour') >= 5
@@ -151,13 +169,25 @@ begin
   return found;
 end $$;
 
+-- The thanks page's own check with PayMongo: allowed at most once every 10 seconds and 60 times per pending order
+-- (needs the shop key). true = go ahead and ask PayMongo now.
+create or replace function public.claim_shop_check(p_token text, p_secret text) returns boolean
+language plpgsql volatile security definer set search_path = public, pg_temp as $$
+begin
+  if not public.shop_secret_ok(p_secret) or coalesce(p_token, '') !~ '^[0-9a-f]{96}$' then return false; end if;
+  update public.shop_orders set checks = checks + 1, last_checked_at = now()
+    where token = p_token and status = 'pending' and checks < 60
+      and (last_checked_at is null or last_checked_at < now() - interval '10 seconds');
+  return found;
+end $$;
+
 -- PayMongo says the order is paid (webhook, or the server's own check of the checkout session): needs the shop key,
--- the order's exact amount and currency, and its checkout session. Idempotent: a paid order answers already = true
+-- the order's exact amount, currency and product, and its checkout session. Idempotent: a paid order answers already = true
 -- and keeps its first password (the email goes out once). A late payment of an expired / failed order still counts.
 -- Answers {status: ok, already, id, token, email, buyer_name, product, password, pack} |
 -- {status: error, reason: forbidden | not_found | mismatch | invalid | duplicate_payment}.
 create or replace function public.mark_shop_order_paid(p_order uuid, p_checkout_id text, p_payment_id text, p_amount int,
-  p_currency text, p_password text, p_secret text) returns jsonb
+  p_currency text, p_product text, p_password text, p_secret text) returns jsonb
 language plpgsql volatile security definer set search_path = public, pg_temp as $$
 declare o public.shop_orders%rowtype;
 begin
@@ -165,7 +195,7 @@ begin
   select * into o from public.shop_orders where id = p_order for update;
   if not found then return jsonb_build_object('status', 'error', 'reason', 'not_found'); end if;
   if o.status <> 'paid' then
-    if p_amount is distinct from o.amount or upper(coalesce(p_currency, '')) is distinct from o.currency
+    if p_amount is distinct from o.amount or upper(coalesce(p_currency, '')) is distinct from o.currency or p_product is distinct from o.product
       or (o.checkout_id is not null and p_checkout_id is distinct from o.checkout_id) then
       return jsonb_build_object('status', 'error', 'reason', 'mismatch');
     end if;
@@ -198,7 +228,8 @@ begin
   return found;
 end $$;
 
--- The buyer's download: only a paid order, within 7 days of payment, at most 5 times (this call counts one). Answers
+-- The buyer's download: only a paid order, within 7 days of payment, at most 5 times. This call reserves one download;
+-- the server gives it back (release_shop_download) when the PDF could not be made. Answers
 -- {status: ok, product, buyer_name, email, password, pack, downloads, names: [{name, meaning, gender, style, status,
 -- origin, meaning_category}]} | {status: error, reason: not_found | unpaid | expired | limit}.
 create or replace function public.download_shop_order(p_token text) returns jsonb
@@ -220,6 +251,15 @@ begin
     where n.status in ('available', 'reserved', 'used') and (o.product = 'both' or n.gender = o.product);
   return jsonb_build_object('status', 'ok', 'product', o.product, 'buyer_name', o.buyer_name, 'email', o.email,
     'password', o.password, 'pack', o.pack, 'downloads', o.downloads + 1, 'names', v_names);
+end $$;
+
+-- A reserved download whose PDF could not be made is given back (needs the shop key).
+create or replace function public.release_shop_download(p_token text, p_secret text) returns boolean
+language plpgsql volatile security definer set search_path = public, pg_temp as $$
+begin
+  if not public.shop_secret_ok(p_secret) or coalesce(p_token, '') !~ '^[0-9a-f]{96}$' then return false; end if;
+  update public.shop_orders set downloads = downloads - 1 where token = p_token and status = 'paid' and downloads > 0;
+  return found;
 end $$;
 
 -- The owner's app links the server's shop key (Orders > Link payments) and checks it is still the same.
@@ -249,18 +289,20 @@ revoke all on public.shop_secrets from anon, authenticated;
 grant select, insert, update, delete on public.shop_secrets to service_role;
 
 revoke execute on function public.shop_secret_ok(text) from public, anon, authenticated;
-revoke execute on function public.shop_info() from public;
-revoke execute on function public.create_shop_order(text, text, int, text, text, text, text, text) from public;
+revoke execute on function public.shop_info(text) from public;
+revoke execute on function public.create_shop_order(text, text, int, text, text, text, text, text, boolean, text) from public;
+revoke execute on function public.claim_shop_check(text, text) from public;
+revoke execute on function public.release_shop_download(text, text) from public;
 revoke execute on function public.get_shop_order_status(text) from public;
 revoke execute on function public.attach_shop_checkout(uuid, text, text) from public;
-revoke execute on function public.mark_shop_order_paid(uuid, text, text, int, text, text, text) from public;
+revoke execute on function public.mark_shop_order_paid(uuid, text, text, int, text, text, text, text) from public;
 revoke execute on function public.note_shop_order_email(uuid, text, text) from public;
 revoke execute on function public.download_shop_order(text) from public;
 revoke execute on function public.set_shop_secret(text) from public, anon;
 revoke execute on function public.shop_secret_matches(text) from public, anon;
-grant execute on function public.shop_info(), public.create_shop_order(text, text, int, text, text, text, text, text),
-  public.get_shop_order_status(text), public.attach_shop_checkout(uuid, text, text),
-  public.mark_shop_order_paid(uuid, text, text, int, text, text, text), public.note_shop_order_email(uuid, text, text),
-  public.download_shop_order(text) to anon, authenticated, service_role;
+grant execute on function public.shop_info(text), public.create_shop_order(text, text, int, text, text, text, text, text, boolean, text),
+  public.get_shop_order_status(text), public.attach_shop_checkout(uuid, text, text), public.claim_shop_check(text, text),
+  public.mark_shop_order_paid(uuid, text, text, int, text, text, text, text), public.note_shop_order_email(uuid, text, text),
+  public.download_shop_order(text), public.release_shop_download(text, text) to anon, authenticated, service_role;
 grant execute on function public.set_shop_secret(text), public.shop_secret_matches(text) to authenticated, service_role;
 -- @supabase-only end

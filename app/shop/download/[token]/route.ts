@@ -1,5 +1,6 @@
 import { activePack } from "@/packs";
 import { anonShopDb } from "@/lib/shop/anon";
+import { shopEnv } from "@/lib/shop/config";
 import { downloadOrder, TOKEN_RE } from "@/lib/shop/service";
 
 // /shop/download/<token>: the buyer's own PDF. POST only (the Download button's form), so link scanners in email apps
@@ -26,7 +27,8 @@ export async function GET(req: Request, ctx: { params: Promise<{ token: string }
 
 export async function POST(req: Request, ctx: { params: Promise<{ token: string }> }) {
   const { token } = await ctx.params;
-  const r = await downloadOrder({ db: anonShopDb(), pack: activePack(), token, now: new Date() });
+  const pack = activePack();
+  const r = await downloadOrder({ db: anonShopDb(), pack, env: shopEnv(pack.shop), token, now: new Date() });
   if (!r.ok) {
     const status = r.reason === "not_found" ? 404 : r.reason === "error" ? 500 : 403;
     // our own fixed texts only (no input is echoed)

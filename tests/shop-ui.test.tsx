@@ -81,6 +81,13 @@ describe("ShopView", () => {
     expect(screen.getByRole("link", { name: /Message us on Facebook/ }).getAttribute("href")).toBe("https://m.me/example");
     expect(screen.getByAltText(/cover/).getAttribute("src")).toBe("/packs/unique-names/shop/cover.webp");
   });
+  it("test mode (owner only): a banner says only you can see it", () => {
+    render(<ShopView {...base} open testMode />);
+    expect(screen.getByText(/Test mode — only you can see this/)).toBeTruthy();
+    cleanup();
+    render(<ShopView {...base} open />);
+    expect(screen.queryByText(/Test mode/)).toBeNull();
+  });
   it("closed: 'Coming soon', no form", () => {
     render(<ShopView {...base} open={false} />);
     expect(screen.getByText("Coming soon")).toBeTruthy();

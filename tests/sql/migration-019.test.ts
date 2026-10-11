@@ -30,7 +30,11 @@ async function migratedDb(o: { secret?: boolean; roles?: boolean } = {}) {
   const db = await liveDb();
   if (o.roles) await db.exec("create role anon; create role authenticated; create role service_role;");
   await db.exec(o.roles ? m019raw : m019);
-  if (o.secret !== false) await db.query(`select set_shop_secret($1)`, [SECRET]);
+  // linked and opened (the switch is off until the owner opens the shop at go-live)
+  if (o.secret !== false) {
+    await db.query(`select set_shop_secret($1)`, [SECRET]);
+    await db.exec(`update settings set shop_enabled = true`);
+  }
   return db;
 }
 const fn = async <T = Record<string, unknown>>(db: PGlite, sql: string, params: unknown[] = []) =>
@@ -39,28 +43,30 @@ const fn = async <T = Record<string, unknown>>(db: PGlite, sql: string, params: 
 /** The given value, null included; the default only when the key is missing. */
 const pick = <T extends object>(o: T, k: string, d: unknown) => (k in o ? (o as Record<string, unknown>)[k] : d);
 type Created = { status: string; id?: string; token?: string; reason?: string };
-const order = (db: PGlite, o: Partial<Record<"pack" | "product" | "currency" | "buyer" | "email" | "fb" | "ip", string | null> & { amount: number }> = {}) =>
-  fn<Created>(db, `create_shop_order($1, $2, $3, $4, $5, $6, $7, $8)`, [
+const order = (db: PGlite, o: Partial<Record<"pack" | "product" | "currency" | "buyer" | "email" | "fb" | "ip" | "secret", string | null> & { amount: number; ignorePause: boolean }> = {}) =>
+  fn<Created>(db, `create_shop_order($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`, [
     pick(o, "pack", "unique-names"), pick(o, "product", "girl"), pick(o, "amount", 5000), pick(o, "currency", "PHP"),
     pick(o, "buyer", "Maria Santos"), pick(o, "email", "maria@example.com"), pick(o, "fb", "Maria S."), pick(o, "ip", IP),
+    pick(o, "ignorePause", false), pick(o, "secret", SECRET),
   ]);
-const paid = (db: PGlite, id: string, o: Partial<{ checkout: string | null; payment: string; amount: number; currency: string; password: string; secret: string }> = {}) =>
-  fn<Record<string, unknown>>(db, `mark_shop_order_paid($1, $2, $3, $4, $5, $6, $7)`, [
+const paid = (db: PGlite, id: string, o: Partial<{ checkout: string | null; payment: string; amount: number; currency: string; product: string; password: string; secret: string }> = {}) =>
+  fn<Record<string, unknown>>(db, `mark_shop_order_paid($1, $2, $3, $4, $5, $6, $7, $8)`, [
     id, o.checkout === undefined ? "cs_test_1" : o.checkout, o.payment ?? "pay_test_1", o.amount ?? 5000, o.currency ?? "PHP",
-    o.password ?? "Kp7m-Xr4d-Tq9w", o.secret ?? SECRET,
+    o.product ?? "girl", o.password ?? "Kp7m-Xr4d-Tq9w", o.secret ?? SECRET,
   ]);
 const addName = (db: PGlite, name: string, gender: string, style = "single", status = "available") =>
   db.query(`insert into names (name, meaning, gender, style, status) values ($1, 'a kind meaning', $2, $3, $4)`, [name, gender, style, status]);
 
 describe("019_shop.sql on the live schema (v1 + 002..018)", () => {
-  it("runs twice, also without 015; the shop switch is on by default", async () => {
+  it("runs twice, also without 015; the shop switch is OFF by default (the owner opens it at go-live)", async () => {
     const db = await liveDb();
     await db.exec(m019);
     await db.exec(m019);
-    expect(await one(db, `select shop_enabled from settings where id = 1`)).toEqual({ shop_enabled: true });
+    expect(await one(db, `select shop_enabled from settings where id = 1`)).toEqual({ shop_enabled: false });
     const db2 = await liveDb(true);
     await db2.exec(m019);
     await db2.query(`select set_shop_secret($1)`, [SECRET]);
+    await db2.exec(`update settings set shop_enabled = true`);
     await addName(db2, "Wren", "girl");
     const { token } = await order(db2);
     await paid(db2, (await one<{ id: string }>(db2, `select id from shop_orders`)).id);
@@ -80,15 +86,21 @@ describe("019_shop.sql on the live schema (v1 + 002..018)", () => {
 });
 
 describe("shop_info", () => {
-  it("is closed until the shop key is linked, and while the owner's switch is off", async () => {
+  it("ready only when the linked key is THIS server's key; closed while the owner's switch is off", async () => {
     const db = await migratedDb({ secret: false });
-    expect(await fn(db, `shop_info()`)).toMatchObject({ enabled: true, ready: false });
-    expect(await order(db)).toEqual({ status: "error", reason: "closed" });
+    expect(await fn(db, `shop_info($1)`, [SECRET])).toMatchObject({ enabled: false, ready: false });
+    expect(await order(db)).toEqual({ status: "error", reason: "forbidden" });
     await db.query(`select set_shop_secret($1)`, [SECRET]);
-    expect(await fn(db, `shop_info()`)).toMatchObject({ enabled: true, ready: true });
-    await db.exec(`update settings set shop_enabled = false`);
-    expect(await fn(db, `shop_info()`)).toMatchObject({ enabled: false });
+    expect(await fn(db, `shop_info($1)`, [SECRET])).toMatchObject({ enabled: false, ready: true });
+    // a stale or foreign key is not "ready"
+    expect(await fn(db, `shop_info($1)`, ["b".repeat(64)])).toMatchObject({ ready: false });
+    expect(await fn(db, `shop_info($1)`, [null])).toMatchObject({ ready: false });
     expect(await order(db)).toEqual({ status: "error", reason: "closed" });
+    // the server's owner-only test mode may order while the switch is off
+    expect((await order(db, { ignorePause: true })).status).toBe("ok");
+    await db.exec(`update settings set shop_enabled = true`);
+    expect(await fn(db, `shop_info($1)`, [SECRET])).toMatchObject({ enabled: true, ready: true });
+    expect((await order(db, { email: "b@example.com" })).status).toBe("ok");
   });
 
   it("counts the approved names of each edition (never pending or skipped)", async () => {
@@ -98,7 +110,7 @@ describe("shop_info", () => {
     await addName(db, "Ash", "boy", "single", "reserved");
     await addName(db, "Zed", "boy", "single", "pending");
     await addName(db, "Kip", "boy", "single", "skip");
-    expect((await fn<{ counts: unknown }>(db, `shop_info()`)).counts).toEqual({ girl_single: 1, girl_combo: 1, boy_single: 1, boy_combo: 0 });
+    expect((await fn<{ counts: unknown }>(db, `shop_info($1)`, [SECRET])).counts).toEqual({ girl_single: 1, girl_combo: 1, boy_single: 1, boy_combo: 0 });
   });
 });
 
@@ -111,6 +123,20 @@ describe("create_shop_order", () => {
     expect(a.token).not.toBe(b.token);
     expect(await one(db, `select status, product, amount, currency, buyer_name, email, fb_name, downloads, password from shop_orders where id = $1`, [a.id]))
       .toEqual({ status: "pending", product: "girl", amount: 5000, currency: "PHP", buyer_name: "Maria Santos", email: "maria@example.com", fb_name: "Maria S.", downloads: 0, password: null });
+  });
+
+  it("only our server can create orders: the shop key is required (no bypassing the honeypot / network limit)", async () => {
+    const db = await migratedDb();
+    for (const secret of [null, "", "x".repeat(40), SECRET.slice(0, -1)]) {
+      expect(await order(db, { secret }), String(secret)).toEqual({ status: "error", reason: "forbidden" });
+    }
+    expect(await one(db, `select count(*)::int n from shop_orders`)).toEqual({ n: 0 });
+  });
+
+  it("counts the rate limits under a transaction lock", async () => {
+    const db = await migratedDb();
+    const src = await one<{ src: string }>(db, `select prosrc src from pg_proc where proname = 'create_shop_order'`);
+    expect(src.src).toMatch(/pg_advisory_xact_lock\(hashtext\('public\.create_shop_order'\)\)[\s\S]*rate_limited/);
   });
 
   it("refuses bad input with 'invalid' (never a crash)", async () => {
@@ -185,6 +211,8 @@ describe("mark_shop_order_paid", () => {
     expect(await paid(db, a.id!, { amount: 100 })).toEqual({ status: "error", reason: "mismatch" });
     expect(await paid(db, a.id!, { amount: 10000 })).toEqual({ status: "error", reason: "mismatch" });
     expect(await paid(db, a.id!, { currency: "USD" })).toEqual({ status: "error", reason: "mismatch" });
+    expect(await paid(db, a.id!, { product: "both" })).toEqual({ status: "error", reason: "mismatch" });
+    expect(await paid(db, a.id!, { product: "boy" })).toEqual({ status: "error", reason: "mismatch" });
     expect(await paid(db, a.id!, { checkout: "cs_other" })).toEqual({ status: "error", reason: "mismatch" });
     expect(await paid(db, a.id!, { password: "short" })).toEqual({ status: "error", reason: "invalid" });
     expect(await paid(db, "00000000-0000-4000-8000-000000000000")).toEqual({ status: "error", reason: "not_found" });
@@ -271,10 +299,45 @@ describe("download_shop_order", () => {
 
   it("'both' gets girl and boy names; the link ends 7 days after payment", async () => {
     const { db, a } = await setup("both");
-    await paid(db, a.id!, { amount: 10000 });
+    await paid(db, a.id!, { amount: 10000, product: "both" });
     expect(((await dl(db, a.token)).names as { name: string }[]).map((n) => n.name)).toEqual(["Ash", "Ivy Rose", "Wren"]);
     await db.exec(`update shop_orders set paid_at = now() - interval '7 days 1 minute'`);
     expect(await dl(db, a.token)).toEqual({ status: "error", reason: "expired" });
+  });
+});
+
+describe("claim_shop_check (the thanks page's PayMongo check)", () => {
+  it("once per 10 s and at most 60 times per pending order; needs the shop key", async () => {
+    const db = await migratedDb();
+    const a = await order(db);
+    const claim = (secret = SECRET) => fn<boolean>(db, `claim_shop_check($1, $2)`, [a.token, secret]);
+    expect(await claim("nope".repeat(10))).toBe(false);
+    expect(await claim()).toBe(true);
+    expect(await claim()).toBe(false); // within 10 s
+    await db.exec(`update shop_orders set last_checked_at = now() - interval '11 seconds'`);
+    expect(await claim()).toBe(true);
+    await db.exec(`update shop_orders set last_checked_at = now() - interval '11 seconds', checks = 60`);
+    expect(await claim()).toBe(false); // cap reached
+    await db.exec(`update shop_orders set checks = 0, last_checked_at = null`);
+    await paid(db, a.id!);
+    expect(await claim()).toBe(false); // nothing to check once paid
+    expect(await fn(db, `claim_shop_check($1, $2)`, ["x", SECRET])).toBe(false);
+  });
+});
+
+describe("release_shop_download (a PDF that could not be made gives its download back)", () => {
+  it("needs the shop key, never goes below zero", async () => {
+    const db = await migratedDb();
+    await addName(db, "Wren", "girl");
+    const a = await order(db);
+    await paid(db, a.id!);
+    await fn(db, `download_shop_order($1)`, [a.token]);
+    expect(await one(db, `select downloads from shop_orders`)).toEqual({ downloads: 1 });
+    expect(await fn(db, `release_shop_download($1, $2)`, [a.token, "nope".repeat(10)])).toBe(false);
+    expect(await fn(db, `release_shop_download($1, $2)`, [a.token, SECRET])).toBe(true);
+    expect(await one(db, `select downloads from shop_orders`)).toEqual({ downloads: 0 });
+    expect(await fn(db, `release_shop_download($1, $2)`, [a.token, SECRET])).toBe(false);
+    expect(await one(db, `select downloads from shop_orders`)).toEqual({ downloads: 0 });
   });
 });
 
@@ -308,9 +371,9 @@ describe("permissions (Supabase roles)", () => {
     }
     const exec = async (role: string, f: string) =>
       (await one<{ ok: boolean }>(db, `select has_function_privilege($1, $2, 'execute') ok`, [role, f])).ok;
-    for (const f of ["shop_info()", "create_shop_order(text, text, int, text, text, text, text, text)", "get_shop_order_status(text)",
-      "attach_shop_checkout(uuid, text, text)", "mark_shop_order_paid(uuid, text, text, int, text, text, text)",
-      "note_shop_order_email(uuid, text, text)", "download_shop_order(text)"]) {
+    for (const f of ["shop_info(text)", "create_shop_order(text, text, int, text, text, text, text, text, boolean, text)", "get_shop_order_status(text)",
+      "attach_shop_checkout(uuid, text, text)", "claim_shop_check(text, text)", "mark_shop_order_paid(uuid, text, text, int, text, text, text, text)",
+      "note_shop_order_email(uuid, text, text)", "download_shop_order(text)", "release_shop_download(text, text)"]) {
       expect(await exec("anon", `public.${f}`), f).toBe(true);
     }
     for (const f of ["shop_secret_ok(text)", "set_shop_secret(text)", "shop_secret_matches(text)"]) expect(await exec("anon", `public.${f}`), f).toBe(false);
@@ -345,8 +408,8 @@ describe("permissions (Supabase roles)", () => {
     const rows = (await db.query<{ proname: string; prosecdef: boolean; proconfig: string[] | null }>(
       `select proname, prosecdef, proconfig from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and proname like '%shop%' order by 1`)).rows;
     expect(rows.map((r) => r.proname)).toEqual([
-      "attach_shop_checkout", "create_shop_order", "download_shop_order", "get_shop_order_status", "mark_shop_order_paid",
-      "note_shop_order_email", "set_shop_secret", "shop_info", "shop_secret_matches", "shop_secret_ok",
+      "attach_shop_checkout", "claim_shop_check", "create_shop_order", "download_shop_order", "get_shop_order_status", "mark_shop_order_paid",
+      "note_shop_order_email", "release_shop_download", "set_shop_secret", "shop_info", "shop_secret_matches", "shop_secret_ok",
     ]);
     for (const r of rows) {
       expect(r.prosecdef, r.proname).toBe(true);
@@ -378,6 +441,7 @@ describe("fresh schema.sql matches v1 + 002..019 (settings, shop_orders, shop_se
     const db = await freshDb();
     await db.exec(m019);
     await db.query(`select set_shop_secret($1)`, [SECRET]);
+    await db.exec(`update settings set shop_enabled = true`);
     expect((await order(db)).status).toBe("ok");
   });
 
@@ -387,6 +451,6 @@ describe("fresh schema.sql matches v1 + 002..019 (settings, shop_orders, shop_se
     expect(schema).toMatch(/alter table public\.shop_secrets enable row level security;/);
     expect(schema).toMatch(/foreach t in array array\[[^\]]*'shop_orders'[^\]]*\] loop\s+execute format\('drop policy if exists owner_all/);
     expect(schema).toMatch(/revoke all on public\.shop_secrets from anon, authenticated;/);
-    expect(schema).toMatch(/grant execute on function public\.shop_info\(\)[\s\S]*to anon, authenticated, service_role;/);
+    expect(schema).toMatch(/grant execute on function public\.shop_info\(text\)[\s\S]*to anon, authenticated, service_role;/);
   });
 });
