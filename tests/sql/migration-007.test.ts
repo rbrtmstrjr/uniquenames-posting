@@ -25,6 +25,7 @@ const m012 = stripSupabase(read("supabase", "migrations", "012_two_styles.sql"))
 const m013 = stripSupabase(read("supabase", "migrations", "013_letter_posts.sql"));
 const m014 = stripSupabase(read("supabase", "migrations", "014_reel_formats.sql"));
 const m015 = stripSupabase(read("supabase", "migrations", "015_name_nest.sql"));
+const m017 = stripSupabase(read("supabase", "migrations", "017_initials_posts.sql"));
 
 // The final style blocks from the PC spike, verbatim.
 const spike = read("docs", "reference", "reel-themes-motion-spike.md").replace(/\r\n/g, "\n");
@@ -298,6 +299,7 @@ describe("fresh schema.sql matches v1 + 002..007 (+ 008)", () => {
     await migrated.exec(m013);
     await migrated.exec(m014);
     await migrated.exec(m015);
+    await migrated.exec(m017);
     const want = await shape(migrated);
     expect(want.functions).toHaveLength(8);
     expect(want.themes).toHaveLength(10);
