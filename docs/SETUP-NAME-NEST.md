@@ -83,7 +83,7 @@ A project set up from `supabase/schema.sql` before 2026-10-11: in the **SQL Edit
 name from the Names page on a card in one safe step. A project set up later already has it.
 Then run `supabase/migrations/017_initials_posts.sql` once (safe to run again) for **Today > Initials** (two-word names
 with two chosen initials, like A·R): it stores the post's **A·R** label and picks unused names first, then new AI names
-(US English), then names used before, in one safe step. Before it runs, initials posts are made without names used before
+(US English, Claude Sonnet; well-loved US names are fine, never the same first or middle name twice in a post), then names used before, in one safe step. A new pair's card shows its parts' origins from your names (like "English · Latin") and no US rank. Before it runs, initials posts are made without names used before
 and without the label. A project set up from `supabase/schema.sql` after 2026-10-11 already has it.
 
 ## Updating the names later
