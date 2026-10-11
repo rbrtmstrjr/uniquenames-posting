@@ -69,16 +69,20 @@ Without these, buyers still get the download and password on the thanks page; Or
 The "Need help?" link opens Messenger with your page: `https://m.me/61572452954153` (your page id; the page has no
 username), set in `packs/unique-names/shop.ts`. `SHOP_MESSENGER_URL` in Vercel overrides it.
 
-### 7. Test in test mode
-Open `/shop`, pick an edition, use your own email and pay on PayMongo's test checkout. The thanks page should switch
-to **Download PDF** within seconds; Orders shows the order as **paid**.
+### 7. Test in test mode (only you can see the shop)
+With **test** keys the shop is never public: visitors see **Coming soon**, because a test payment is not real money
+and would otherwise give the real PDF away. Sign in to the app first, then open `/shop` **in the same browser**: you see
+a yellow **Test mode — only you can see this** banner (even while the shop switch is still **Paused**). Pick an edition,
+use your own email and pay on PayMongo's test checkout. The thanks page should switch to **Download PDF** within
+seconds; Orders shows the order as **paid**.
 
 ### 8. Go live
 PayMongo: switch to live, copy the **live** keys and add a **live** webhook (same URL, same event). In Vercel replace
 `PAYMONGO_PUBLIC_KEY`, `PAYMONGO_SECRET_KEY` (`sk_live_…`) and `PAYMONGO_WEBHOOK_SECRET` with the live ones, redeploy,
-then **Orders > Link payments** again. Then do one real **₱50** purchase yourself with GCash (Pay QR > Upload QR),
-download it, open it with the password, and check the email and the Orders page. Refund it from the PayMongo dashboard
-if you like.
+then **Orders > Link payments** again (the checklist shows a red mark until the link matches the live secret; until
+then the shop stays closed). Then turn the shop **Open** on the Orders page: it starts **Paused**, and with live keys
+nobody can buy until you open it. Do one real **₱50** purchase yourself with GCash (Pay QR > Upload QR), download it,
+open it with the password, and check the email and the Orders page. Refund it from the PayMongo dashboard if you like.
 
 ## The link to post
 `https://<your site>/shop` (Orders > **Copy shop link**). Put it in your post comments, for example:
@@ -90,8 +94,8 @@ follow PayMongo's QR Ph refund process) and disputes. A refund does not lock the
 Payouts go to the bank account in your PayMongo settings.
 
 ## Pausing the shop
-Orders > the **Open / Paused** switch. Paused (or no keys, or not linked): /shop shows **Coming soon**; orders already
-paid can still be downloaded.
+Orders > the **Open / Paused** switch. A new shop starts **Paused**. Paused (or no keys, or test keys for visitors, or
+not linked): /shop shows **Coming soon**; orders already paid can still be downloaded.
 
 ## More payment methods later
 Your account accepts QR Ph now. When PayMongo enables more (for example direct GCash or Maya), set
@@ -99,13 +103,18 @@ Your account accepts QR Ph now. When PayMongo enables more (for example direct G
 Messenger delivery: a slot is ready in the pack (`delivery.messenger`), not built yet.
 
 ## Security (what keeps it safe)
+- Test keys never open the shop to the public: only the signed-in owner can order in test mode.
 - The Supabase service-role key is never on Vercel. The public pages use the anon key, which can only call the shop's
   database functions; it cannot read any table (orders, names, the key fingerprint).
 - Only a request signed by PayMongo (checked on the exact bytes received, 5-minute window) or the server's own question
   to PayMongo can mark an order paid; the database also demands the server's shop key. The thanks page never trusts
-  PayMongo's redirect.
-- Prices come from the pack on the server; the paid amount and currency must match the order exactly.
+  PayMongo's redirect, and its own checks with PayMongo are limited to one every 10 seconds (60 per order).
+- Only this server can create orders (the database demands the shop key), so the honeypot and the per-network limit
+  cannot be skipped. If the key in the database is not this server's (a stale link), the shop closes and no buyer is
+  sent to pay.
+- Prices come from the pack on the server; the paid amount, currency and edition must match the order exactly.
+- A download counts only when its PDF was made.
 - Every order has a random 96-character link token; PDF passwords are new for every order. Emails and passwords are
   never written to logs.
-- Limits: 5 orders an hour per email, 10 per network, 120 in any 10 minutes for the whole shop; a hidden honeypot field
-  stops simple bots.
+- Limits: 5 orders an hour per email, 10 per network, 120 in any 10 minutes for the whole shop (counted one order at a
+  time, so simultaneous requests cannot slip past); a hidden honeypot field stops simple bots.
