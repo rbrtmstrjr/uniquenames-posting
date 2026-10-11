@@ -28,7 +28,6 @@ export function validateExport(raw: unknown): { ok: true; buyer: string; gender:
   const buyer = typeof r.buyer === "string" ? r.buyer.replace(/\s+/g, " ").trim() : "";
   if (buyer.length < 2) return { ok: false, error: "Type the buyer's name or email." };
   if (buyer.length > BUYER_MAX) return { ok: false, error: `Keep the buyer's name under ${BUYER_MAX} characters.` };
-  // eslint-disable-next-line no-control-regex
   if (/[\u0000-\u001f\u007f]/.test(buyer)) return { ok: false, error: "The buyer's name has characters a PDF can't show." };
   if (r.gender !== "girl" && r.gender !== "boy" && r.gender !== "both") return { ok: false, error: "Pick Girl, Boy or Both." };
   return { ok: true, buyer, gender: r.gender };

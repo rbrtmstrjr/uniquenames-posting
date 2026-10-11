@@ -295,7 +295,10 @@ function contents(b: Book, rows: ContentsRow[], placed: { page: number; y: numbe
   doc.restore();
   rows.forEach((r, k) => {
     const at = placed[k];
-    if (b.page !== first + at.page) b.goto(first + at.page);
+    if (b.page !== first + at.page) {
+      b.goto(first + at.page);
+      b.text("contents", `${p.contentsHeading} (continued)`.toUpperCase(), M, 36, { f: "bold", size: 7.5, color: c.muted, spacing: 1.6 });
+    }
     const y = at.y;
     const num = String(r.page);
     if (r.level === 0) {
