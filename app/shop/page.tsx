@@ -5,6 +5,7 @@ import { shopEnv } from "@/lib/shop/config";
 import { fillCounts, formatPrice, productCount } from "@/lib/shop/products";
 import { shopState, type ShopState } from "@/lib/shop/service";
 import { ShopView } from "@/components/shop/shop-view";
+import { galleryImages } from "@/components/shop/shop-gallery";
 import { getOwner } from "@/lib/supabase/server";
 
 // /shop: the public names PDF shop (docs/SHOP.md). No login (lib/supabase/proxy isPublicPath). Before migration 019,
@@ -37,10 +38,12 @@ export default async function ShopPage({ searchParams }: { searchParams: Promise
     id, name: pack.shop.products[id].name, price: formatPrice(pack.shop, pack.shop.products[id].price), blurb: pack.shop.products[id].blurb,
     badge: pack.shop.products[id].badge, count: counts ? productCount(counts, id) : null,
   }));
+  const cheapest = pack.shop.productOrder.reduce((a, b) => (pack.shop.products[b].price < pack.shop.products[a].price ? b : a));
+  const gallery = galleryImages(pack.shop.gallery);
   return (
     <ShopView
       brandName={pack.brand.name} logo={pack.brand.assets.logo ?? null} copy={pack.shop.copy} inside={inside} products={products}
-      previews={pack.shop.previews} messenger={env.messenger} open={state.open} testMode={state.open && state.testMode} cancelled={(await searchParams).cancelled === "1"}
+      previews={pack.shop.previews} gallery={gallery} facebookPage={pack.shop.facebookPage} fromPrice={formatPrice(pack.shop, pack.shop.products[cheapest].price)} messenger={env.messenger} open={state.open} testMode={state.open && state.testMode} cancelled={(await searchParams).cancelled === "1"}
     />
   );
 }

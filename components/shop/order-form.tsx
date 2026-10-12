@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import { Check, Loader2, Lock } from "lucide-react";
+import { AlertCircle, Check, Loader2, Lock } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 
 // The shop's order form (/shop): pick an edition, type a name and an email (+ an optional Facebook name), then go to
@@ -44,7 +44,7 @@ export function OrderForm({ products, heading, payButton, initial = "both" }: {
     setBusy(false);
   };
 
-  const input = "min-h-12 w-full rounded-xl border border-line bg-surface px-4 text-base text-ink outline-none transition placeholder:text-muted/70 focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-accent/30";
+  const input = "min-h-12 w-full rounded-xl border border-line bg-surface px-4 text-base text-ink outline-none transition placeholder:text-muted focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-accent/30";
   const bad = (f: Field) => error?.field === f;
 
   return (
@@ -57,12 +57,13 @@ export function OrderForm({ products, heading, payButton, initial = "both" }: {
             const on = p.id === product;
             return (
               <label key={p.id} className={cn(
-                "relative flex cursor-pointer items-center gap-3 rounded-2xl border bg-surface p-4 transition",
-                on ? "border-accent ring-2 ring-accent/25" : "border-line hover:border-accent/50",
+                "relative flex cursor-pointer items-center gap-3 rounded-2xl border bg-surface p-4 transition duration-200",
+                "has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-accent",
+                on ? "border-accent shadow-soft ring-2 ring-accent/25" : "border-line hover:-translate-y-0.5 hover:border-accent/60 hover:shadow-soft active:translate-y-0",
               )}>
                 <input type="radio" name="product" value={p.id} checked={on} onChange={() => setProduct(p.id)} className="sr-only" />
-                <span aria-hidden className={cn("grid size-6 shrink-0 place-items-center rounded-full border-2", on ? "border-accent bg-accent text-accent-ink" : "border-line")}>
-                  {on && <Check className="size-3.5" strokeWidth={3} />}
+                <span aria-hidden className={cn("grid size-6 shrink-0 place-items-center rounded-full border-2 transition duration-200", on ? "scale-100 border-accent bg-accent text-accent-ink" : "border-line")}>
+                  {on && <Check className="size-3.5 animate-pop" strokeWidth={3} />}
                 </span>
                 <span className="min-w-0 flex-1">
                   <span className="flex flex-wrap items-center gap-2">
@@ -71,7 +72,7 @@ export function OrderForm({ products, heading, payButton, initial = "both" }: {
                   </span>
                   <span className="block text-sm text-muted">{p.blurb}{p.count ? ` ${p.count.toLocaleString("en-US")} names.` : ""}</span>
                 </span>
-                <span className="text-lg font-bold text-ink">{p.price}</span>
+                <span className="text-xl font-bold tabular-nums text-ink">{p.price}</span>
               </label>
             );
           })}
@@ -102,7 +103,11 @@ export function OrderForm({ products, heading, payButton, initial = "both" }: {
       </div>
 
       <div aria-live="polite" role="status" className="min-h-0">
-        {error && <p className="rounded-xl bg-bad/10 px-4 py-3 text-sm font-semibold text-bad">{error.text}</p>}
+        {error && (
+          <p className="flex items-start gap-2 rounded-xl border border-bad/40 bg-bad/10 px-4 py-3 text-sm font-semibold text-ink">
+            <AlertCircle className="mt-px size-4 shrink-0 text-bad" aria-hidden /> {error.text}
+          </p>
+        )}
       </div>
 
       <button type="submit" disabled={busy} aria-busy={busy || undefined}
