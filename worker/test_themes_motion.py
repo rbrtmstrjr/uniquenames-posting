@@ -329,8 +329,13 @@ class PreviewTickTest(unittest.TestCase):
         self.assertEqual(len([m for m in self.logs if "(007 found)" in m]), 1)
 
     def test_other_errors_reach_the_loop(self):
-        self.supa.rpc = mock.Mock(side_effect=lambda fn, args=None: (_ for _ in ()).throw(SupaError("network down"))
-                                  if fn == "claim_next_theme_preview" else (0 if fn != "claim_next_card" else None))
+        def rpc(fn, args=None):
+            if fn == "claim_next_job":
+                raise SupaError('POST /rest/v1/rpc/claim_next_job -> HTTP 404 {"code":"PGRST202"}')  # a database without 020
+            if fn == "claim_next_theme_preview":
+                raise SupaError("network down")
+            return None if fn == "claim_next_card" else 0
+        self.supa.rpc = mock.Mock(side_effect=rpc)
         with self.assertRaises(SupaError):
             self.run_.tick()
 

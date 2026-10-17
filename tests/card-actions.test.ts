@@ -20,7 +20,7 @@ const base: CardRow = {
 
 type Health = "ready" | "comfy-off" | "offline" | "unknown";
 const workerRow = (h: Health) => h === "unknown" ? null : {
-  id: 1, last_seen: new Date(Date.now() - (h === "offline" ? 120_000 : 3_000)).toISOString(), comfyui_ok: h === "ready",
+  id: 1, last_seen: new Date(Date.now() - (h === "offline" ? 600_000 : 3_000)).toISOString(), comfyui_ok: h === "ready",
 };
 
 /** Answers: the card select, worker_status, the dup-name check, and the updates (configurable). */

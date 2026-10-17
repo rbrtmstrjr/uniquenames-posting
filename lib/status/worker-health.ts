@@ -1,7 +1,12 @@
 import type { WorkerStatusRow } from "@/lib/db/types";
 
 export type WorkerHealth = "ready" | "comfy-off" | "offline" | "unknown";
-export const OFFLINE_AFTER_MS = 45_000;
+/**
+ * The PC worker (2.8.0) writes worker_status once a minute, and at once when ComfyUI opens or closes, so 3 missed
+ * heartbeats mean the PC is off (before 2.8.0: every 15 s, offline after 45 s; the slower heartbeat keeps the Supabase
+ * project's logs small). Changes still arrive at once through Realtime.
+ */
+export const OFFLINE_AFTER_MS = 180_000;
 
 export function workerHealth(w: WorkerStatusRow | null, now: number): WorkerHealth {
   if (!w || !w.last_seen) return "unknown";

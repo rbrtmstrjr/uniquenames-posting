@@ -33,6 +33,22 @@ ordered and saved to the phone with the caption.
 
 Setup: `docs/SETUP.md`. Design: `docs/superpowers/specs/2026-10-04-uniquenames-posting-design.md`, v2 changes: `docs/superpowers/specs/2026-10-05-v2-feedback-design.md`.
 
+## Fewer log lines (worker 2.8.0, 2026-10-17)
+The Supabase project went over the Free plan's 1 GB of logs: every request is a log line, and the idle PC worker sent
+about 2 a second (~5 million a month). Now:
+- **One request per poll**: `claim_next_job` (migration `020_one_claim.sql`) hands out the next card, reel step, voice
+  sample or theme preview in exactly the old order; the stuck-claim recovery rides on one poll a minute. Without 020 the
+  worker keeps the old calls (checked again every 10 minutes).
+- **Idle poll**: every 3 s while there is work, every 15 s after a minute with nothing to do (a new job starts within
+  ~15 s, then it is back to 3 s at once).
+- **Heartbeat** once a minute, plus within seconds when ComfyUI opens or closes or the PC starts or stops working.
+  The website calls the PC offline after 3 minutes without one (was 45 s).
+- **Login check** with `getClaims()` (the token is verified on the server with the project's public key) instead of
+  `getUser()`, which asked Supabase Auth on every page view.
+- Measured with a fake Supabase (`worker/test_request_budget.py`, `python test_request_budget.py report`): an idle day
+  178,561 → 7,201 requests (-96 %, ~5.36 M → ~0.22 M a month); a busy hour of non-stop cards 1,105 → 781 (-29 %).
+Setup: `docs/SETUP.md` ("Fewer log lines").
+
 ## Commands
 - `npm run dev` · `npm run build` · `npm test` · `npm run typecheck` · `npm run lint`
 - `npm run import` (once) · `cd worker && python -m unittest -v`

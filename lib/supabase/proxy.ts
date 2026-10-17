@@ -1,8 +1,31 @@
 import { createServerClient } from "@supabase/ssr";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { NextResponse, type NextRequest } from "next/server";
 
 export function isOwnerEmail(email?: string | null, admin?: string): boolean {
   return !!email && !!admin && email.toLowerCase() === admin.toLowerCase();
+}
+
+export type Account = { id: string; email: string | null };
+
+/**
+ * The signed-in account from the session cookie, or null. auth.getClaims() verifies the access token's signature and
+ * expiry (and refreshes an expiring session, like getUser did). This project signs tokens with an asymmetric key (ES256),
+ * so the check runs here against the public key from /auth/v1/.well-known/jwks.json (fetched once, cached 10 minutes)
+ * instead of sending every page view to Supabase Auth with getUser() (each request is a line in the project's logs).
+ * A project still on the legacy symmetric JWT secret makes getClaims ask Auth, exactly as getUser did.
+ * Trade-off: a session revoked elsewhere is honoured until its access token expires (1 hour at most); signing out in
+ * this browser clears its cookies at once.
+ */
+export async function verifiedAccount(sb: SupabaseClient): Promise<Account | null> {
+  try {
+    const { data, error } = await sb.auth.getClaims();
+    const c = data?.claims;
+    if (error || !c?.sub) return null;
+    return { id: c.sub, email: typeof c.email === "string" ? c.email : null };
+  } catch {
+    return null; // Auth unreachable while refreshing: treated as signed out, as getUser was
+  }
 }
 
 // Only same-site relative paths. Browsers strip tab/CR/LF and treat "\" as "/",
@@ -47,9 +70,9 @@ export async function updateSession(request: NextRequest) {
       },
     },
   });
-  const { data: { user } } = await sb.auth.getUser();
-  const owner = !!user && isOwnerEmail(user.email, process.env.ADMIN_EMAIL);
-  const target = gateRedirect(request.nextUrl.pathname, !!user, owner);
+  const account = await verifiedAccount(sb);
+  const owner = !!account && isOwnerEmail(account.email, process.env.ADMIN_EMAIL);
+  const target = gateRedirect(request.nextUrl.pathname, !!account, owner);
   if (!target) return response;
   const url = request.nextUrl.clone();
   url.pathname = target.pathname;

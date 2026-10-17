@@ -150,7 +150,7 @@ class BuildRunnerTest(unittest.TestCase):
         self.assertEqual(r.output_root, render.default_output_root())
         self.assertEqual(r.reels.output_root, r.output_root)
         self.assertEqual(r.poll_seconds, 3.0)
-        self.assertEqual(r.heartbeat_seconds, 15.0)
+        self.assertEqual(r.heartbeat_seconds, 60.0)                           # 2.8.0: once a minute + on changes
         r.log("hello")
         self.assertEqual(logs, ["hello"])                                     # no prefix with one page
 
@@ -384,10 +384,71 @@ class RoundRobinTest(unittest.TestCase):
         self.assertEqual(m.slots[0].off_until, 0.0)
 
     def test_previews_sweep_per_page_but_not_while_backing_off(self):
-        m, (a, b) = self.make(("a", {"boom": SupaError("down")}), ("b", {}))
+        m, (a, b) = self.make(("a", {"boom": SupaError("down")}), ("b", {"work": 5}))
         m.tick()
         m.tick()
         self.assertEqual((a.sweeps, b.sweeps), (1, 2))
+
+    # 2.8.0: each page has its own idle poll (every 3 s for a minute after its last job, then every 15 s)
+    def test_an_idle_page_is_asked_every_3_s_for_a_minute_then_every_15_s(self):
+        m, (a,) = self.make(("a", {}))
+        asked = []
+        for _ in range(200):                          # 100 s in half-second steps
+            before = a.ticks
+            m.tick()
+            if a.ticks > before:
+                asked.append(self.clock.t - 1000.0)
+            self.clock.t += 0.5
+        self.assertEqual(asked[:21], [3.0 * i for i in range(21)])     # 0 .. 60 s: every 3 s
+        self.assertEqual(asked[21:], [75.0, 90.0])                    # then every 15 s
+
+    def test_a_job_brings_the_page_back_to_3_s(self):
+        m, (a,) = self.make(("a", {}))
+        self.clock.t += 100                           # a long idle start
+        m.tick()
+        self.assertEqual(m.next_wait(), 15.0)
+        a.work = 1
+        self.clock.t += 15
+        self.assertTrue(m.tick())                     # the job ran: asked again at once
+        self.assertFalse(m.tick())
+        self.assertEqual(m.next_wait(), 3.0)
+
+    def test_a_busy_page_does_not_wait_for_an_idle_one(self):
+        m, (a, b) = self.make(("a", {"work": 1000}), ("b", {}))
+        for _ in range(240):                          # 2 minutes of 0.5 s jobs on page a
+            m.tick()
+            self.clock.t += 0.5
+        self.assertEqual(a.ticks, 240)
+        # b: every 3 s for its first minute (20 asks, 0.5 .. 57.5 s), then every 15 s (60.5, 75.5, 90.5, 105.5 s)
+        self.assertEqual(b.ticks, 24)
+
+    def test_next_wait_is_the_soonest_page(self):
+        m, (a, b) = self.make(("a", {}), ("b", {"boom": SupaError("down")}))
+        self.assertFalse(m.tick())
+        self.assertEqual(m.next_wait(), 3.0)          # a in 3 s; b backing off for 3 s
+        self.clock.t += 3
+        m.tick()
+        self.assertEqual(m.next_wait(), 3.0)          # a again in 3 s; b now in 6 s
+        self.clock.t += 2.9
+        self.assertAlmostEqual(m.next_wait(), 0.1)
+        self.clock.t += 1
+        self.assertEqual(m.next_wait(), pages.MIN_WAIT)
+
+    def test_run_forever_sleeps_until_the_next_page_is_due(self):
+        m, (a, b) = self.make(("a", {}), ("b", {}))
+        waits = []
+
+        def wait(seconds):
+            waits.append(seconds)
+            self.clock.t += seconds
+            if len(waits) >= 25:
+                m.stop_event.set()
+            return m.stop_event.is_set()
+        m.stop_event.wait = wait
+        with mock.patch.object(m, "start_heartbeats"):
+            m.run_forever()
+        self.assertEqual(waits[:20], [3.0] * 20)
+        self.assertEqual(set(waits[20:]), {15.0})
 
     def test_heartbeat_per_page(self):
         m, (a, b) = self.make(("a", {}), ("b", {}))
@@ -506,7 +567,8 @@ class BusyElsewhereTest(unittest.TestCase):
                 seen.append(ru.busy)
 
         ru.reels = Reels()
-        su.rpc = lambda fn, args=None: {"step": "voice", "reel": {"id": "r1", "title": "t"}} if fn == "claim_next_reel_step" else None
+        su.rpc = lambda fn, args=None: ({"kind": "reel_step", "job": {"step": "voice", "reel": {"id": "r1", "title": "t"}}}
+                                        if fn == "claim_next_job" else None)
         self.assertTrue(ru.tick())
         self.assertEqual(seen, [True])
         self.assertFalse(ru.busy)
@@ -528,7 +590,7 @@ class BusyElsewhereTest(unittest.TestCase):
         self.assertIsNone(ru.busy_elsewhere)
 
     def test_version(self):
-        self.assertEqual(jobs.VERSION, "2.7.2")
+        self.assertEqual(jobs.VERSION, "2.8.0")
 
 
 class ReelsFolderTest(unittest.TestCase):

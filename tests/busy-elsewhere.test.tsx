@@ -30,7 +30,7 @@ describe("busy with the other page", () => {
     expect(canGenerate(workerHealth(ws(BUSY_ELSEWHERE), NOW))).toEqual({ ok: true });
     expect(busyElsewhere(ws(null), NOW)).toBe(false);
     expect(busyElsewhere(ws("ComfyUI is not reachable at http://127.0.0.1:8188", false), NOW)).toBe(false);
-    expect(busyElsewhere(ws(BUSY_ELSEWHERE, true, 120), NOW)).toBe(false); // offline wins
+    expect(busyElsewhere(ws(BUSY_ELSEWHERE, true, 200), NOW)).toBe(false); // offline wins
     expect(busyElsewhere(null, NOW)).toBe(false);
   });
 

@@ -1,5 +1,9 @@
 # The worker's job loop: claim one card at a time from Supabase, make it with
 # ComfyUI + Pillow, upload it, keep a backup copy on the PC, and heartbeat.
+# 2.8.0: every request to Supabase is a line in the project's logs (the Free plan allows 1 GB a month), so a poll is
+# ONE request (claim_next_job, migration 020; the old one-function-at-a-time calls stay as the fallback), the stuck-claim
+# requeue rides on one poll a minute, an idle worker polls every 15 s instead of every 3 s, and worker_status is written
+# once a minute plus at once when something the website shows changes (ComfyUI open/closed, busy/idle).
 import contextlib
 import datetime
 import io
@@ -17,7 +21,7 @@ import photo_look
 from render import JobError, card_layout, detail_line, slugify, text_style
 from supa import SupaError
 
-VERSION = "2.7.2"
+VERSION = "2.8.0"
 BUCKET = "cards"
 COMFY_CLOSED = "ComfyUI is closed. Open ComfyUI Desktop on your PC, then press Retry."
 NO_NET_SAVE = "Couldn't reach the internet to save this card. Press Retry."
@@ -32,6 +36,13 @@ BUSY_ELSEWHERE = "PC busy with your other page"
 CTA_FILENAME = "99-follow.jpg"  # the closing card's PC backup name (migration 010)
 
 REELS_RECHECK_SECONDS = 600
+ONE_CLAIM_RECHECK_SECONDS = 600  # claim_next_job missing (020 not run): the old calls, checked again after this
+REQUEUE_SECONDS = 60.0           # the stuck-claim requeue runs on one poll a minute, not on every poll
+IDLE_AFTER_SECONDS = 60.0        # no job for this long: poll every IDLE_POLL_SECONDS instead of POLL_SECONDS
+IDLE_POLL_SECONDS = 15.0         # (a new job then starts within ~15 s; back to POLL_SECONDS at once after any job)
+HEARTBEAT_SECONDS = 60.0         # worker_status at least once a minute (the website: "PC offline" after 3 minutes) ...
+HEARTBEAT_CHECK_SECONDS = 5.0    # ... and within 5 s of a change it shows; the look itself is local (no request)
+HEARTBEAT_RETRY_SECONDS = 15.0   # after a failed heartbeat
 PREVIEW_DAYS = 14               # reel previews leave storage after this; the full video stays on the PC
 PREVIEW_SWEEP_SECONDS = 86400   # once a day
 
@@ -39,6 +50,12 @@ PREVIEW_SWEEP_SECONDS = 86400   # once a day
 def is_missing_function(e):
     """PostgREST's answer when an RPC does not exist (yet): HTTP 404 / PGRST202."""
     return "PGRST202" in str(e) or re.search(r"HTTP 404", str(e)) is not None
+
+
+def idle_poll_seconds(idle_for, poll_seconds):
+    """The wait after a poll that found nothing: poll_seconds while a job ran in the last IDLE_AFTER_SECONDS (or the
+    worker just started), then IDLE_POLL_SECONDS (never faster than poll_seconds)."""
+    return poll_seconds if idle_for < IDLE_AFTER_SECONDS else max(poll_seconds, IDLE_POLL_SECONDS)
 
 
 def _age_days(stamp, now):
@@ -141,14 +158,15 @@ def with_post_fonts(settings, fonts):
 
 
 class Runner:
-    def __init__(self, supa, renderer, output_root, cache_dir, poll_seconds=3.0, heartbeat_seconds=15.0, log=print,
-                 reels=None, look=None):
+    def __init__(self, supa, renderer, output_root, cache_dir, poll_seconds=3.0, heartbeat_seconds=HEARTBEAT_SECONDS,
+                 log=print, reels=None, look=None):
         self.supa = supa
         self.renderer = renderer
         self.output_root = output_root
         self.cache_dir = cache_dir
         self.poll_seconds = poll_seconds
         self.heartbeat_seconds = heartbeat_seconds
+        self.heartbeat_check_seconds = HEARTBEAT_CHECK_SECONDS
         self.log = log
         self.current = None
         self.stop_event = threading.Event()
@@ -163,6 +181,14 @@ class Runner:
         self.next_preview_sweep = 0.0
         self.busy = False              # a job of this page is running (a card, a reel step, a sample, a preview)
         self.busy_elsewhere = None     # set by pages.MultiRunner: () -> True while another page's job runs
+        self.one_claim_off_until = 0.0 # claim_next_job is missing (020 not run): the old calls until then
+        self.one_claim_state = None    # None = not known yet, True = 020 there, False = 020 missing
+        self.next_requeue = 0.0        # when the next poll runs the stuck-claim requeue
+        self.last_job_at = time.time() # the idle poll starts IDLE_AFTER_SECONDS after this
+        self._beat_key = None          # what the website last got (see _status_key)
+        self._beat_look = None         # what the last look saw
+        self._beat_next = 0.0          # the next keep-alive heartbeat
+        self._beat_retry_at = 0.0      # after a failed heartbeat
 
     @contextlib.contextmanager
     def _working(self):
@@ -173,35 +199,128 @@ class Runner:
             self.busy = False
 
     # ------------------------------------------------------------ heartbeat
-    def heartbeat_once(self):
+    def _status(self):
+        """worker_status as the website should see it now (ComfyUI is asked locally; no request to Supabase)."""
         h = self.renderer.health()
         message = h.get("error")
         if not message and not self.busy and self.busy_elsewhere and self.busy_elsewhere():
             message = BUSY_ELSEWHERE
-        self.supa.update("worker_status", "id=eq.1", {
-            "last_seen": now_iso(), "comfyui_ok": bool(h["ok"]), "gpu": h.get("gpu"),
-            "current_card_id": self.current, "worker_version": VERSION, "message": message,
-        })
+        return {"comfyui_ok": bool(h["ok"]), "gpu": h.get("gpu"), "current_card_id": self.current,
+                "worker_version": VERSION, "message": message}
+
+    @staticmethod
+    def _status_key(status):
+        """What the website shows: PC ready / ComfyUI closed (+ why), busy with the other page, working on a card."""
+        return (status["comfyui_ok"], status["gpu"], status["message"], status["current_card_id"] is not None)
+
+    def heartbeat_once(self, status=None):
+        """Write worker_status now."""
+        status = status or self._status()
+        self.supa.update("worker_status", "id=eq.1", dict({"last_seen": now_iso()}, **status))
+        return status
+
+    def heartbeat_tick(self, now=None):
+        """One look at the local state (every HEARTBEAT_CHECK_SECONDS): write worker_status HEARTBEAT_SECONDS after the
+        last write (the keep-alive), at once when ComfyUI opened or closed, and when busy / idle changed and the next look
+        agrees (the split second between two jobs is never sent as "idle"). True if it was written."""
+        now = time.time() if now is None else now
+        if now < self._beat_retry_at:
+            return False
+        status = self._status()
+        key = self._status_key(status)
+        last_look, self._beat_look = self._beat_look, key
+        comfy_moved = self._beat_key is None or key[:2] != self._beat_key[:2]
+        changed = key != self._beat_key and (comfy_moved or key == last_look)
+        if not changed and now < self._beat_next:
+            return False
+        try:
+            self.heartbeat_once(status)
+        except Exception as e:
+            self.log("heartbeat failed: %s" % e)
+            self._beat_retry_at = now + HEARTBEAT_RETRY_SECONDS
+            return False
+        self._beat_key, self._beat_next = key, now + self.heartbeat_seconds
+        return True
 
     def _heartbeat_loop(self):
         while not self.stop_event.is_set():
             try:
-                self.heartbeat_once()
-            except Exception as e:
+                self.heartbeat_tick()
+            except Exception as e:  # a look that failed never stops the loop
                 self.log("heartbeat failed: %s" % e)
-            self.stop_event.wait(self.heartbeat_seconds)
+            self.stop_event.wait(self.heartbeat_check_seconds)
 
     # ------------------------------------------------------------ one job
     def tick(self):
-        self.supa.rpc("requeue_stuck_cards")
+        """Claim and run one job (a card, a reel step, a voice sample or a theme preview). True if a job ran."""
+        ran = self._tick()
+        if ran:
+            self.last_job_at = time.time()
+        return ran
+
+    def idle_wait(self, now=None):
+        """How long run_forever waits after a poll that found nothing."""
+        now = time.time() if now is None else now
+        return idle_poll_seconds(now - self.last_job_at, self.poll_seconds)
+
+    def _tick(self):
         # With ComfyUI down, leave queued cards alone (they stay queued) but still
         # do restamps, which only need Pillow.
         comfy_ok = bool(self.renderer.health()["ok"])
+        requeue = time.time() >= self.next_requeue
+        if self.reels and time.time() >= self.one_claim_off_until:
+            # 020: the whole poll in one request, in the same order as the calls below
+            try:
+                got = self.supa.rpc("claim_next_job", {"p_comfy_ok": comfy_ok, "p_music": True, "p_requeue": requeue})
+            except SupaError as e:
+                if not is_missing_function(e):
+                    raise
+                self._one_claim_off(e)
+            else:
+                self._one_claim_on()
+                if requeue:
+                    self.next_requeue = time.time() + REQUEUE_SECONDS
+                return self._run_claimed(got)
+        # The old way, one function at a time (a database without 020, or a cards-only runner).
+        if requeue:
+            self.supa.rpc("requeue_stuck_cards")
+            self.next_requeue = time.time() + REQUEUE_SECONDS
         job = self.supa.rpc("claim_next_card", None if comfy_ok else {"p_restamp_only": True})
         if not job:
             # Cards always go first: a reel step only when there is no card to make.
             # With ComfyUI closed, only the steps that don't need it (timing, render) are handed out.
-            return self._reel_tick(comfy_ok) if self.reels else False
+            return self._reel_tick(comfy_ok, requeue) if self.reels else False
+        return self._card(job)
+
+    def _run_claimed(self, got):
+        """Run what claim_next_job handed out: {kind, job} (job = what the one-kind claim function answers) or null."""
+        if not got:
+            return False
+        kind, job = got.get("kind"), got.get("job")
+        if kind == "card":
+            return self._card(job)
+        if kind == "reel_step":
+            return self._reel_step(job)
+        if kind == "voice_sample":
+            return self._sample(job)
+        if kind == "theme_preview":
+            return self._preview(job)
+        self.log("unknown job kind from claim_next_job: %r (skipped; update the worker)" % (kind,))
+        return False
+
+    def _one_claim_off(self, e):
+        self.one_claim_off_until = time.time() + ONE_CLAIM_RECHECK_SECONDS
+        if self.one_claim_state is not False:
+            self.log("one request per poll is off until supabase/migrations/020_one_claim.sql is run: asking the old "
+                     "way (%s)" % str(e)[:120])
+        self.one_claim_state = False
+
+    def _one_claim_on(self):
+        if self.one_claim_state is not True:
+            self.log("jobs are claimed with one request per poll (020 found)")
+        self.one_claim_state = True
+
+    def _card(self, job):
         card = job["card"]
         self.current = card["id"]
         self.busy = True
@@ -227,11 +346,12 @@ class Runner:
             self.busy = False
         return True
 
-    def _reel_tick(self, comfy_ok):
+    def _reel_tick(self, comfy_ok, requeue=True):
         if time.time() < self.reels_off_until:
             return False
         try:
-            self.supa.rpc("requeue_stuck_reels")
+            if requeue:
+                self.supa.rpc("requeue_stuck_reels")
             step = self._claim_reel_step(comfy_ok)
         except SupaError as e:
             if not is_missing_function(e):
@@ -247,6 +367,9 @@ class Runner:
             if not comfy_ok:
                 return False
             return self._sample_tick() or self._preview_tick()
+        return self._reel_step(step)
+
+    def _reel_step(self, step):
         reel = step.get("reel") or {}
         scene = step.get("scene") or {}
         self.log("reel %s: %s%s (%s)" % (step.get("step"), reel.get("title"),
@@ -292,6 +415,9 @@ class Runner:
                 raise
             self._music_off()
             return False
+        return self._sample(job)
+
+    def _sample(self, job):
         if not isinstance(job, dict) or not job.get("voice"):
             return False
         self.log("voice sample: %s" % (job["voice"].get("id")))
@@ -317,6 +443,9 @@ class Runner:
         if self.themes_state is False:
             self.log("theme previews are on (007 found)")
         self.themes_state = True
+        return self._preview(job)
+
+    def _preview(self, job):
         if not isinstance(job, dict) or not job.get("theme"):
             return False
         self.log("theme preview: %s" % job["theme"].get("id"))
@@ -592,7 +721,7 @@ class Runner:
                 ran = self.tick()
                 backoff = self.poll_seconds
                 if not ran:
-                    self.stop_event.wait(self.poll_seconds)
+                    self.stop_event.wait(self.idle_wait())
             except Exception as e:
                 self.log("loop error (retrying in %ds): %s" % (backoff, e))
                 self.stop_event.wait(backoff)
