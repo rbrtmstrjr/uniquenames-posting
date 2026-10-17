@@ -66,6 +66,10 @@ def _has_ffmpeg():
         return False
 
 
+# A database without migration 020 (claim_next_job): the 2.8.0 worker asks the old way, one function at a time.
+NO_ONE_CLAIM = SupaError('POST /rest/v1/rpc/claim_next_job -> HTTP 404 {"code":"PGRST202"}')
+
+
 class FakeSupa:
     def __init__(self, scenes=None):
         self.scenes = scenes if scenes is not None else [make_scene(i, status="queued") for i in (1, 2, 3)]
@@ -85,6 +89,8 @@ class FakeSupa:
     def rpc(self, fn, args=None):
         self.rpcs.append(fn)
         self.rpc_args.append(args)
+        if fn == "claim_next_job":
+            raise NO_ONE_CLAIM
         if fn == "claim_next_card":
             return None
         if self.rpc_error and fn in ("requeue_stuck_reels", "claim_next_reel_step"):
@@ -567,11 +573,15 @@ class RunnerReelTickTest(unittest.TestCase):
     def last_claim(self):
         return [a for f, a in zip(self.supa.rpcs, self.supa.rpc_args) if f == "claim_next_reel_step"][-1]
 
+    def music_claims(self):
+        return [a for f, a in zip(self.supa.rpcs, self.supa.rpc_args) if f == "claim_next_reel_step" and a and "p_music" in a]
+
     def test_reel_step_only_after_no_card(self):
         step = {"step": "image", "reel": make_reel(), "scene": make_scene(1)}
         self.supa.reel_steps.append(step)
         self.assertTrue(self.run_.tick())
-        self.assertEqual(self.supa.rpcs, ["requeue_stuck_cards", "claim_next_card", "requeue_stuck_reels", "claim_next_reel_step"])
+        self.assertEqual(self.supa.rpcs, ["claim_next_job", "requeue_stuck_cards", "claim_next_card", "requeue_stuck_reels",
+                                          "claim_next_reel_step"])
         self.reels.run_step.assert_called_once_with(step)
 
     def test_no_reel_step(self):
@@ -648,7 +658,7 @@ class RunnerReelTickTest(unittest.TestCase):
         self.assertEqual(self.supa.rpc_args[-1], {"p_no_comfy": False})
         self.assertFalse(self.run_.tick())                                   # no reel step, no samples asked
         self.assertNotIn("claim_next_voice_sample", self.supa.rpcs)
-        self.assertEqual(len([a for a in self.supa.rpc_args if a and "p_music" in a]), 1)   # re-checked later
+        self.assertEqual(len(self.music_claims()), 1)                       # re-checked later
         self.assertEqual(len([m for m in self.logs if "006_reel_voices" in m]), 1)
         self.assertNotIn("005_reels", " ".join(self.logs))
         self.run_.music_off_until = 0                                         # 10 minutes later: still missing
@@ -666,7 +676,7 @@ class RunnerReelTickTest(unittest.TestCase):
         self.supa.music_rpc_error = SupaError("POST /rest/v1/rpc/claim_next_reel_step -> HTTP 404 page not found")
         self.assertFalse(self.run_.tick())                                   # 005's handling, not a music switch
         self.assertEqual(self.run_.music_off_until, 0.0)
-        self.assertEqual(len([a for a in self.supa.rpc_args if a and "p_music" in a]), 1)   # no 2nd call without music
+        self.assertEqual(len(self.music_claims()), 1)                       # no 2nd call without music
         self.assertFalse([m for m in self.logs if "006_reel_voices" in m])
 
     def test_voice_sample_runs_when_no_reel_step(self):

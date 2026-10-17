@@ -11,5 +11,5 @@ Copy `example.env.example` to `<id>.env` (e.g. `name-nest.env`), fill it in, and
 - `PREVIEW_MOMENT`, `PREVIEW_CAST`, `PREVIEW_DOLL_CAST` — optional theme-preview scene (default: Unique Names').
 
 `worker.env` keeps working as before: it is the `unique-names` page, unless a file here has the same `PAGE_ID` or the
-same `SUPABASE_URL` (then that file wins). ComfyUI, poll and heartbeat settings stay in `worker.env` (one ComfyUI).
+same `SUPABASE_URL` (then that file wins). ComfyUI and poll settings stay in `worker.env` (one ComfyUI).
 A file with a missing key, a bad id, or an id/project already used is skipped and named at the top of `worker.log`.

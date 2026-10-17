@@ -3,8 +3,8 @@
 # Config: worker.env stays as it is (one page = Unique Names). Each extra page is a worker/pages/<id>.env file
 # (git-ignored, see pages/README.md). Rule for worker.env: it is the "unique-names" page (PAGE_ID in worker.env may
 # rename it) unless a pages file has the same PAGE_ID or the same SUPABASE_URL - then that pages file wins, so one
-# project is never served by two loops. Global settings (COMFY_URL, POLL_SECONDS, HEARTBEAT_SECONDS,
-# GENERATE_TIMEOUT_SECONDS) are read from worker.env only: there is one ComfyUI.
+# project is never served by two loops. Global settings (COMFY_URL, POLL_SECONDS, GENERATE_TIMEOUT_SECONDS) are read
+# from worker.env only: there is one ComfyUI. (HEARTBEAT_SECONDS is not read any more, 2.8.0: see jobs.HEARTBEAT_SECONDS.)
 #
 # Scheduling: MultiRunner takes turns round-robin. Each turn asks the pages in order, starting after the page that ran
 # last, and runs ONE job (Runner.tick: a card, or one whole reel step such as a reel's voice with Chatterbox kept
@@ -16,6 +16,8 @@
 # 2.7.1: while one page's job runs, every other page's heartbeat sets worker_status.message to jobs.BUSY_ELSEWHERE,
 # which the website shows as "PC busy with your other page" instead of "PC ready" (one page alone never sets it).
 # 2.7.2: the card photo look (photo_look.py): PHOTO_VIBRANCE / PHOTO_TEXTURE from the page's own file, else worker.env.
+# 2.8.0: each page has its own idle poll: asked every POLL_SECONDS for a minute after its last job, then every
+# jobs.IDLE_POLL_SECONDS (fewer requests, i.e. fewer log lines in its project); a busy page is asked again at once.
 import glob
 import os
 import re
@@ -23,7 +25,7 @@ import threading
 import time
 
 import photo_look
-from jobs import Runner
+from jobs import HEARTBEAT_SECONDS, Runner, idle_poll_seconds
 from reels import ReelRunner
 from render import ComfyRenderer, default_output_root, load_env
 from supa import Supa
@@ -31,6 +33,7 @@ from supa import Supa
 DEFAULT_PAGE = "unique-names"
 PAGE_ID = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 MAX_BACKOFF = 300.0
+MIN_WAIT = 0.05      # the shortest sleep between two turns with nothing to do
 REQUIRED = ("SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY")
 
 
@@ -122,17 +125,21 @@ def build_runner(page, base_cfg, log, prefix=False):
     supa = Supa(page.url, page.key)
     reels = ReelRunner(supa, renderer, log=plog, output_root=page.output_root, reels_dir=page.reels_dir,
                        preview_cast=page.preview_cast)
+    # The heartbeat is fixed (2.8.0): once a minute + at once on a change; the website calls the PC offline after 3
+    # minutes without one, so an old worker.env's HEARTBEAT_SECONDS=15 is not used any more.
     return Runner(supa, renderer, page.output_root, page.cache_dir,
-                  float(base_cfg.get("POLL_SECONDS", "3")), float(base_cfg.get("HEARTBEAT_SECONDS", "15")),
+                  float(base_cfg.get("POLL_SECONDS", "3")), HEARTBEAT_SECONDS,
                   log=plog, reels=reels, look=photo_look.settings(page.look_cfg, base_cfg, log=plog))
 
 
 class _Slot:
-    def __init__(self, page_id, runner, backoff):
+    def __init__(self, page_id, runner, backoff, now):
         self.id = page_id
         self.runner = runner
         self.backoff = backoff
-        self.off_until = 0.0
+        self.off_until = 0.0     # can't be reached: skipped until then
+        self.poll_at = 0.0       # nothing to do: asked again then (2.8.0)
+        self.last_job_at = now   # its idle poll starts jobs.IDLE_AFTER_SECONDS after this
 
 
 class MultiRunner:
@@ -140,7 +147,7 @@ class MultiRunner:
 
     def __init__(self, runners, poll_seconds=3.0, log=print, clock=time.time, max_backoff=MAX_BACKOFF):
         self.poll_seconds = float(poll_seconds)
-        self.slots = [_Slot(pid, r, self.poll_seconds) for pid, r in runners]
+        self.slots = [_Slot(pid, r, self.poll_seconds, clock()) for pid, r in runners]
         # 2.7.1: each page's heartbeat says "PC busy with your other page" while another page's job runs
         for slot in self.slots:
             slot.runner.busy_elsewhere = lambda me=slot: any(getattr(o.runner, "busy", False) for o in self.slots if o is not me)
@@ -156,7 +163,7 @@ class MultiRunner:
         for k in range(n):
             i = (self.next + k) % n
             slot = self.slots[i]
-            if self.clock() < slot.off_until:
+            if self.clock() < max(slot.off_until, slot.poll_at):
                 continue
             slot.runner.sweep_old_previews()  # once a day per page, never raises
             try:
@@ -167,10 +174,18 @@ class MultiRunner:
                 slot.backoff = min(slot.backoff * 2, self.max_backoff)
                 continue
             slot.backoff, slot.off_until = self.poll_seconds, 0.0
+            now = self.clock()
             if ran:
+                slot.last_job_at, slot.poll_at = now, 0.0
                 self.next = (i + 1) % n
                 return True
+            slot.poll_at = now + idle_poll_seconds(now - slot.last_job_at, self.poll_seconds)
         return False
+
+    def next_wait(self):
+        """Seconds until the next page is due to be asked (its idle poll or its backoff), at least MIN_WAIT."""
+        due = min(max(s.off_until, s.poll_at) for s in self.slots)
+        return max(MIN_WAIT, due - self.clock())
 
     def start_heartbeats(self):
         """One heartbeat thread per page: a slow or unreachable project never delays another page's heartbeat."""
@@ -195,4 +210,4 @@ class MultiRunner:
                 self.log("loop error: %s" % e)
                 ran = False
             if not ran:
-                self.stop_event.wait(self.poll_seconds)
+                self.stop_event.wait(self.next_wait())

@@ -3,7 +3,27 @@
 Takes queued cards from Supabase one at a time, makes the text-free photo in ComfyUI Desktop
 (Z-Image Turbo), stamps the exact name, meaning and handle with Pillow, uploads both to the
 private `cards` bucket, and keeps a backup copy in `OneDrive\Pictures\Unique Names\<date> <Boy|Girl>\`.
-Sends a heartbeat every 15 s so the website can show "PC ready / ComfyUI closed / PC offline".
+Sends a heartbeat once a minute (and within seconds when ComfyUI opens or closes or the PC starts or stops working) so
+the website can show "PC ready / ComfyUI closed / PC offline" (offline = no heartbeat for 3 minutes).
+
+## Requests to Supabase (2.8.0)
+
+Every request is a line in the project's logs (Free plan: 1 GB a month), so the worker keeps them few:
+- **One request per poll**: `claim_next_job(p_comfy_ok, p_music, p_requeue)` (migration `020_one_claim.sql`) answers
+  `{kind: card | reel_step | voice_sample | theme_preview, job}` in exactly the order of the old calls (restamps only
+  while ComfyUI is closed, cards before reels, reel steps, then voice samples and theme previews with ComfyUI up). On a
+  database without 020 (PostgREST `PGRST202` / 404) the worker logs "one request per poll is off …" once and asks the
+  old way (`claim_next_card`, `claim_next_reel_step`, …), checking again every 10 minutes; with 020 it logs
+  "jobs are claimed with one request per poll (020 found)".
+- **Stuck claims** (`requeue_stuck_cards` / `requeue_stuck_reels`) are recovered on one poll a minute (`p_requeue`),
+  not on every poll.
+- **Idle poll**: every `POLL_SECONDS` (3 s) while there is work; after a minute without a job, every 15 s (a new job
+  starts within ~15 s; back to 3 s at once after any job). With several pages, each page has its own idle poll.
+- **Heartbeat** (`worker_status`): a local look every 5 s (ComfyUI asked on the PC, no request); written once a minute,
+  at once when ComfyUI opens or closes, and when the PC starts or stops working once the next look agrees (the moment
+  between two jobs is never sent as idle). `HEARTBEAT_SECONDS` in `worker.env` is not used any more.
+- `python test_request_budget.py report` counts the requests of 2.7.2 and 2.8.0 with a fake Supabase: an idle day
+  178,561 → 7,201, a busy hour of non-stop cards 1,105 → 781.
 
 - Setup: copy `worker.env.example` to `worker.env`, fill in the Supabase URL and service-role key.
 - Run once by hand: `python main.py`. Autostart at login: `powershell -ExecutionPolicy Bypass -File install-autostart.ps1`.
