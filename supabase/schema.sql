@@ -1,5 +1,5 @@
 -- Unique Names posting: database. Paste the whole file into the Supabase SQL editor and run it once.
--- A project created before v2 runs supabase/migrations/002_v2.sql, 003_post_fonts.sql, 004_subject_age.sql, 005_reels.sql, 006_reel_voices.sql, 007_reel_themes.sql, 008_reel_playbook.sql, 009_captions.sql, 010_cta_card.sql, 011_az_series.sql, 012_two_styles.sql, 013_letter_posts.sql, 014_reel_formats.sql, 015_name_nest.sql, 016_swap_card_name.sql then 017_initials_posts.sql instead (this file already includes them).
+-- A project created before v2 runs supabase/migrations/002_v2.sql, 003_post_fonts.sql, 004_subject_age.sql, 005_reels.sql, 006_reel_voices.sql, 007_reel_themes.sql, 008_reel_playbook.sql, 009_captions.sql, 010_cta_card.sql, 011_az_series.sql, 012_two_styles.sql, 013_letter_posts.sql, 014_reel_formats.sql, 015_name_nest.sql, 016_swap_card_name.sql, 017_initials_posts.sql, 018_names_pdf.sql, 019_shop.sql then 020_one_claim.sql instead (this file already includes them).
 -- Status 'pending' = an AI-suggested name/theme waiting for approval; nothing here ever plans it (only 'available').
 
 -- ---------------------------------------------------------------- tables
@@ -1160,6 +1160,37 @@ begin
   return v_scenes + v_reels + v_flagged + v_empty + v_samples + v_previews;
 end $$;
 
+-- ---------------------------------------------------------------- worker: one claim per poll (020)
+-- claim_next_job: the worker's whole poll in one call (2.8.0; every request is a line in the project's logs), in exactly
+-- the order the worker used to ask:
+--   1. p_requeue (the worker asks once a minute, not every poll): requeue_stuck_cards()
+--   2. a card: claim_next_card(p_restamp_only = ComfyUI closed): restamps first, then the oldest queued card
+--   3. no card: p_requeue: requeue_stuck_reels(); then a reel step: claim_next_reel_step(p_no_comfy = ComfyUI closed,
+--      p_music = the worker makes music beds)
+--   4. no reel step and ComfyUI up: a voice sample (claim_next_voice_sample), then a theme preview
+--      (claim_next_theme_preview)
+-- Answers {kind: 'card' | 'reel_step' | 'voice_sample' | 'theme_preview', job: that function's own answer} or null.
+-- It calls the same functions, so each kind's rules (cards first, stuck claims, music, 3 tries) stay in one place.
+create or replace function public.claim_next_job(p_comfy_ok boolean, p_music boolean, p_requeue boolean)
+returns jsonb language plpgsql as $$
+declare v_job jsonb; v_comfy boolean := coalesce(p_comfy_ok, false);
+begin
+  if coalesce(p_requeue, false) then perform public.requeue_stuck_cards(); end if;
+  v_job := public.claim_next_card(not v_comfy);
+  if v_job is not null then return jsonb_build_object('kind', 'card', 'job', v_job); end if;
+
+  if coalesce(p_requeue, false) then perform public.requeue_stuck_reels(); end if;
+  v_job := public.claim_next_reel_step(not v_comfy, coalesce(p_music, false));
+  if v_job is not null then return jsonb_build_object('kind', 'reel_step', 'job', v_job); end if;
+
+  if not v_comfy then return null; end if;
+  v_job := public.claim_next_voice_sample();
+  if v_job is not null then return jsonb_build_object('kind', 'voice_sample', 'job', v_job); end if;
+  v_job := public.claim_next_theme_preview();
+  if v_job is not null then return jsonb_build_object('kind', 'theme_preview', 'job', v_job); end if;
+  return null;
+end $$;
+
 -- ---------------------------------------------------------------- the names PDF shop (019)
 -- The server's shop key, checked against the stored hash (never callable from outside: the functions below use it).
 create or replace function public.shop_secret_ok(p_secret text) returns boolean
@@ -1413,6 +1444,8 @@ grant execute on function public.claim_next_reel_step(boolean, boolean) to servi
 grant execute on function public.claim_next_voice_sample() to service_role;
 grant execute on function public.requeue_stuck_reels() to service_role;
 grant execute on function public.claim_next_theme_preview() to service_role;
+revoke execute on function public.claim_next_job(boolean, boolean, boolean) from public, anon, authenticated;
+grant execute on function public.claim_next_job(boolean, boolean, boolean) to service_role;
 revoke execute on function public.create_post(jsonb) from public, anon;
 revoke execute on function public.add_card(uuid, jsonb) from public, anon;
 revoke execute on function public.delete_card(uuid) from public, anon;
