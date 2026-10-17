@@ -1,7 +1,7 @@
 import { cache } from "react";
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
-import { isOwnerEmail } from "./proxy";
+import { isOwnerEmail, verifiedAccount, type Account } from "./proxy";
 
 export async function createClient() {
   const store = await cookies();
@@ -15,8 +15,9 @@ export async function createClient() {
   });
 }
 
-export const getOwner = cache(async () => {
+/** The owner's account (verified token claims, see verifiedAccount), or null: pages, server actions, the test-mode shop. */
+export const getOwner = cache(async (): Promise<Account | null> => {
   const sb = await createClient();
-  const { data: { user } } = await sb.auth.getUser();
-  return user && isOwnerEmail(user.email, process.env.ADMIN_EMAIL) ? user : null;
+  const account = await verifiedAccount(sb);
+  return account && isOwnerEmail(account.email, process.env.ADMIN_EMAIL) ? account : null;
 });

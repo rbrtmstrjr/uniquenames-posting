@@ -21,7 +21,7 @@ const name = (over: Partial<NameRow> = {}): NameRow => ({
   id: NEW, name: "Cyrus", meaning: "sun", gender: "boy", style: "single", status: "available", post_id: null, position: null,
   created_at: "", updated_at: "", ...over,
 });
-const workerRow = (h: "ready" | "offline") => ({ id: 1, last_seen: new Date(Date.now() - (h === "offline" ? 120_000 : 3_000)).toISOString(), comfyui_ok: true });
+const workerRow = (h: "ready" | "offline") => ({ id: 1, last_seen: new Date(Date.now() - (h === "offline" ? 600_000 : 3_000)).toISOString(), comfyui_ok: true });
 
 type World = {
   card?: CardRow | null; post?: Partial<PostRow> | null; name?: NameRow | null; names?: Partial<NameRow>[]; postCards?: { name_id: string | null }[];

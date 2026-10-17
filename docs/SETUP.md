@@ -179,8 +179,17 @@ Followers ask for names with two initials, like **A** and **R** (Arjay Royce). *
 ### Selling it automatically (shop page + PayMongo)
 Buyers can also pay by GCash / QR Ph on your own `/shop` page and download their PDF without you: see `docs/SHOP.md` (migration 019, PayMongo keys, webhook, **Orders** page).
 
+## Fewer log lines (existing install)
+The PC worker 2.8.0 sends far fewer requests to Supabase (the Free plan allows 1 GB of logs a month; the old worker used
+about 5 million requests a month just waiting). Any order is safe; this one is the smoothest:
+1. Supabase **SQL Editor**: paste and run `supabase/migrations/020_one_claim.sql` (safe to run again; it needs 007 first). Run it in every page's project (Unique Names and Name Nest).
+2. Restart the worker: Task Scheduler, **End** then **Run** "Unique Names card worker". `worker/worker.log` says "jobs are claimed with one request per poll (020 found)" (without step 1 it says "one request per poll is off …" and keeps working the old way).
+3. Push to GitHub so Vercel redeploys the website (it now waits 3 minutes without a heartbeat before it says "PC offline", and checks the login without a request to Supabase Auth).
+
+What changes for you: when the PC has had nothing to do for a minute, a new card or reel step starts within about 15 s (it used to be 3 s); after that the PC is back to fast polling. Turning the PC off shows "PC offline" after about 3 minutes (it was 45 s). `HEARTBEAT_SECONDS` in `worker/worker.env` is not used any more (you can leave it or delete it).
+
 ## When something is wrong
-- Header dot red, "PC offline": turn on the PC. The worker starts at login. **Generate** is disabled (the button says why) until the PC is back.
+- Header dot red, "PC offline": turn on the PC. The worker starts at login. **Generate** is disabled (the button says why) until the PC is back. "PC offline" shows 3 minutes after the PC stopped.
 - Amber dot, "ComfyUI closed": open ComfyUI Desktop. **Generate** stays disabled until then; text edits and Re-stamp still work.
 - A card failed: open it and press Retry. The reason is shown on the card.
 - Worker log: `worker/worker.log` (it starts fresh each time the worker starts).

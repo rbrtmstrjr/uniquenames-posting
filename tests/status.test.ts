@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { cardVisual, queuePosition, workerHealth, lastSeenText } from "@/lib/status/card-state-exports";
+import { OFFLINE_AFTER_MS } from "@/lib/status/worker-health";
 import { etaSeconds, formatElapsed, formatEta } from "@/lib/status/eta";
 import { downloadName } from "@/lib/files/download-name";
 import type { WorkerStatusRow } from "@/lib/db/types";
@@ -14,7 +15,11 @@ describe("workerHealth", () => {
   it("ready / comfy-off / offline / unknown", () => {
     expect(workerHealth(ws(5), NOW)).toBe("ready");
     expect(workerHealth(ws(5, false), NOW)).toBe("comfy-off");
-    expect(workerHealth(ws(46), NOW)).toBe("offline");
+    // worker 2.8.0 heartbeats once a minute (and at once on a change): offline after 3 missed minutes, never sooner
+    expect(workerHealth(ws(46), NOW)).toBe("ready");
+    expect(workerHealth(ws(179), NOW)).toBe("ready");
+    expect(workerHealth(ws(181), NOW)).toBe("offline");
+    expect(OFFLINE_AFTER_MS).toBe(180_000);
     expect(workerHealth(ws(null), NOW)).toBe("unknown");
     expect(workerHealth(null, NOW)).toBe("unknown");
   });
