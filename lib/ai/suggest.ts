@@ -68,7 +68,7 @@ const THEMES_SCHEMA: GeminiSchema = {
         type: "OBJECT",
         properties: {
           title: { type: "STRING" }, backdrop: { type: "STRING" }, outfit: { type: "STRING" },
-          props: { type: "STRING", description: "2-4 small low props, comma-separated" }, lighting: { type: "STRING" }, palette: { type: "STRING" },
+          props: { type: "STRING", description: "small props, comma-separated, one distinct object each" }, lighting: { type: "STRING" }, palette: { type: "STRING" },
         },
         required: ["title", "backdrop", "outfit", "props", "lighting", "palette"],
       },

@@ -6,6 +6,7 @@ import {
 } from "@/lib/planner";
 import { validateCreatePost } from "@/lib/actions/helpers";
 import type { NameRow, ThemeRow } from "@/lib/db/types";
+import { ageIn, childOf, subjectOf } from "./helpers/prompt-lines";
 
 const now = "2026-10-05T00:00:00Z";
 const names: NameRow[] = Array.from({ length: 20 }, (_, i) => ({
@@ -26,8 +27,9 @@ const plan = (age?: AgeChoice | null, count: number | null = 13, postDate?: stri
   if (!r.ok) throw new Error(r.reason);
   return r;
 };
-const subjectLine = (prompt: string) => prompt.split("\n")[1];
 const babyCards = (r: ReturnType<typeof plan>) => r.cards.filter((c) => !isPropsOnly(c.shot));
+/** The face cards' subject lines (hands, detail and focus-pull frames name no full look). */
+const subjectLines = (r: ReturnType<typeof plan>) => r.cards.map((c) => subjectOf(c.prompt)).filter((l): l is string => !!l);
 const ALL_SHOTS = [...SITTER_SHOTS, ...NEWBORN_SHOTS, ...TODDLER_SHOTS, ...KID_SHOTS, ...PROPS_SPECS];
 
 describe("age choices", () => {
@@ -58,7 +60,8 @@ describe("toddler and kid shot libraries", () => {
     const lib = sessionShots(session);
     expect(lib.length).toBeGreaterThanOrEqual(10);
     const angles = new Set(lib.map((s) => s.angle));
-    for (const a of ["eye", "wide", "high", "closeup", "macro", "low", "profile", "pov"] as const) expect(angles.has(a)).toBe(true);
+    for (const a of ["eye", "high", "closeup", "macro", "low", "profile", "pov"] as const) expect(angles.has(a)).toBe(true);
+    expect(angles.has("wide")).toBe(false);
     for (const s of lib) {
       expect(s.kind).toBe("baby");
       expect(s.camera).toMatch(/\bf\/\d(\.\d)?\b/);
@@ -75,7 +78,7 @@ describe("toddler and kid shot libraries", () => {
       for (const n of [9, 11, 13]) {
         const specs = buildShotSpecs(n, session, seededRandom(seed * 13 + n));
         expect(specs[0]).toBe(sessionShots(session)[0]);
-        expect(specs.filter((s) => s.kind === "props")).toHaveLength(n >= 11 ? 4 : 3);
+        expect(specs.filter((s) => s.kind === "props")).toHaveLength(2);
         specs.forEach((s, i) => { if (i > 0) expect(s.angle).not.toBe(specs[i - 1].angle); });
       }
     }
@@ -97,18 +100,19 @@ describe("Random age (the default)", () => {
   it("spreads the children across at least 3 age buckets for 8+ baby cards, each card its own child", () => {
     for (let d = 1; d <= 28; d++) {
       const r = plan("random", 13, `2026-11-${String(d).padStart(2, "0")}`);
-      const babies = babyCards(r);
-      expect(babies.length).toBeGreaterThanOrEqual(8);
-      const lines = babies.map((c) => subjectLine(c.prompt));
-      const ages = new Set(lines.map((l) => /newborn|(\d)-year-old/.exec(l)![0]));
+      const withChild = r.cards.filter((c) => childOf(c.prompt));
+      expect(withChild.length).toBeGreaterThanOrEqual(5);
+      const lines = withChild.map((c) => childOf(c.prompt)!);
+      const ages = new Set(lines.map((l) => ageIn(l)));
       expect(ages.size).toBeGreaterThanOrEqual(3);
       for (const l of lines) {
         expect(l).not.toMatch(/same (baby|child|toddler)/);
         expect(l).toMatch(/\bboy\b/);
       }
       // each card's shot comes from the library of its own child's age
-      for (const c of babies) {
-        const age = /newborn/.test(subjectLine(c.prompt)) ? "newborn" : (/(\d)-year-old/.exec(subjectLine(c.prompt))![1] as SubjectAge);
+      for (const c of withChild) {
+        const a = ageIn(childOf(c.prompt)!)!;
+        const age = a === "newborn" ? "newborn" : (a[0] as SubjectAge);
         expect(sessionShots(sessionFor(age))).toContain(shotSpec(c.shot));
       }
       r.cards.forEach((c, i) => { if (i > 0) expect(shotSpec(c.shot)!.angle).not.toBe(shotSpec(r.cards[i - 1].shot)!.angle); });
@@ -116,7 +120,7 @@ describe("Random age (the default)", () => {
   });
   it("is deterministic and is what a post without a choice gets from the action (undefined stays legacy)", () => {
     expect(plan("random")).toEqual(plan("random"));
-    expect(new Set(babyCards(plan(undefined)).map((c) => subjectLine(c.prompt))).size).toBe(1); // legacy: one baby
+    expect(new Set(subjectLines(plan(undefined))).size).toBe(1); // legacy: one baby
   });
   it("buildMixedShotSpecs keeps the cover first, props slots, and the right number of frames", () => {
     for (let seed = 1; seed <= 40; seed++) {
@@ -125,7 +129,7 @@ describe("Random age (the default)", () => {
       expect(shots).toHaveLength(13);
       expect(shots[0].kind).toBe("baby");
       expect(shots[0].spec).toBe(sessionShots(sessionFor(shots[0].age!))[0]);
-      expect(shots.filter((s) => s.kind === "props")).toHaveLength(4);
+      expect(shots.filter((s) => s.kind === "props")).toHaveLength(2);
       expect(new Set(shots.map((s) => s.spec.text)).size).toBe(13);
     }
   });
@@ -134,7 +138,7 @@ describe("Random age (the default)", () => {
 describe("fixed age", () => {
   it.each(SUBJECT_AGES)("age %s: one child for the whole post, at that age, with that age's shots", (age) => {
     const r = plan(age);
-    const lines = new Set(babyCards(r).map((c) => subjectLine(c.prompt)));
+    const lines = new Set(subjectLines(r));
     expect(lines.size).toBe(1);
     const line = [...lines][0];
     expect(line).toMatch(/same (baby|toddler|child) in every photo/);
@@ -150,9 +154,12 @@ describe("fixed age", () => {
     expect(outfitLine("3")).toMatch(/^Outfit: a toddler-sized version of the cream shirt romper/); // 3 keeps "romper"
     expect(outfitLine("6")).toBe("Outfit: a child-sized version of the cream shirt playsuit with a caramel bow tie and suspenders.");
     expect(outfitLine("6")).not.toContain("tiny");
-    // props-only frames are untouched
-    const propsLine = plan("6").cards.find((c) => isPropsOnly(c.shot))!.prompt;
-    expect(propsLine).toContain(`Outfit (empty, no one wearing it): ${theme.outfit}.`);
+    // the empty-outfit still life shows the outfit as written
+    const outfitStill = PROPS_SPECS.find((s) => /outfit/.test(s.text))!;
+    expect(buildPrompt(theme, outfitStill.text, "boy")).toContain(`Outfit (empty, no one wearing it): ${theme.outfit}.`);
+    // hands and detail frames name only the garment (no bow tie or suspenders pulling a chest and face back in)
+    const hands = babyCards(plan("6")).map((c) => c.prompt).find((p) => p.includes("Sleeves and fabric:"))!;
+    expect(hands).toContain("Sleeves and fabric: a child-sized version of the cream shirt playsuit.");
   });
   it("outfitFor drops a leading article so it never reads 'the a …'", () => {
     expect(outfitFor("a white knit romper", "3")).toBe("a toddler-sized version of the white knit romper");
@@ -203,33 +210,47 @@ describe("planExtraCard with an age", () => {
   const base = { theme, gender: "boy" as const, style: "two-word" as const, names, nextPosition: 14, subjectKey: subjectKey("2026-10-05", "boy", "two-word") };
   it("fixed age: the same child as the post", () => {
     const r = plan("4");
-    const e = planExtraCard({ ...base, usedNameIds: r.cards.map((c) => c.name_id), salt: "p|1", age: "4" });
-    if (!e.ok) throw new Error(e.reason);
-    expect(subjectLine(e.card.prompt)).toBe(subjectLine(babyCards(r)[0].prompt));
-    expect(KID_SHOTS).toContain(shotSpec(e.card.shot));
+    let faces = 0;
+    for (let i = 0; i < 12; i++) {
+      const e = planExtraCard({ ...base, usedNameIds: r.cards.map((c) => c.name_id), salt: `p|${i}`, age: "4" });
+      if (!e.ok) throw new Error(e.reason);
+      const line = subjectOf(e.card.prompt);
+      if (line) { faces++; expect(line).toBe(subjectLines(r)[0]); }
+      expect(KID_SHOTS).toContain(shotSpec(e.card.shot));
+    }
+    expect(faces).toBeGreaterThan(0);
   });
   it("random: a new child of a random age, varying with the salt", () => {
     const ages = new Set<string>();
     for (let i = 0; i < 60; i++) {
       const e = planExtraCard({ ...base, usedNameIds: [], salt: `p|${i}`, age: "random" });
       if (!e.ok) throw new Error(e.reason);
-      const line = subjectLine(e.card.prompt);
-      expect(line).not.toMatch(/same/);
-      ages.add(/newborn|(\d)-year-old/.exec(line)![0]);
       expect(isPropsOnly(e.card.shot)).toBe(false);
+      const line = childOf(e.card.prompt);
+      if (!line) continue; // a hands or detail frame names no age
+      expect(line).not.toMatch(/same/);
+      ages.add(ageIn(line)!);
     }
     expect(ages.size).toBeGreaterThanOrEqual(6);
   });
   it("no age (legacy post or before 004): the post's legacy baby", () => {
     const legacy = plan(undefined);
-    const e = planExtraCard({ ...base, usedNameIds: [], salt: "p|2", age: null });
-    if (!e.ok) throw new Error(e.reason);
-    expect(subjectLine(e.card.prompt)).toBe(subjectLine(babyCards(legacy)[0].prompt));
+    let faces = 0;
+    for (let i = 0; i < 12; i++) {
+      const e = planExtraCard({ ...base, usedNameIds: [], salt: `p|${i}`, age: null });
+      if (!e.ok) throw new Error(e.reason);
+      const line = subjectOf(e.card.prompt);
+      if (line) { faces++; expect(line).toBe(subjectLines(legacy)[0]); }
+    }
+    expect(faces).toBeGreaterThan(0);
   });
 });
 
 describe("buildPrompt still works for theme previews (no subject)", () => {
-  it("keeps the baby photoshoot header", () => {
-    expect(buildPrompt(theme, SITTER_SHOTS[0].text, "girl").split("\n")[0]).toMatch(/baby photoshoot/);
+  it("keeps the baby photoshoot look, the theme's first prop as the cover's hero", () => {
+    const p = buildPrompt(theme, SITTER_SHOTS[0].text, "girl");
+    expect(p.split("\n")[0]).toMatch(/^Close-up portrait of the baby sitting and holding the wooden rocking horse/);
+    expect(p).toMatch(/Professional studio baby photoshoot photograph/);
+    expect(p).toContain("Subject: a baby girl.");
   });
 });

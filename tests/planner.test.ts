@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
-  BABY_SHOTS, LOOKS, NEWBORN_SHOTS, PROPS_SPECS, SITTER_SHOTS, buildCaption, buildPrompt, buildShotSpecs, buildShots, hashSeed,
-  isPropsOnly, pickSubject, planExtraCard, planPost, seededRandom, sessionShots, shotSpec, subjectKey,
+  BABY_SHOTS, LOOKS, NEWBORN_SHOTS, PROPS_SPECS, SITTER_SHOTS, buildCaption, buildPrompt, buildShotSpecs, buildShots, frameOf, hashSeed,
+  isPropsOnly, needsProp, pickSubject, planExtraCard, planPost, seededRandom, sessionShots, shotSpec, subjectKey,
 } from "@/lib/planner";
 import type { NameRow, ThemeRow } from "@/lib/db/types";
+import { subjectOf } from "./helpers/prompt-lines";
 
 const now = "2026-10-04T00:00:00Z";
 let n = 0;
@@ -32,19 +33,28 @@ describe("shots", () => {
   const sessions = ["sitter", "newborn"] as const;
   const cases = sessions.flatMap((session) => [9, 10, 11, 12, 13].map((count) => [session, count] as const));
 
-  it.each(cases)("%s, %i cards: cover first, 3-4 props-only shots spread out, every frame different", (session, count) => {
+  it.each(cases)("%s, %i cards: cover first, 2 still lifes apart, a photographer's mix, every frame different", (session, count) => {
+    const slots = new Set<string>();
     for (let seed = 1; seed <= 40; seed++) {
       const specs = buildShotSpecs(count, session, seededRandom(seed * 97 + count));
       expect(specs).toHaveLength(count);
       expect(specs[0]).toBe(sessionShots(session)[0]);
       const propsIdx = specs.map((s, i) => (s.kind === "props" ? i : -1)).filter((i) => i >= 0);
-      expect(propsIdx).toHaveLength(count >= 11 ? 4 : 3);
+      expect(propsIdx).toHaveLength(2);
       expect(propsIdx[0]).toBeGreaterThan(1);
-      propsIdx.forEach((p, i) => { if (i > 0) expect(p - propsIdx[i - 1]).toBeGreaterThan(1); });
-      expect(specs[propsIdx[0]]).toBe(PROPS_SPECS[0]); // the empty set comes before the other props frames
+      expect(propsIdx[1]).toBeLessThan(count - 1);
+      expect(propsIdx[1] - propsIdx[0]).toBeGreaterThan(1);
+      slots.add(propsIdx.join(","));
       expect(new Set(specs.map((s) => s.text)).size).toBe(count); // no frame repeats
       expect(specs.filter((s) => s.kind === "baby").every((s) => sessionShots(session).includes(s))).toBe(true);
+      // the camera moves in: faces, details, small hands with a prop, prop stories and stills in every post
+      const frames = specs.map(frameOf);
+      expect(frames.filter((f) => f === "detail").length).toBeGreaterThanOrEqual(1);
+      expect(frames.filter((f) => f === "hands").length).toBeGreaterThanOrEqual(1);
+      expect(frames.filter((f) => f === "story").length).toBeGreaterThanOrEqual(2);
+      expect(frames.filter((f) => f === "portrait").length).toBeGreaterThanOrEqual(2);
     }
+    expect(slots.size).toBeGreaterThan(3); // the still lifes move from post to post (no fixed 4, 6, 9, 11)
   });
 
   it.each(sessions)("%s: neighbouring frames never share a camera angle", (session) => {
@@ -56,14 +66,16 @@ describe("shots", () => {
     }
   });
 
-  it("each library covers the requested camera angles", () => {
+  it("each library covers the requested camera angles, and the camera stays in close (no wide shots)", () => {
     for (const session of sessions) {
       const angles = new Set(sessionShots(session).map((s) => s.angle));
-      for (const a of ["eye", "wide", "high", "closeup", "macro", "low", "profile"] as const) expect(angles.has(a)).toBe(true);
+      for (const a of ["eye", "high", "closeup", "macro", "low", "profile"] as const) expect(angles.has(a)).toBe(true);
+      expect(angles.has("wide")).toBe(false);
+      for (const s of sessionShots(session)) expect(s.text).toMatch(/close-up|macro/);
     }
     expect(new Set(SITTER_SHOTS.map((s) => s.angle)).has("pov")).toBe(true);
     expect(new Set(NEWBORN_SHOTS.map((s) => s.angle)).has("overhead")).toBe(true);
-    expect(PROPS_SPECS.every((s) => isPropsOnly(s.text))).toBe(true);
+    expect(PROPS_SPECS.every((s) => isPropsOnly(s.text) && needsProp(s) && frameOf(s) === "still")).toBe(true);
   });
 
   it("buildShots returns the texts and keeps the old preview shot", () => {
@@ -96,14 +108,42 @@ describe("prompt", () => {
     expect(p).toMatch(/no baby, no child, no person/);
     expect(p).toContain("wicker basket");
   });
-  it("uses each shot's own camera and reserves the title space it names", () => {
-    const high = SITTER_SHOTS.find((s) => s.angle === "high")!;
-    const p = buildPrompt(themes[0], high.text, "boy", { session: "sitter", look: LOOKS[0] });
-    expect(p).toContain(`Photography: ${high.camera}`);
-    expect(p).toContain("keep the lower third of the frame calm and empty");
-    expect(p).not.toContain("lower 60 percent");
-    const flat = PROPS_SPECS[1];
-    expect(buildPrompt(themes[0], flat.text, "boy")).toContain(`Photography: ${flat.camera}`);
+  it("uses each shot's own camera, and every story frame keeps the top clean for the stamped name", () => {
+    for (const s of [...SITTER_SHOTS, ...NEWBORN_SHOTS, ...PROPS_SPECS]) {
+      const p = buildPrompt(themes[0], s.text, "boy", { session: "sitter", look: LOOKS[0] });
+      expect(p).toContain(`Photography: ${s.camera}.`);
+      // the placement rides in the first sentence (later in the prompt the head still reached the name's band)
+      expect(p.split("\n")[0]).toMatch(/in the bottom half of the frame\. The upper half of the frame is empty, softly blurred chocolate brown backdrop\.$/);
+      expect(p).toContain("the top third of the frame is clean");
+    }
+  });
+  it("one hero prop per frame: sharp and named in the frame, the other props only as soft shapes", () => {
+    const theme = { ...themes[0], props: "wicker basket, pampas grass, felt bunny" };
+    for (const s of [...SITTER_SHOTS, ...PROPS_SPECS].filter(needsProp)) {
+      const p = buildPrompt(theme, s.text, "boy", { session: "sitter", look: LOOKS[0] }, "felt bunny");
+      expect(p.split("\n")[0]).toContain("the felt bunny");
+      expect(p).not.toContain("{prop}");
+      const background = p.split("\n").find((l) => l.startsWith("Background"))!;
+      if (frameOf(s) === "hands" || frameOf(s) === "detail") expect(background).not.toMatch(/basket|pampas/);
+      else expect(background).toMatch(/the wicker basket and the pampas grass as soft blurred shapes/);
+    }
+  });
+  it("names the child's whole look only when the face is in the frame", () => {
+    const s = { session: "sitter" as const, look: LOOKS[0] };
+    for (const spec of SITTER_SHOTS) {
+      const p = buildPrompt(themes[0], spec.text, "boy", s, "wicker basket");
+      const f = frameOf(spec);
+      if (f === "hands" || f === "detail") {
+        expect(p).not.toContain(LOOKS[0]);
+        expect(p).toContain("warm light-tan skin");
+        expect(p).toMatch(/^Sleeves and fabric: knit romper\.$/m);
+      } else if (spec.childSoft) {
+        expect(p).toContain("Out of focus behind it: an 8-month-old baby boy with soft wispy dark hair, warm light-tan skin.");
+        expect(p).not.toContain("big brown eyes");
+      } else {
+        expect(subjectOf(p)).toContain(LOOKS[0]);
+      }
+    }
   });
   it("never asks for a title or mentions a camera position (the model would draw them)", () => {
     for (const s of [...SITTER_SHOTS, ...NEWBORN_SHOTS, ...PROPS_SPECS]) {
@@ -119,15 +159,12 @@ describe("prompt", () => {
       expect(s.camera).toMatch(/\d+mm (portrait |macro )?lens/);
     }
   });
-  it("portrait frames use the 85mm f/1.8 look, macro 100mm f/2.8, wide and overhead stay shallow", () => {
+  it("faces get the 85mm wide-open portrait look, details a macro lens, focus pulls the macro lens at the prop", () => {
     const all = [...SITTER_SHOTS, ...NEWBORN_SHOTS];
-    for (const s of all.filter((x) => ["eye", "profile", "high", "low", "pov", "closeup"].includes(x.angle))) {
-      expect(s.camera).toContain("85mm portrait lens, f/1.8");
-    }
-    for (const s of all.filter((x) => x.angle === "closeup")) expect(s.camera).toContain("very shallow depth of field");
-    for (const s of [...all, ...PROPS_SPECS].filter((x) => x.angle === "macro")) expect(s.camera).toContain("100mm macro lens, f/2.8");
-    for (const s of all.filter((x) => x.angle === "wide")) expect(s.camera).toContain("35mm lens, f/2.0, soft background falloff");
-    for (const s of all.filter((x) => x.angle === "overhead")) expect(s.camera).toContain("50mm lens, f/2.8, soft focus falloff at the edges");
+    for (const s of all.filter((x) => frameOf(x) === "portrait" && x.angle !== "overhead")) expect(s.camera).toMatch(/85mm portrait lens, f\/1\.[24]/);
+    for (const s of all.filter((x) => frameOf(x) === "detail" || x.angle === "macro")) expect(s.camera).toContain("100mm macro lens");
+    for (const s of all.filter((x) => x.childSoft)) expect(s.camera).toContain("100mm macro lens, f/2, extremely shallow depth of field");
+    for (const s of all) expect(s.camera).toMatch(/depth of field|melted into blur/);
   });
   it("names the same baby, with session age and look, in every baby frame", () => {
     const s = { session: "newborn" as const, look: LOOKS[2] };
@@ -203,16 +240,33 @@ describe("planPost", () => {
 });
 
 describe("one baby per post", () => {
-  it("every baby card of a post describes the same baby, and an added card matches it", () => {
+  it("every face card of a post describes the same baby, and an added card matches it", () => {
     const r = planPost({ request: { ...req, count: 13 }, names: boys, themes, settings });
     if (!r.ok) throw new Error(r.reason);
-    const subjectLines = r.cards.filter((c) => !isPropsOnly(c.shot)).map((c) => c.prompt.split("\n")[1]);
+    const subjectLines = r.cards.map((c) => subjectOf(c.prompt)).filter((l): l is string => !!l);
+    expect(subjectLines.length).toBeGreaterThanOrEqual(4);
     expect(new Set(subjectLines).size).toBe(1);
     expect(subjectLines[0]).toContain("the same baby in every photo");
-    const extra = planExtraCard({ theme: themes[0], gender: "boy", style: "two-word", names: boys, usedNameIds: r.cards.map((c) => c.name_id),
-      nextPosition: 14, salt: "post-1|123", subjectKey: subjectKey(req.postDate, "boy", "two-word") });
-    if (!extra.ok) throw new Error(extra.reason);
-    expect(extra.card.prompt.split("\n")[1]).toBe(subjectLines[0]);
+    let faces = 0;
+    for (let i = 0; i < 12; i++) {
+      const extra = planExtraCard({ theme: themes[0], gender: "boy", style: "two-word", names: boys, usedNameIds: r.cards.map((c) => c.name_id),
+        nextPosition: 14, salt: `post-1|${i}`, subjectKey: subjectKey(req.postDate, "boy", "two-word") });
+      if (!extra.ok) throw new Error(extra.reason);
+      const line = subjectOf(extra.card.prompt);
+      if (line) { faces++; expect(line).toBe(subjectLines[0]); }
+    }
+    expect(faces).toBeGreaterThan(0);
+  });
+  it("a post's hero props rotate: every prop gets its frames and two prop frames in a row never share one", () => {
+    const theme = { ...themes[0], props: "wicker basket, pampas grass, felt bunny, wooden rattle" };
+    for (const postDate of ["2026-10-05", "2026-10-06", "2026-10-07", "2026-10-08"]) {
+      const r = planPost({ request: { ...req, count: 13, postDate }, names: boys, themes: [theme], settings });
+      if (!r.ok) throw new Error(r.reason);
+      const heroes = r.cards.filter((c) => needsProp(shotSpec(c.shot)!))
+        .map((c) => ["wicker basket", "pampas grass", "felt bunny", "wooden rattle"].find((p) => c.prompt.split("\n")[0].includes(p)));
+      expect(new Set(heroes)).toEqual(new Set(["wicker basket", "pampas grass", "felt bunny", "wooden rattle"]));
+      heroes.forEach((h, i) => { if (i > 0) expect(h).not.toBe(heroes[i - 1]); });
+    }
   });
 });
 

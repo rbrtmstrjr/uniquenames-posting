@@ -1,6 +1,7 @@
 export * from "./random";
 export * from "./age";
 export * from "./shots";
+export * from "./props";
 export * from "./prompt";
 export * from "./caption";
 export * from "./plan";

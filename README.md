@@ -33,6 +33,18 @@ ordered and saved to the phone with the caption.
 
 Setup: `docs/SETUP.md`. Design: `docs/superpowers/specs/2026-10-04-uniquenames-posting-design.md`, v2 changes: `docs/superpowers/specs/2026-10-05-v2-feedback-design.md`.
 
+## Story shots (2026-10-18)
+Each post is now shot the way a photographer works through a session: one set, and the camera moves in. About 80% of
+frames are close-ups or macros, each with ONE hero: the child's face, a detail (hands, feet), or one prop from the
+theme. Props rotate so every prop gets its own frames; focus pulls put a prop tack sharp with the child a soft blur
+behind; 2 props-only still lifes land in different spots each post. No wide shots.
+- Prompts lead with the frame and its placement ("in the bottom half of the frame, the upper half empty backdrop"),
+  so the stamped name stays clear; hands and detail frames leave the face and hats out so macros stay macros.
+- AI theme suggestions ask for 3-5 props that can each carry a close-up; existing themes work as they are.
+- The name is stamped extra-bold (800; fonts that stop at 700 use 700). Poppins ExtraBold downloads on the worker's
+  next start.
+Design: `docs/superpowers/specs/2026-10-18-story-shots-design.md`.
+
 ## Fewer log lines (worker 2.8.0, 2026-10-17)
 The Supabase project went over the Free plan's 1 GB of logs: every request is a log line, and the idle PC worker sent
 about 2 a second (~5 million a month). Now:

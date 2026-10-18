@@ -45,18 +45,24 @@ describe("font catalog", () => {
     expect(isFontId("comic")).toBe(false);
   });
 
-  it("single-weight fonts are never asked for 600 (no faux bold)", () => {
-    expect(fontWeight(fontById("greatvibes"), 600)).toBe(400);
-    expect(fontWeight(fontById("montserrat"), 600)).toBe(600);
-    expect(fontWeight(fontById("poppins"), 600)).toBe(600);
+  it("the name is extra-bold (800) where the font has it; single-weight fonts are never faux bold", () => {
+    expect(layoutJson.titleWeight).toBe(800);
+    expect(fontWeight(fontById("greatvibes"), 800)).toBe(400);
+    expect(fontWeight(fontById("montserrat"), 800)).toBe(800);
+    expect(fontWeight(fontById("poppins"), 800)).toBe(800);
+    // variable fonts whose weight axis stops at 700 (the worker clamps to the axis too)
+    for (const id of ["quicksand", "lora", "cormorant", "josefin", "comfortaa", "dancing"]) expect(fontWeight(fontById(id), 800)).toBe(700);
   });
 
   it("one Google Fonts URL with every family and only the weights each has", () => {
     const href = googleFontsHref();
     expect(href).toMatch(/^https:\/\/fonts\.googleapis\.com\/css2\?/);
-    expect(href).toContain("family=Playfair+Display:wght@400;600");
+    expect(href).toContain("family=Playfair+Display:wght@400;800");
     expect(href).toContain("family=Great+Vibes&");
-    expect(href).toContain("family=Poppins:wght@400;600");
+    expect(href).toContain("family=Poppins:wght@400;600;800");
+    // Google Fonts refuses the WHOLE request when one family asks for a weight outside its axis
+    expect(href).toContain("family=Quicksand:wght@400;700&");
+    expect(href).not.toMatch(/(Quicksand|Lora|Cormorant\+Garamond|Josefin\+Sans|Comfortaa|Dancing\+Script):wght@[\d;]*800/);
     expect(href.match(/family=/g)).toHaveLength(FONT_IDS.length);
     expect(href).toMatch(/display=swap$/);
     expect(cssFamily(fontById("pacifico"))).toBe('"Pacifico", cursive');

@@ -108,7 +108,7 @@ class Downloads(unittest.TestCase):
 
         with mock.patch("fonts._download", side_effect=fake):
             missing = fonts.prefetch(timeout=15, log=logs.append)
-        self.assertEqual(len(calls), 16)  # 15 fonts, Poppins has two files
+        self.assertEqual(len(calls), 17)  # 15 fonts, Poppins has three files (regular, semibold, extra-bold names)
         self.assertTrue(all(t == 15 for _u, t in calls))
         self.assertEqual(missing, 1)
         self.assertTrue(logs and "Lora" in logs[0])
