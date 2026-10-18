@@ -159,6 +159,16 @@ describe("prompt", () => {
       expect(s.camera).toMatch(/\d+mm (portrait |macro )?lens/);
     }
   });
+  it("feet are shot from above or from the side, never soles to the lens from the floor (owner: it looks like a dead body)", () => {
+    const all = (["newborn", "sitter", "toddler", "kid"] as const).flatMap((s) => sessionShots(s));
+    const feet = all.filter((s) => /\b(feet|foot|toes)\b/.test(s.text));
+    expect(feet.length).toBeGreaterThanOrEqual(5);
+    for (const s of feet) {
+      expect(s.text).toMatch(/from above|from the side/);
+      expect(s.text).not.toMatch(/toward the viewer/);
+      expect(s.camera).not.toMatch(/floor[- ]level|blanket-level/);
+    }
+  });
   it("faces get the 85mm wide-open portrait look, details a macro lens, focus pulls the macro lens at the prop", () => {
     const all = [...SITTER_SHOTS, ...NEWBORN_SHOTS];
     for (const s of all.filter((x) => frameOf(x) === "portrait" && x.angle !== "overhead")) expect(s.camera).toMatch(/85mm portrait lens, f\/1\.[24]/);
