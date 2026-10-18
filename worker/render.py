@@ -429,6 +429,7 @@ NEST_INK = (43, 30, 30)
 PILL_PAD = (0.75, 0.38)   # the watermark pill's padding, in font sizes (x, y)
 CHIP_PAD = (0.7, 0.34)    # the detail chip's padding, in font sizes (x, y)
 CHIP_SCALE = 1.3          # the chip text is the watermark size x this
+CHIP_WEIGHT = 600         # semibold, as before the name went extra-bold (2026-10-18: the name's weight alone changed)
 
 
 def card_layout(settings):
@@ -456,7 +457,7 @@ def detail_line(us_rank=None, origin=None):
 def _chip_part(font_id, text, mark_px, gap, above, log=print):
     """The chip as a layout part: its `bb` is the padded chip box (so alignment and the block include the padding),
     `y` puts the chip's top `gap` below `above` (the meaning's last ink line)."""
-    cf = fonts.load_safe(font_id, LAYOUT["titleWeight"], max(LAYOUT["minPx"], _px(mark_px * CHIP_SCALE)), log)
+    cf = fonts.load_safe(font_id, CHIP_WEIGHT, max(LAYOUT["minPx"], _px(mark_px * CHIP_SCALE)), log)
     cb = cf.getbbox(text)
     px, py = cf.size * CHIP_PAD[0], cf.size * CHIP_PAD[1]
     bb = (cb[0] - px, cb[1] - py, cb[2] + px, cb[3] + py)

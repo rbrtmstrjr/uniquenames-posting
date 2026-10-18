@@ -38,10 +38,12 @@ class ClassicGoldenTest(unittest.TestCase):
     """The Unique Names stamp, captured before Name Nest's layout was added (2026-10-10). Never update these to make a
     change pass: a diff here means the live Unique Names cards would change."""
 
+    # 2026-10-18: the name is stamped extra-bold (layout.json titleWeight 600 -> 800, owner's request); the closing
+    # card's message keeps the body weight, so "cta" is unchanged.
     GOLDEN = {
-        "auto-dark": "06bc66d580cceaa892d73c61",
-        "auto-light": "17a19fa0cc320f4d42eb8ee8",
-        "styled": "56752930c6e320c1d194102e",
+        "auto-dark": "df93dc6d7ef792cce2e1818d",
+        "auto-light": "a996dfb37ebce846caaa2b34",
+        "styled": "8473b3c724037f1f4c824dd7",
         "cta": "d66acc1895f87d4732cb9f31",
     }
 

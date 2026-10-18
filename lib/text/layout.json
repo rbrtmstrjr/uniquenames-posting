@@ -15,7 +15,7 @@
   "markInsetBottom": 0.045,
   "lightBackdrop": 175,
   "darkInk": [59, 42, 32],
-  "titleWeight": 600,
+  "titleWeight": 800,
   "bodyWeight": 400,
   "autoBands": { "top": [0.07, 0.33], "middle": [0.37, 0.63], "bottom": [0.64, 0.88] },
   "autoBandBias": { "top": 0.80, "middle": 1.0, "bottom": 0.95 },
