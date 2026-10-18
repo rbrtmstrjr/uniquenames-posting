@@ -525,6 +525,10 @@ CTA_MAX_LINES = 3
 # Auto position: the message block is centred at this fraction of the height, the upper-middle
 # calm area the closing card's prompt leaves open (the child and props sit in the lower half).
 CTA_CENTER_Y = 0.30
+# The message is quieter than a name: it starts at this share of the name size, and its lines stay inside this share
+# of the card width (an even margin on each side) - before 2026-10-18 it started at the name size and ran to 88%.
+CTA_SIZE = 0.6
+CTA_MAX_WIDTH = 0.72
 
 
 def cta_lines(message):
@@ -567,13 +571,13 @@ def layout_cta(size, message, handle, style, log=print, pill=False):
     k = W / LAYOUT["baseWidth"]
     pos = style.position if style.position in LAYOUT["positions"] else "auto"
     vert = "auto" if pos == "auto" else pos.split("-")[0]
-    max_w = W * LAYOUT["maxWidthCenter"]
+    max_w = W * CTA_MAX_WIDTH
     mark, lo, bottom = _mark_and_room(W, H, handle, style, False, log, pill=pill)
     lines = cta_lines(message) or [""]
 
     scale = 1.0
     while True:
-        font, rows = fit_cta(style.meaning_font, lines, style.title_size * k * scale, max_w, log)
+        font, rows = fit_cta(style.meaning_font, lines, style.title_size * k * CTA_SIZE * scale, max_w, log)
         pitch = font.size * (1 + LAYOUT["lineGap"])
         parts = [{"text": ln, "font": font, "y": i * pitch, "bb": font.getbbox(ln)} for i, ln in enumerate(rows)]
         top = min(p["y"] + p["bb"][1] for p in parts)

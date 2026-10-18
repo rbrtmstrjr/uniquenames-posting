@@ -397,6 +397,8 @@ class ClosingCard(unittest.TestCase):
         for part in lay["lines"]:
             self.assertTrue(inside(part["box"], self.padded(W, H)), (style.position, part["text"], part["box"]))
             self.assertAlmostEqual((part["box"][0] + part["box"][2]) / 2, W / 2, delta=1)  # always centred across
+            # an even side margin: the lines stay inside CTA_MAX_WIDTH of the card (owner: proper padding side by side)
+            self.assertLessEqual(part["box"][2] - part["box"][0], W * w.CTA_MAX_WIDTH + 1, (style.position, part["text"]))
         self.assertFalse(overlaps(lay["block"], lay["mark"]["box"]), style.position)
         self.assertLessEqual(len(lay["lines"]), w.CTA_MAX_LINES)
         return lay
@@ -408,14 +410,16 @@ class ClosingCard(unittest.TestCase):
         self.assertEqual(w.cta_lines("a/b/c/d"), ["a", "b", "c d"])
         self.assertEqual(w.cta_lines(""), [])
 
-    def test_the_owners_lines_in_the_meaning_font_near_the_title_size_no_meaning(self):
+    def test_the_owners_lines_in_the_meaning_font_smaller_than_a_name_no_meaning(self):
         style = w.text_style({"meaning_font": "lora", "title_font": "playfair"})
         lay = self.check(1080, 1080, style, CTA)
         self.assertEqual([p["text"] for p in lay["lines"]], ["Follow for more", "baby name ideas."])
         font = lay["lines"][0]["font"]
         self.assertEqual(font.size, lay["lines"][1]["font"].size)
-        self.assertGreaterEqual(font.size, 70)  # about the title size (95), not the meaning size (37)
-        self.assertLessEqual(font.size, 95)
+        # 2026-10-18 (owner: "the last frame should use small font"): CTA_SIZE of the title size (95 -> 57), still
+        # larger than the meaning line (37)
+        self.assertEqual(font.size, round(95 * w.CTA_SIZE))
+        self.assertGreater(font.size, 37)
         self.assertEqual(font.path, w.fonts.load_safe("lora", w.LAYOUT["bodyWeight"], 20, lambda m: None).path)
         self.assertNotIn("meaning", lay)
         self.assertNotIn("title", lay)
