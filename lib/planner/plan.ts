@@ -2,7 +2,8 @@ import type { Gender, NameRow, NameStyle, SettingsRow, ThemeRow } from "@/lib/db
 import { buildCaption } from "./caption";
 import { buildCtaPrompt, buildPrompt, ctaShot, pickSubject, randomSubject, type Subject } from "./prompt";
 import { hashSeed, seededRandom, shuffle } from "./random";
-import { buildMixedShotSpecs, buildShots, dealAges, sessionShots, shotSpec, type ShotSpec } from "./shots";
+import { buildMixedShotSpecs, buildShotSpecs, dealAges, needsProp, sessionShots, shotSpec, type ShotSpec } from "./shots";
+import { dealProps, splitProps } from "./props";
 import { SUBJECT_AGES, type AgeChoice } from "./age";
 import { startsWith } from "@/lib/series/letter";
 import type { InitialsPick, InitialsSource } from "@/lib/series/initials";
@@ -86,21 +87,28 @@ export function planPost(input: PlanInput): PlanResult {
 function galleryCards(chosen: NameRow[], theme: ThemeRow, gender: Gender, postDate: string, key: string, age: AgeChoice | null | undefined, salt = ""): PlannedCard[] {
   const rngKey = salt ? `${key}|${salt}` : key;
   const shotRng = seededRandom(hashSeed(`${rngKey}|shots`));
-  let frames: { shot: string; subject?: Subject }[];
+  let frames: { spec: ShotSpec; subject?: Subject }[];
   if (age === "random") {
     // Its own child per baby card, the ages dealt so the post shows a real spread.
     const ageRng = seededRandom(hashSeed(`${rngKey}|ages`));
     const ages = dealAges(chosen.length, ageRng);
     frames = buildMixedShotSpecs(chosen.length, ages, shotRng).map((f) =>
-      ({ shot: f.spec.text, subject: f.age ? randomSubject(f.age, ageRng) : undefined }));
+      ({ spec: f.spec, subject: f.age ? randomSubject(f.age, ageRng) : undefined }));
   } else {
     const subject = pickSubject(key, age ?? undefined);
-    frames = buildShots(chosen.length, shotRng, subject.session).map((shot) => ({ shot, subject }));
+    frames = buildShotSpecs(chosen.length, subject.session, shotRng).map((spec) => ({ spec, subject }));
   }
-  return chosen.map((n, k) => ({
-    position: k + 1, name_id: n.id, name: n.name.trim(), meaning: n.meaning.trim(), shot: frames[k].shot,
-    prompt: buildPrompt(theme, frames[k].shot, gender, frames[k].subject), seed: cardSeed(postDate, n.name, k),
-  }));
+  // One hero prop per story frame, dealt in gallery order: every prop gets its frames, neighbours differ.
+  const heroes = dealProps(splitProps(theme.props), frames.filter((f) => needsProp(f.spec)).length, seededRandom(hashSeed(`${rngKey}|props`)));
+  let h = 0;
+  return chosen.map((n, k) => {
+    const { spec, subject } = frames[k];
+    const hero = needsProp(spec) ? heroes[h++] : undefined;
+    return {
+      position: k + 1, name_id: n.id, name: n.name.trim(), meaning: n.meaning.trim(), shot: spec.text,
+      prompt: buildPrompt(theme, spec.text, gender, subject, hero), seed: cardSeed(postDate, n.name, k),
+    };
+  });
 }
 
 /** A card of a post by initials (migration 017): where its name comes from; a fresh AI name has no row yet (name_id null). */
@@ -172,11 +180,13 @@ export function planExtraCard(i: ExtraCardInput): ExtraCardResult {
   const subject = i.age === "random"
     ? randomSubject(SUBJECT_AGES[Math.floor(rng() * SUBJECT_AGES.length)], rng)
     : pickSubject(i.subjectKey ?? i.salt, i.age ?? undefined);
-  const shot = pickExtraShot(sessionShots(subject.session), i.usedShots ?? [], rng).text;
+  const spec = pickExtraShot(sessionShots(subject.session), i.usedShots ?? [], rng);
+  const props = splitProps(i.theme.props);
+  const hero = needsProp(spec) && props.length ? props[Math.floor(rng() * props.length)] : undefined;
   return {
     ok: true,
-    card: { position: i.nextPosition, name_id: pick.id, name: pick.name.trim(), meaning: pick.meaning.trim(), shot,
-      prompt: buildPrompt(i.theme, shot, i.gender, subject), seed: cardSeed(i.salt, pick.name, i.nextPosition) },
+    card: { position: i.nextPosition, name_id: pick.id, name: pick.name.trim(), meaning: pick.meaning.trim(), shot: spec.text,
+      prompt: buildPrompt(i.theme, spec.text, i.gender, subject, hero), seed: cardSeed(i.salt, pick.name, i.nextPosition) },
   };
 }
 

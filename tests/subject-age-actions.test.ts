@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { NameRow, ThemeRow } from "@/lib/db/types";
-import { isPropsOnly } from "@/lib/planner";
 import { fakeSupabase, type Query, type Respond } from "./helpers/fake-supabase";
+import { childOf, subjectOf } from "./helpers/prompt-lines";
 
 let respond: Respond = () => undefined;
 let fake = fakeSupabase((q) => respond(q));
@@ -42,8 +42,9 @@ beforeEach(() => {
   };
 });
 const rpc = (fn: string) => fake.rpcs.find((r) => r.fn === fn)!.args as Record<string, Record<string, unknown>>;
+/** The face cards' subject lines of the planned post (hands, detail and still frames have none). */
 const subjectLines = () => (rpc("create_post").p.cards as { shot: string; prompt: string }[])
-  .filter((c) => !isPropsOnly(c.shot)).map((c) => c.prompt.split("\n")[1]);
+  .map((c) => subjectOf(c.prompt)).filter((l): l is string => !!l);
 
 describe("createPostAction subject age", () => {
   it("defaults to Random: stored as 'random', a spread of ages across the cards", async () => {
@@ -67,24 +68,39 @@ describe("createPostAction subject age", () => {
 });
 
 describe("addCardAction subject age", () => {
-  const line = () => (rpc("add_card").c.prompt as string).split("\n")[1];
+  /**
+   * Adds 12 cards (the salt is the clock, so each one gets its own shot) and returns their child lines: an added card
+   * may be a hands or detail frame without one, so the assertions run on the cards that show the child.
+   */
+  const addMany = async () => {
+    const base = Date.now();
+    const lines: string[] = [];
+    for (let i = 0; i < 12; i++) {
+      vi.spyOn(Date, "now").mockReturnValue(base + i * 1000);
+      fake = fakeSupabase((q) => respond(q));
+      expect(await addCardAction(POST_ID)).toEqual({ ok: true, cardId: "c1" });
+      const line = childOf(rpc("add_card").c.prompt as string);
+      if (line) lines.push(line);
+    }
+    vi.restoreAllMocks();
+    expect(lines.length).toBeGreaterThan(0);
+    return lines;
+  };
   it("fixed-age post: the post's child", async () => {
     post.subject_age = "3";
-    expect(await addCardAction(POST_ID)).toEqual({ ok: true, cardId: "c1" });
-    expect(line()).toMatch(/same toddler in every photo.*3-year-old boy/);
+    for (const l of await addMany()) expect(l).toMatch(/(same toddler in every photo.*|^Out of focus behind it: )a 3-year-old boy/);
   });
   it("random post: a child of its own", async () => {
     post.subject_age = "random";
-    await addCardAction(POST_ID);
-    expect(line()).toMatch(/^Subject: a (newborn|\d-year-old)/);
+    for (const l of await addMany()) expect(l).toMatch(/^(Subject|Out of focus behind it): an? (newborn|\d-year-old|1-year-old)/);
   });
   it("post made before ages, or 004 not run yet (no column): the original baby", async () => {
     for (const age of [null, undefined]) {
-      fake = fakeSupabase((q) => respond(q));
       post.subject_age = age;
       if (age === undefined) delete post.subject_age;
-      await addCardAction(POST_ID);
-      expect(line()).toMatch(/same baby in every photo of this session\): (a newborn baby boy, about 10 days old|an 8-month-old baby boy)/);
+      for (const l of await addMany()) {
+        expect(l).toMatch(/(same baby in every photo of this session\): |^Out of focus behind it: )(a newborn baby boy, about 10 days old|an 8-month-old baby boy)/);
+      }
     }
   });
 });

@@ -17,12 +17,12 @@ const namesSystem = (words: { min: number; max: number }) => [
 ].join("\n");
 
 const THEMES_SYSTEM = [
-  "You design baby photoshoot themes for @unique_names. Each theme is one complete studio set that an AI image model photographs: the baby (a newborn or an 8-month-old) poses on it in every picture of a post.",
+  "You design baby photoshoot themes for @unique_names. Each theme is one complete studio set that an AI image model photographs like a photographer moving through a session: most pictures of a post are close-ups of the child (a newborn up to 7 years old), of small hands holding one prop, or of one prop on its own, so every prop tells part of the theme's story.",
   "Fields:",
   "- title: 2 to 4 words, a warm name for the set (at most 40 characters).",
   "- backdrop: always written as \"smooth seamless <color> studio backdrop\" (you may add one soft detail, like \"with a soft darker vignette\").",
   "- outfit: one baby outfit: fabric, color and one small detail (a bonnet, a collar, ears on a hood). Say \"knitted\", not \"hand-knitted\".",
-  "- props: 2 to 4 small, LOW props, comma-separated, that sit on the floor or blanket beside a lying or sitting baby and stay below the baby's shoulders: baskets, plush or felt toys, wooden toys, cushions, flowers, fruit, knitted pieces. Every prop must be visual only.",
+  "- props: 3 to 5 small props, comma-separated, each one distinct object that can fill a close-up photo on its own and fits the theme's story: at least one small enough for a baby's hands to hold (a little toy, a charm, a small fruit, a single flower), the others sitting on the floor or blanket beside the child (baskets, plush or felt toys, wooden toys, cushions, knitted pieces). Every prop must be visual only.",
   "- lighting: the quality and direction of the light and the mood (for example \"soft warm light from the left, gentle shadows, cozy\"). Describe the light itself, never the equipment.",
   "- palette: 3 or 4 colors, like \"sage, cream, oat and soft gold\".",
   "The image model draws every word you write and cannot be told what to leave out, so describe ONLY what should be visible:",
