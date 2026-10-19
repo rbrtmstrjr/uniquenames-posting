@@ -230,6 +230,18 @@ class Layout(unittest.TestCase):
         dark = Image.new("RGB", (1080, 1080), (90, 60, 40))
         self.assertEqual(w.text_colors(dark, (0, 0, 1080, 1080))[0], (255, 255, 255))
 
+    def test_every_position_keeps_the_safe_margin(self):
+        # 2026-10-19 (owner): the name sat too close to the card edges in the side positions. The name + meaning
+        # block keeps 10% from the left, right and top edges and 12% from the bottom, at the owner's big name size.
+        style = w.text_style({"title_font": "poppins", "meaning_font": "poppins", "title_size": 141, "meaning_size": 27})
+        for pos in w.LAYOUT["positions"]:
+            for name in ("Agatha", "Maximiliana Seraphine"):
+                b = w.layout_text((1080, 1080), name, "the greatest burning one", "@unique_names", style._replace(position=pos))["block"]
+                self.assertGreaterEqual(b[0], 108 - 1, (pos, name))
+                self.assertLessEqual(b[2], 1080 - 108 + 1, (pos, name))
+                self.assertGreaterEqual(b[1], 108 - 1, (pos, name))
+                self.assertLessEqual(b[3], 1080 - 0.12 * 1080 + 1, (pos, name))
+
     def test_meaning_is_light_and_letter_spaced(self):
         # 2026-10-19 (owner): the meaning is light with ~5% letter spacing, counted in its box (so centring and the
         # margins see the real width); the name and the watermark keep their weights and no spacing.

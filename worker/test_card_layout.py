@@ -41,10 +41,11 @@ class ClassicGoldenTest(unittest.TestCase):
     # 2026-10-18: the name is stamped extra-bold (layout.json titleWeight 600 -> 800, owner's request); the closing
     # card's message is smaller with even side margins (CTA_SIZE 0.6 of the name size, lines inside 72% of the width).
     # 2026-10-19: the meaning is light (meaningWeight 300) with 5% letter spacing (owner); the closing card is unchanged.
+    # 2026-10-19: a 10% safe margin from the card edges (12% bottom) in every position (owner); "styled" is bottom-right.
     GOLDEN = {
         "auto-dark": "cb1dd4cc0d2976566a9f05a3",
         "auto-light": "9de1f242bd61c9e0ea1d2b0a",
-        "styled": "2dd9156a1b552114ab8ceecb",
+        "styled": "12097af7cd21519c78a818bb",
         "cta": "6b1f2a543d9ce3a415725555",
     }
 
