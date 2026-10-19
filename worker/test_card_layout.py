@@ -39,12 +39,13 @@ class ClassicGoldenTest(unittest.TestCase):
     change pass: a diff here means the live Unique Names cards would change."""
 
     # 2026-10-18: the name is stamped extra-bold (layout.json titleWeight 600 -> 800, owner's request); the closing
-    # card's message keeps the body weight, so "cta" is unchanged.
+    # card's message is smaller with even side margins (CTA_SIZE 0.6 of the name size, lines inside 72% of the width).
+    # 2026-10-19: the meaning is light (meaningWeight 300) with 5% letter spacing (owner); the closing card is unchanged.
     GOLDEN = {
-        "auto-dark": "df93dc6d7ef792cce2e1818d",
-        "auto-light": "a996dfb37ebce846caaa2b34",
-        "styled": "8473b3c724037f1f4c824dd7",
-        "cta": "d66acc1895f87d4732cb9f31",
+        "auto-dark": "cb1dd4cc0d2976566a9f05a3",
+        "auto-light": "9de1f242bd61c9e0ea1d2b0a",
+        "styled": "2dd9156a1b552114ab8ceecb",
+        "cta": "6b1f2a543d9ce3a415725555",
     }
 
     def cases(self):

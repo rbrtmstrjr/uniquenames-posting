@@ -10,8 +10,8 @@ export interface FontEntry {
   id: string; label: string; family: string; dir: string;
   /** One variable font file with a wght axis, or one static file per weight. */
   var?: string; files?: Record<string, string>;
-  /** A variable font's heaviest weight when it is below the name weight (Google Fonts refuses weights outside the axis). */
-  wmax?: number;
+  /** A variable font's lightest / heaviest weight when the meaning / name weight is outside its axis (Google Fonts refuses weights outside it). */
+  wmin?: number; wmax?: number;
   /** Names are stamped in CAPITALS; script fonts keep the name's own Title Case. */
   caps: boolean;
 }
@@ -26,8 +26,9 @@ export const fontById = (id: string | null | undefined): FontEntry =>
   FONTS.find((f) => f.id === id) ?? FONTS.find((f) => f.id === FALLBACK_FONT)!;
 
 /** The weights a font really has (a static single-weight font is drawn at 400 only, never faux bold). */
-export const fontWeights = (f: FontEntry): number[] =>
-  (f.var ? [layout.bodyWeight, Math.min(layout.titleWeight, f.wmax ?? layout.titleWeight)] : Object.keys(f.files ?? {}).map(Number).sort((a, b) => a - b));
+export const fontWeights = (f: FontEntry): number[] => (f.var
+  ? [...new Set([Math.max(layout.meaningWeight, f.wmin ?? 0), layout.bodyWeight, Math.min(layout.titleWeight, f.wmax ?? layout.titleWeight)])]
+  : Object.keys(f.files ?? {}).map(Number)).sort((a, b) => a - b);
 /** The closest weight the font has, like worker/fonts.py `_pick_file`. */
 export function fontWeight(f: FontEntry, want: number): number {
   return fontWeights(f).reduce((best, w) => (Math.abs(w - want) < Math.abs(best - want) ? w : best));

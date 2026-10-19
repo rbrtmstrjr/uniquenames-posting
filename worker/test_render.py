@@ -230,6 +230,26 @@ class Layout(unittest.TestCase):
         dark = Image.new("RGB", (1080, 1080), (90, 60, 40))
         self.assertEqual(w.text_colors(dark, (0, 0, 1080, 1080))[0], (255, 255, 255))
 
+    def test_meaning_is_light_and_letter_spaced(self):
+        # 2026-10-19 (owner): the meaning is light with ~5% letter spacing, counted in its box (so centring and the
+        # margins see the real width); the name and the watermark keep their weights and no spacing.
+        style = w.text_style({"meaning_font": "poppins", "title_font": "poppins"})
+        lay = w.layout_text((1080, 1080), "Arlo Zenith", "peak strength with calm", "@unique_names", style)
+        m = lay["meaning"][0]
+        self.assertEqual(os.path.basename(m["font"].path), "Poppins-Light.ttf")
+        self.assertAlmostEqual(m["track"], 0.05 * m["font"].size)
+        plain = m["font"].getbbox(m["text"])
+        self.assertAlmostEqual(m["box"][2] - m["box"][0], plain[2] - plain[0] + m["track"] * (len(m["text"]) - 1), delta=0.01)
+        self.assertAlmostEqual((m["box"][0] + m["box"][2]) / 2, 540, delta=1)  # still centred with the spacing
+        self.assertEqual(lay["title"][0].get("track", 0.0), 0.0)
+        # drawn spaced, the ink really is wider than the same text unspaced
+        def ink_w(track):
+            img = Image.new("L", (1080, 200), 0)
+            w._draw_text(ImageDraw.Draw(img), (20, 40), m["text"], m["font"], 255, track)
+            box = img.getbbox()
+            return box[2] - box[0]
+        self.assertAlmostEqual(ink_w(m["track"]) - ink_w(0.0), m["track"] * (len(m["text"]) - 1), delta=3)
+
     def test_fit_to_size(self):
         self.assertEqual(w.fit_to_size(Image.new("RGB", (1072, 1072)), 1080, 1080).size, (1080, 1080))
         self.assertEqual(w.fit_to_size(Image.new("RGB", (1080, 1344)), 1080, 1080).size, (1080, 1080))
@@ -397,6 +417,8 @@ class ClosingCard(unittest.TestCase):
         for part in lay["lines"]:
             self.assertTrue(inside(part["box"], self.padded(W, H)), (style.position, part["text"], part["box"]))
             self.assertAlmostEqual((part["box"][0] + part["box"][2]) / 2, W / 2, delta=1)  # always centred across
+            # an even side margin: the lines stay inside CTA_MAX_WIDTH of the card (owner: proper padding side by side)
+            self.assertLessEqual(part["box"][2] - part["box"][0], W * w.CTA_MAX_WIDTH + 1, (style.position, part["text"]))
         self.assertFalse(overlaps(lay["block"], lay["mark"]["box"]), style.position)
         self.assertLessEqual(len(lay["lines"]), w.CTA_MAX_LINES)
         return lay
@@ -408,14 +430,16 @@ class ClosingCard(unittest.TestCase):
         self.assertEqual(w.cta_lines("a/b/c/d"), ["a", "b", "c d"])
         self.assertEqual(w.cta_lines(""), [])
 
-    def test_the_owners_lines_in_the_meaning_font_near_the_title_size_no_meaning(self):
+    def test_the_owners_lines_in_the_meaning_font_smaller_than_a_name_no_meaning(self):
         style = w.text_style({"meaning_font": "lora", "title_font": "playfair"})
         lay = self.check(1080, 1080, style, CTA)
         self.assertEqual([p["text"] for p in lay["lines"]], ["Follow for more", "baby name ideas."])
         font = lay["lines"][0]["font"]
         self.assertEqual(font.size, lay["lines"][1]["font"].size)
-        self.assertGreaterEqual(font.size, 70)  # about the title size (95), not the meaning size (37)
-        self.assertLessEqual(font.size, 95)
+        # 2026-10-18 (owner: "the last frame should use small font"): CTA_SIZE of the title size (95 -> 57), still
+        # larger than the meaning line (37)
+        self.assertEqual(font.size, round(95 * w.CTA_SIZE))
+        self.assertGreater(font.size, 37)
         self.assertEqual(font.path, w.fonts.load_safe("lora", w.LAYOUT["bodyWeight"], 20, lambda m: None).path)
         self.assertNotIn("meaning", lay)
         self.assertNotIn("title", lay)

@@ -15,7 +15,7 @@ import render
 class Catalog(unittest.TestCase):
     def test_catalog_has_the_verified_list(self):
         self.assertEqual(fonts.ids(), ["poppins", "montserrat", "playfair", "fraunces", "dmserif", "quicksand", "nunito", "lora",
-                                       "cormorant", "josefin", "comfortaa", "greatvibes", "dancing", "pacifico", "parisienne"])
+                                       "cormorant", "josefin", "comfortaa", "mochiy", "greatvibes", "dancing", "pacifico", "parisienne"])
 
     def test_unknown_id_falls_back_to_poppins(self):
         for bad in ("comic-sans", "", None, 7):
@@ -108,7 +108,7 @@ class Downloads(unittest.TestCase):
 
         with mock.patch("fonts._download", side_effect=fake):
             missing = fonts.prefetch(timeout=15, log=logs.append)
-        self.assertEqual(len(calls), 17)  # 15 fonts, Poppins has three files (regular, semibold, extra-bold names)
+        self.assertEqual(len(calls), 19)  # 16 fonts, Poppins has four files (light meanings, regular, semibold, extra-bold names)
         self.assertTrue(all(t == 15 for _u, t in calls))
         self.assertEqual(missing, 1)
         self.assertTrue(logs and "Lora" in logs[0])
