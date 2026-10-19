@@ -55,8 +55,16 @@ export function balancedLines(measure: Measure, px: number, words: string[], n: 
   return Array.from({ length: n }, (_, i) => words.slice(best!.bounds[i], best!.bounds[i + 1]).join(" "));
 }
 
-/** One line shrinking to meaningShrinkFirst, then up to meaningMaxLines balanced lines, then smaller. */
-export function fitMeaning(measure: Measure, text: string, px: number, maxW: number): { px: number; lines: string[] } {
+/** A measure with `em` letter spacing between letters, like the worker's _text_w(font, text, track). */
+export const tracked = (measure: Measure, em: number): Measure =>
+  (text, px) => measure(text, px) + em * px * Math.max(0, text.length - 1);
+
+/**
+ * One line shrinking to meaningShrinkFirst, then up to meaningMaxLines balanced lines, then smaller. Every width counts
+ * the meaning's letter spacing (meaningTracking), like the worker's fit_meaning.
+ */
+export function fitMeaning(base: Measure, text: string, px: number, maxW: number): { px: number; lines: string[] } {
+  const measure = tracked(base, layout.meaningTracking);
   const words = text.split(/\s+/).filter(Boolean);
   const start = Math.floor(px + 0.5);
   const floor = Math.max(layout.minPx, Math.floor(px * layout.meaningShrinkFirst + 0.5));

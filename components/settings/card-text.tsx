@@ -15,7 +15,7 @@ export interface PreviewSample { photoUrl: string | null; name: string; meaning:
 
 const FONT_FIELDS = [
   { key: "title_font", label: "Name font", weight: LAYOUT.titleWeight },
-  { key: "meaning_font", label: "Meaning font", weight: LAYOUT.bodyWeight },
+  { key: "meaning_font", label: "Meaning font", weight: LAYOUT.meaningWeight },
   { key: "mark_font", label: "Watermark font", weight: LAYOUT.bodyWeight },
 ] as const;
 const SIZE_FIELDS = [
@@ -189,7 +189,7 @@ export function TextPreview({ t, sample, aspect, handle }: { t: TextSettings; sa
     const maxW = maxWidthFor(horiz, W);
     const title = titleText(sample.name, t.title_font);
     const titlePx = fitTitle(canvasMeasure(t.title_font, LAYOUT.titleWeight), title, pxAt(t.title_size, W), maxW);
-    const meaning = fitMeaning(canvasMeasure(t.meaning_font, LAYOUT.bodyWeight), sample.meaning, pxAt(t.meaning_size, W), maxW);
+    const meaning = fitMeaning(canvasMeasure(t.meaning_font, LAYOUT.meaningWeight), sample.meaning, pxAt(t.meaning_size, W), maxW);
     return { title, titlePx, meaning, markPx: Math.max(1, pxAt(t.mark_size, W)) };
   }, [W, horiz, sample.name, sample.meaning, t.title_font, t.meaning_font, t.title_size, t.meaning_size, t.mark_size, fontsTick]);
 
@@ -228,7 +228,8 @@ export function TextPreview({ t, sample, aspect, handle }: { t: TextSettings; sa
           }}>
             <div ref={block} className={cn("flex flex-col", align)} style={{ color: inks.text.color, textShadow: shadow(inks.text) }}>
               <div style={{ fontFamily: cssFamily(titleFont), fontWeight: fontWeight(titleFont, LAYOUT.titleWeight), fontSize: lay.titlePx, lineHeight: 1, whiteSpace: "nowrap" }}>{lay.title}</div>
-              <div style={{ marginTop: W * LAYOUT.gap, fontFamily: cssFamily(meaningFont), fontWeight: fontWeight(meaningFont, LAYOUT.bodyWeight), fontSize: lay.meaning.px, lineHeight: 1 + LAYOUT.lineGap, opacity: 240 / 255 }}>
+              <div style={{ marginTop: W * LAYOUT.gap, fontFamily: cssFamily(meaningFont), fontWeight: fontWeight(meaningFont, LAYOUT.meaningWeight), fontSize: lay.meaning.px,
+                letterSpacing: `${LAYOUT.meaningTracking}em`, lineHeight: 1 + LAYOUT.lineGap, opacity: 240 / 255 }}>
                 {lay.meaning.lines.map((ln, i) => <div key={i} style={{ whiteSpace: "nowrap" }}>{ln}</div>)}
               </div>
             </div>

@@ -234,9 +234,32 @@ def text_style(settings):
                      pos if pos in LAYOUT["positions"] else "auto")
 
 
-def _text_w(font, text):
+def _text_w(font, text, track=0.0):
+    """Ink width; `track` = letter spacing in em (layout.json meaningTracking), added between letters."""
     b = font.getbbox(text)
-    return b[2] - b[0]
+    return b[2] - b[0] + _track_px(font, track) * max(0, len(text) - 1)
+
+
+def _track_px(font, track):
+    return track * font.size if track else 0.0
+
+
+def _tracked_bbox(font, text, track=0.0):
+    """getbbox with the letter spacing added on the right (the first letter stays put)."""
+    b = font.getbbox(text)
+    return (b[0], b[1], b[2] + _track_px(font, track) * max(0, len(text) - 1), b[3])
+
+
+def _draw_text(draw, xy, text, font, fill, track_px=0.0):
+    """draw.text, with `track_px` added between letters. Each letter is drawn at its own pen position in the whole
+    line (font.getlength of the text before it), so the font's kerning stays."""
+    if not track_px:
+        draw.text(xy, text, font=font, fill=fill)
+        return
+    x, y = xy
+    for i, ch in enumerate(text):
+        if not ch.isspace():
+            draw.text((x + font.getlength(text[:i]) + i * track_px, y), ch, font=font, fill=fill)
 
 
 def _largest(fits, lo, hi):
@@ -261,15 +284,15 @@ def fit_title(font_id, text, px, max_w, log=print):
     return load(size or LAYOUT["minPx"])
 
 
-def balanced_lines(font, words, n):
-    """`words` split into n lines whose widest line is as narrow as possible."""
+def balanced_lines(font, words, n, track=0.0):
+    """`words` split into n lines whose widest line is as narrow as possible (`track`: letter spacing in em)."""
     if n <= 1:
         return [" ".join(words)]
     widths = {}
 
     def width(i, j):  # each run of words is measured once
         if (i, j) not in widths:
-            widths[(i, j)] = _text_w(font, " ".join(words[i:j]))
+            widths[(i, j)] = _text_w(font, " ".join(words[i:j]), track)
         return widths[(i, j)]
 
     best = None
@@ -282,24 +305,30 @@ def balanced_lines(font, words, n):
     return [" ".join(words[b[i]:b[i + 1]]) for i in range(n)]
 
 
+MEANING_WEIGHT = LAYOUT.get("meaningWeight", LAYOUT["bodyWeight"])
+MEANING_TRACK = LAYOUT.get("meaningTracking", 0.0)  # em between letters
+
+
 def fit_meaning(font_id, text, px, max_w, log=print):
     """(font, lines): one line, shrinking to meaningShrinkFirst of the size; then 2, then up
-    to meaningMaxLines balanced lines in that size range; then smaller on the most lines."""
-    load = lambda s: fonts.load_safe(font_id, LAYOUT["bodyWeight"], s, log)
+    to meaningMaxLines balanced lines in that size range; then smaller on the most lines.
+    Light weight; every width counts the letter spacing (MEANING_TRACK), so a spaced line still fits."""
+    load = lambda s: fonts.load_safe(font_id, MEANING_WEIGHT, s, log)
     words = text.split()
     start = _px(px)
     floor = max(LAYOUT["minPx"], _px(px * LAYOUT["meaningShrinkFirst"]))
     most = max(1, min(LAYOUT["meaningMaxLines"], len(words)))
+    lines = lambda f, n: balanced_lines(f, words, n, MEANING_TRACK)
 
     def fits(n):
-        return lambda s: max(_text_w(load(s), ln) for ln in balanced_lines(load(s), words, n)) <= max_w
+        return lambda s: max(_text_w(load(s), ln, MEANING_TRACK) for ln in lines(load(s), n)) <= max_w
 
     for n in range(1, most + 1):
         size = _largest(fits(n), floor, start)
         if size:
-            return load(size), balanced_lines(load(size), words, n)
+            return load(size), lines(load(size), n)
     size = _largest(fits(most), LAYOUT["minPx"], floor - 1) or LAYOUT["minPx"]
-    return load(size), balanced_lines(load(size), words, most)
+    return load(size), lines(load(size), most)
 
 
 def _mark_and_room(W, H, handle, style, mark_left, log=print, pill=False):
@@ -361,7 +390,8 @@ def layout_text(size, name, meaning, handle, style, band="top", log=print, detai
         first = mf.getbbox(lines[0])
         pitch = mf.size * (1 + LAYOUT["lineGap"])
         for i, ln in enumerate(lines):
-            parts.append({"text": ln, "font": mf, "y": tb[3] + W * LAYOUT["gap"] * scale - first[1] + i * pitch, "bb": mf.getbbox(ln)})
+            parts.append({"text": ln, "font": mf, "y": tb[3] + W * LAYOUT["gap"] * scale - first[1] + i * pitch,
+                          "bb": _tracked_bbox(mf, ln, MEANING_TRACK), "track": _track_px(mf, MEANING_TRACK)})
         if detail:
             parts.append(_chip_part(style.mark_font, detail, style.mark_size * k * scale, W * LAYOUT["gap"] * scale,
                                     max(p["y"] + p["bb"][3] for p in parts), log))
@@ -388,7 +418,8 @@ def layout_text(size, name, meaning, handle, style, band="top", log=print, detai
     for p in parts:
         bb = p["bb"]
         x, py = x_for(bb), p["y"] + dy
-        out.append({"text": p["text"], "font": p["font"], "xy": (x, py), "box": (x + bb[0], py + bb[1], x + bb[2], py + bb[3])})
+        out.append({"text": p["text"], "font": p["font"], "xy": (x, py), "box": (x + bb[0], py + bb[1], x + bb[2], py + bb[3]),
+                    "track": p.get("track", 0.0)})
 
     boxes = [p["box"] for p in out]
     block = (min(b[0] for b in boxes), min(b[1] for b in boxes), max(b[2] for b in boxes), max(b[3] for b in boxes))
@@ -479,14 +510,14 @@ def _stamp_nest(img, title, meaning, chip, bx, m):
     sd = ImageDraw.Draw(halo)
     off = max(2, W // 400)
     for p, _ink, _a in lines:
-        sd.text((p["xy"][0], p["xy"][1] + off), p["text"], font=p["font"], fill=halo_rgba)
+        _draw_text(sd, (p["xy"][0], p["xy"][1] + off), p["text"], p["font"], halo_rgba, p.get("track", 0.0))
     pills = [(m["pill"], m["text"], m["font"], m["xy"])] + ([(chip["box"], chip["text"], chip["font"], chip["xy"])] if chip else [])
     for box, _t, _f, _xy in pills:
         sd.rounded_rectangle((box[0], box[1] + off, box[2], box[3] + off), radius=(box[3] - box[1]) / 2, fill=(0, 0, 0, 70))
     out = Image.alpha_composite(img.convert("RGBA"), halo.filter(ImageFilter.GaussianBlur(max(3, W // 220))))
     d = ImageDraw.Draw(out)
     for p, ink, a in lines:
-        d.text(p["xy"], p["text"], font=p["font"], fill=ink + (a,))
+        _draw_text(d, p["xy"], p["text"], p["font"], ink + (a,), p.get("track", 0.0))
     for box, text, font, xy in pills:
         d.rounded_rectangle(box, radius=(box[3] - box[1]) / 2, fill=NEST_RED + (240,))
         d.text(xy, text, font=font, fill=NEST_CREAM + (255,))
@@ -510,12 +541,12 @@ def _stamp(img, parts, bx, m):
     sd = ImageDraw.Draw(halo)
     off = max(2, W // 400)
     for p, _ink, _a, h in lines:
-        sd.text((p["xy"][0], p["xy"][1] + off), p["text"], font=p["font"], fill=h)
+        _draw_text(sd, (p["xy"][0], p["xy"][1] + off), p["text"], p["font"], h, p.get("track", 0.0))
     sd.text((m["xy"][0], m["xy"][1] + 1), m["text"], font=m["font"], fill=mark_halo)
     out = Image.alpha_composite(img.convert("RGBA"), halo.filter(ImageFilter.GaussianBlur(max(3, W // 220))))
     d = ImageDraw.Draw(out)
     for p, ink, a, _h in lines:
-        d.text(p["xy"], p["text"], font=p["font"], fill=ink + (a,))
+        _draw_text(d, p["xy"], p["text"], p["font"], ink + (a,), p.get("track", 0.0))
     d.text(m["xy"], m["text"], font=m["font"], fill=mark_ink + (200,))
     return out.convert("RGB")
 

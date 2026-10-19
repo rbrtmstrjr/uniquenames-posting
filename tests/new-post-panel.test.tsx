@@ -96,7 +96,8 @@ describe("NewPostPanel (shadcn controls)", () => {
     expect(screen.getByLabelText("Font sample").textContent).toContain("ARLO ZENITH");
     fireEvent.keyDown(name, { key: "ArrowDown" });
     const options = within(screen.getByRole("listbox")).getAllByRole("option");
-    expect(options).toHaveLength(15);
+    expect(options).toHaveLength(16);
+    expect(options.find((o) => o.textContent === "Mochiy Pop One")!.getAttribute("style")).toMatch(/font-family: "Mochiy Pop One", sans-serif/);
     const vibes = options.find((o) => o.textContent === "Great Vibes")!;
     expect(vibes.getAttribute("style")).toMatch(/font-family: "Great Vibes", cursive/);
     expect(vibes.getAttribute("style")).toMatch(/font-weight: 400/); // single-weight: no faux bold

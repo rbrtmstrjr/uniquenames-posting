@@ -15,12 +15,13 @@ export function CatalogFontsLink() {
 }
 
 /** The weight a field is stamped at: the name is bold-ish, meaning and watermark regular. */
-export const FONT_WEIGHT: Record<FontKey, number> = { title_font: LAYOUT.titleWeight, meaning_font: LAYOUT.bodyWeight, mark_font: LAYOUT.bodyWeight };
+export const FONT_WEIGHT: Record<FontKey, number> = { title_font: LAYOUT.titleWeight, meaning_font: LAYOUT.meaningWeight, mark_font: LAYOUT.bodyWeight };
 
 /** CSS for a font shown as the PC will stamp it (single-weight fonts never faux bold). */
 export const fontStyle = (id: string, key: FontKey) => {
   const f = fontById(id);
-  return { fontFamily: cssFamily(f), fontWeight: fontWeight(f, FONT_WEIGHT[key]) };
+  // The meaning is stamped letter-spaced (layout.json meaningTracking): show it that way.
+  return { fontFamily: cssFamily(f), fontWeight: fontWeight(f, FONT_WEIGHT[key]), ...(key === "meaning_font" ? { letterSpacing: `${LAYOUT.meaningTracking}em` } : {}) };
 };
 
 /** A shadcn Select of the catalog; the trigger and every item are drawn in their own font. */

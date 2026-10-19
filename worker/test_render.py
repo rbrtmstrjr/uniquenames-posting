@@ -230,6 +230,26 @@ class Layout(unittest.TestCase):
         dark = Image.new("RGB", (1080, 1080), (90, 60, 40))
         self.assertEqual(w.text_colors(dark, (0, 0, 1080, 1080))[0], (255, 255, 255))
 
+    def test_meaning_is_light_and_letter_spaced(self):
+        # 2026-10-19 (owner): the meaning is light with ~5% letter spacing, counted in its box (so centring and the
+        # margins see the real width); the name and the watermark keep their weights and no spacing.
+        style = w.text_style({"meaning_font": "poppins", "title_font": "poppins"})
+        lay = w.layout_text((1080, 1080), "Arlo Zenith", "peak strength with calm", "@unique_names", style)
+        m = lay["meaning"][0]
+        self.assertEqual(os.path.basename(m["font"].path), "Poppins-Light.ttf")
+        self.assertAlmostEqual(m["track"], 0.05 * m["font"].size)
+        plain = m["font"].getbbox(m["text"])
+        self.assertAlmostEqual(m["box"][2] - m["box"][0], plain[2] - plain[0] + m["track"] * (len(m["text"]) - 1), delta=0.01)
+        self.assertAlmostEqual((m["box"][0] + m["box"][2]) / 2, 540, delta=1)  # still centred with the spacing
+        self.assertEqual(lay["title"][0].get("track", 0.0), 0.0)
+        # drawn spaced, the ink really is wider than the same text unspaced
+        def ink_w(track):
+            img = Image.new("L", (1080, 200), 0)
+            w._draw_text(ImageDraw.Draw(img), (20, 40), m["text"], m["font"], 255, track)
+            box = img.getbbox()
+            return box[2] - box[0]
+        self.assertAlmostEqual(ink_w(m["track"]) - ink_w(0.0), m["track"] * (len(m["text"]) - 1), delta=3)
+
     def test_fit_to_size(self):
         self.assertEqual(w.fit_to_size(Image.new("RGB", (1072, 1072)), 1080, 1080).size, (1080, 1080))
         self.assertEqual(w.fit_to_size(Image.new("RGB", (1080, 1344)), 1080, 1080).size, (1080, 1080))

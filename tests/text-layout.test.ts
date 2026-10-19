@@ -33,7 +33,7 @@ describe("one source of truth shared with the PC worker", () => {
 
   it("the font list is the verified one", () => {
     expect(FONT_IDS).toEqual(["poppins", "montserrat", "playfair", "fraunces", "dmserif", "quicksand", "nunito", "lora",
-      "cormorant", "josefin", "comfortaa", "greatvibes", "dancing", "pacifico", "parisienne"]);
+      "cormorant", "josefin", "comfortaa", "mochiy", "greatvibes", "dancing", "pacifico", "parisienne"]);
   });
 });
 
@@ -43,6 +43,17 @@ describe("font catalog", () => {
     expect(fontById(undefined).id).toBe("poppins");
     expect(isFontId("lora")).toBe(true);
     expect(isFontId("comic")).toBe(false);
+  });
+
+  it("the meaning is light (300) with 5% letter spacing where the font has a light weight, counted in its width", () => {
+    expect(layoutJson.meaningWeight).toBe(300);
+    expect(layoutJson.meaningTracking).toBe(0.05);
+    expect(fontWeight(fontById("poppins"), 300)).toBe(300);
+    expect(fontWeight(fontById("quicksand"), 300)).toBe(300);
+    for (const id of ["playfair", "lora", "dancing", "mochiy", "greatvibes"]) expect(fontWeight(fontById(id), 300)).toBe(400);
+    // the spacing is part of every width: 13 letters at 37 px = 12 gaps of 0.05 em
+    expect(fitMeaning(mono, "peak strength", 37, mono("peak strength", 37) + 12 * 0.05 * 37).lines).toEqual(["peak strength"]);
+    expect(fitMeaning(mono, "peak strength", 37, mono("peak strength", 37) + 1).px).toBeLessThan(37);
   });
 
   it("the name is extra-bold (800) where the font has it; single-weight fonts are never faux bold", () => {
@@ -59,10 +70,12 @@ describe("font catalog", () => {
     expect(href).toMatch(/^https:\/\/fonts\.googleapis\.com\/css2\?/);
     expect(href).toContain("family=Playfair+Display:wght@400;800");
     expect(href).toContain("family=Great+Vibes&");
-    expect(href).toContain("family=Poppins:wght@400;600;800");
+    expect(href).toContain("family=Mochiy+Pop+One&");
+    expect(href).toContain("family=Poppins:wght@300;400;600;800");
     // Google Fonts refuses the WHOLE request when one family asks for a weight outside its axis
-    expect(href).toContain("family=Quicksand:wght@400;700&");
+    expect(href).toContain("family=Quicksand:wght@300;400;700&");
     expect(href).not.toMatch(/(Quicksand|Lora|Cormorant\+Garamond|Josefin\+Sans|Comfortaa|Dancing\+Script):wght@[\d;]*800/);
+    expect(href).not.toMatch(/(Playfair\+Display|Lora|Dancing\+Script):wght@300/);
     expect(href.match(/family=/g)).toHaveLength(FONT_IDS.length);
     expect(href).toMatch(/display=swap$/);
     expect(cssFamily(fontById("pacifico"))).toBe('"Pacifico", cursive');
