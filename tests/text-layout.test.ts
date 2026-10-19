@@ -91,8 +91,10 @@ describe("layout mirror of worker/render.py", () => {
   it("spots, widths and the watermark side", () => {
     expect(spot("auto")).toEqual({ vert: "auto", horiz: "center" });
     expect(spot("bottom-left")).toEqual({ vert: "bottom", horiz: "left" });
-    expect(maxWidthFor("center", 1000)).toBeCloseTo(880);
-    expect(maxWidthFor("right", 1000)).toBeCloseTo(700);
+    // a 10% safe margin from every edge (12% at the bottom, above the watermark): owner, 2026-10-19
+    expect([layoutJson.padX, layoutJson.padTop, layoutJson.padBottom]).toEqual([0.10, 0.10, 0.12]);
+    expect(maxWidthFor("center", 1000)).toBeCloseTo(800);
+    expect(maxWidthFor("right", 1000)).toBeCloseTo(620);
     expect(TEXT_POSITIONS.filter((p) => markSide(p) === "left")).toEqual(["bottom-right"]);
   });
 
