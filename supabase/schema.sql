@@ -205,7 +205,17 @@ create table if not exists public.posts (
   constraint posts_letter_check check (letter is null or letter ~ '^[A-Z]$'),
   -- a post by initials (017): the two capitals of its two-word names ('AR' = first name A, middle name R); null otherwise
   initials text,
-  constraint posts_initials_check check (initials is null or initials ~ '^[A-Z]{2}$')
+  constraint posts_initials_check check (initials is null or initials ~ '^[A-Z]{2}$'),
+  -- Post now / Schedule to Facebook (021): the Facebook post, its link, and fb_state, the guard against posting twice
+  -- ('publishing' is set by one conditional update before the app talks to Facebook; see the migration for the states)
+  fb_post_id text,
+  fb_permalink text,
+  fb_state text,
+  fb_scheduled_for timestamptz,
+  fb_attempt_at timestamptz,
+  fb_error text,
+  constraint posts_fb_state_check check (fb_state is null or fb_state in ('publishing', 'published', 'scheduled', 'failed', 'unsure')),
+  constraint posts_fb_error_len check (fb_error is null or char_length(fb_error) <= 500)
 );
 create index if not exists posts_series on public.posts (series_id) where series_id is not null;
 

@@ -188,6 +188,37 @@ about 5 million requests a month just waiting). Any order is safe; this one is t
 
 What changes for you: when the PC has had nothing to do for a minute, a new card or reel step starts within about 15 s (it used to be 3 s); after that the PC is back to fast polling. Turning the PC off shows "PC offline" after about 3 minutes (it was 45 s). `HEARTBEAT_SECONDS` in `worker/worker.env` is not used any more (you can leave it or delete it).
 
+## Posting to Facebook (Post now / Schedule)
+The post page can send the selected cards straight to your Facebook Page as one post, now or at a time you pick. It only
+posts: no comments, likes or anything else. It uses Facebook's official Graph API, which Meta allows ("authorized
+routes"); research: `reports/Facebook auto posting monetization risk.md`.
+
+1. Supabase **SQL Editor**: paste and run `supabase/migrations/021_facebook_posting.sql` (safe to run again).
+2. **Make the Meta app** at https://developers.facebook.com > My Apps > Create app:
+   - Use case **"Manage everything on your Page"**, app type Business. You are the only user, so **no App Review** is needed.
+   - Permissions: `pages_manage_posts`, `pages_read_engagement`, `pages_show_list`.
+   - App settings > Basic: add an app icon, a **Privacy policy URL** and a **Data deletion instructions URL** (a simple page
+     of your own is fine). Copy the **App secret**.
+   - Turn on **Require App Secret** (App settings > Advanced).
+   - Switch the app from Development to **Live**. Important: posts made while the app is in Development mode are visible
+     only to you, not to your followers.
+3. **Get a long-lived Page token**: Graph API Explorer > your app > "Get User Access Token" with the three permissions >
+   Access Token Debugger > **Extend Access Token** (about 60 days) > in the Explorer, call `me/accounts` with that token:
+   copy your Page's `id` and `access_token` (this Page token does not expire, but it stops working if you change your
+   Facebook password or lose your role on the Page; then make a new one).
+4. **Vercel** > Settings > Environment Variables (tick **Sensitive**, Production and Preview): `FACEBOOK_PAGE_ID`,
+   `FACEBOOK_PAGE_TOKEN`, `FACEBOOK_APP_SECRET`. Redeploy.
+5. Settings > **Facebook** > **Check connection**: it shows your Page's name.
+6. **First test on a throwaway Page** (make a test Page, put its id + token in the variables, test, then switch back):
+   post a 14-card album, schedule one more than a day ahead, and look at both from a logged-out browser.
+
+How it behaves: **Post now** asks first, then posts the selected cards in your upload order (closing card last) with the
+caption as it is in the box, and marks the post posted. **Schedule** picks a time 15 minutes to 29 days ahead (Manila);
+Facebook holds the post, so your PC and the app can be off; **Cancel schedule** deletes it on Facebook. The app never
+posts the same album twice: if Facebook doesn't answer while the post is being created, it says it is **unsure** and
+waits for you to check your Page (and press **Retry anyway** only if the post isn't there). **Save to phone** and the zip
+still work as before.
+
 ## When something is wrong
 - Header dot red, "PC offline": turn on the PC. The worker starts at login. **Generate** is disabled (the button says why) until the PC is back. "PC offline" shows 3 minutes after the PC stopped.
 - Amber dot, "ComfyUI closed": open ComfyUI Desktop. **Generate** stays disabled until then; text edits and Re-stamp still work.

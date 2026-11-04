@@ -33,6 +33,15 @@ ordered and saved to the phone with the caption.
 
 Setup: `docs/SETUP.md`. Design: `docs/superpowers/specs/2026-10-04-uniquenames-posting-design.md`, v2 changes: `docs/superpowers/specs/2026-10-05-v2-feedback-design.md`.
 
+## Post now / Schedule to Facebook (2026-11-04)
+The post page sends the selected cards straight to the Facebook Page as ONE multi-photo post (upload order, closing card
+last, the caption as it is in the box), now or at a picked time (15 minutes to 29 days ahead, Manila; Facebook holds a
+scheduled post, so the PC and the app can be off). Posting only, through the official Graph API v26.0, every call signed
+with `appsecret_proof`. The one safeguard is never posting the same album twice: `posts.fb_state` is taken with one
+conditional update before anything is sent, and a post whose creation got no answer is "unsure" until the owner checks
+the Page. Needs migration `021_facebook_posting.sql` and three Vercel variables (`docs/SETUP.md`, "Posting to Facebook").
+Design: `docs/superpowers/specs/2026-11-04-facebook-posting-design.md`; research: `reports/Facebook auto posting monetization risk.md`.
+
 ## Story shots (2026-10-18)
 Each post is now shot the way a photographer works through a session: one set, and the camera moves in. About 80% of
 frames are close-ups or macros, each with ONE hero: the child's face, a detail (hands, feet), or one prop from the

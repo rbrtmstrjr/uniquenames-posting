@@ -38,6 +38,12 @@ export function fakeSupabase(respond: Respond) {
       return Promise.resolve({ data: r.error ? null : (r.data ?? { path }), error: r.error ?? null });
     },
     remove: (paths: string[]) => { removed.push({ bucket, paths }); return Promise.resolve({ data: [], error: null }); },
+    // Answered as { table: "storage:<bucket>", ops: [["createSignedUrls", paths, expiresIn]] }; default: one URL per path.
+    createSignedUrls: (paths: string[], expiresIn: number) => {
+      const r = respond({ table: `storage:${bucket}`, ops: [["createSignedUrls", paths, expiresIn]] }) ?? {};
+      const data = r.data ?? (r.error ? null : paths.map((p) => ({ path: p, signedUrl: `https://signed.example/${bucket}/${p}`, error: null })));
+      return Promise.resolve({ data, error: r.error ?? null });
+    },
     list: (prefix: string) => {
       const r = respond({ table: `storage:${bucket}`, ops: [["list", prefix]] }) ?? {};
       return Promise.resolve({ data: r.data ?? [], error: r.error ?? null });

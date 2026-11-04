@@ -33,6 +33,7 @@ import { postLabel } from "@/lib/series/letter";
 import { useUndoableDelete } from "@/components/cards/use-undoable-delete";
 import type { PostFonts } from "@/lib/fonts/post-fonts";
 import { RestampDialog } from "./restamp-dialog";
+import { FacebookPanel } from "./facebook-panel";
 
 // The owner's order, with the closing card (010) always last.
 const byOrder = cardOrder;
@@ -59,7 +60,11 @@ function Sortable({ id, name, locked, children }: { id: string; name: string; lo
   );
 }
 
-export function PostDetail({ post: initialPost, theme, initialCards, settingsFonts }: { post: PostRow; theme: ThemeRow; initialCards: CardRow[]; settingsFonts: PostFonts }) {
+export function PostDetail({ post: initialPost, theme, initialCards, settingsFonts, facebookConnected = false }: {
+  post: PostRow; theme: ThemeRow; initialCards: CardRow[]; settingsFonts: PostFonts;
+  /** The Facebook keys are set on the server (Post now / Schedule work). */
+  facebookConnected?: boolean;
+}) {
   const router = useRouter();
   const params = useSearchParams();
   const { health } = useWorkerContext();
@@ -72,6 +77,9 @@ export function PostDetail({ post: initialPost, theme, initialCards, settingsFon
   const initialPostRows = useMemo(() => [initialPost], [initialPost]);
   const [posts, setPosts] = useRealtimeRows<PostRow>("posts", initialPostRows, { key: `post-row-${initialPost.id}`, filter: `id=eq.${initialPost.id}` });
   const post = posts[0] ?? initialPost;
+  // The caption as it is in the box (Post now / Schedule send exactly this).
+  const [captionDraft, setCaptionDraft] = useState(initialPost.caption);
+  const patchPost = useCallback((p: Partial<PostRow>) => setPosts((prev) => prev.map((x) => (x.id === initialPost.id ? { ...x, ...p } : x))), [setPosts, initialPost.id]);
   const { hidden, remove: deleteCard } = useUndoableDelete();
   const [openId, setOpenId] = useState<string | null>(params.get("card"));
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -237,10 +245,14 @@ export function PostDetail({ post: initialPost, theme, initialCards, settingsFon
         </Panel>
 
         <div className="space-y-4 lg:sticky lg:top-20 lg:self-start">
-          <Panel title="Save for Facebook">
+          <Panel title="Facebook">
             <div className="space-y-4">
-              <SaveActions post={post} cards={visible} caption={post.caption} />
-              <CaptionBox postId={post.id} initial={post.caption} />
+              <FacebookPanel post={post} cards={visible} caption={captionDraft} connected={facebookConnected} onPatch={patchPost} />
+              <div className="space-y-2 border-t border-line pt-4">
+                <p className="text-xs font-bold uppercase tracking-[.08em] text-muted">Or save and upload yourself</p>
+                <SaveActions post={post} cards={visible} caption={post.caption} />
+              </div>
+              <CaptionBox postId={post.id} initial={post.caption} onTextChange={setCaptionDraft} />
             </div>
           </Panel>
           {!hasCta && (
