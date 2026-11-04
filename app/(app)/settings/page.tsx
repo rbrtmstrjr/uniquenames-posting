@@ -4,6 +4,8 @@ import { createClient } from "@/lib/supabase/server";
 import type { SettingsRow } from "@/lib/db/types";
 import { SettingsForm } from "@/components/settings/settings-form";
 import { WorkerCard } from "@/components/settings/worker-card";
+import { FacebookCard } from "@/components/settings/facebook-card";
+import { facebookConfig } from "@/lib/facebook/graph";
 import { PageHeader } from "@/components/ui/page-header";
 import type { PreviewSample } from "@/components/settings/card-text";
 import { getVoices } from "@/lib/data/voices";
@@ -47,7 +49,10 @@ export default async function SettingsPage() {
       </nav>
       <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
         <SettingsForm initial={data as SettingsRow} sample={sample} voices={voices} themes={themes} />
-        <div className="lg:sticky lg:top-20 lg:self-start"><WorkerCard /></div>
+        <div className="space-y-4 lg:sticky lg:top-20 lg:self-start">
+          <WorkerCard />
+          <FacebookCard connected={facebookConfig() !== null} />
+        </div>
       </div>
     </>
   );

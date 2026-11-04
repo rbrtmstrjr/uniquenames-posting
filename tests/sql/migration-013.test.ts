@@ -50,7 +50,7 @@ describe("013_letter_posts.sql on the live schema (v1 + 002..012)", () => {
   });
 });
 
-describe("fresh schema.sql matches v1 + 002..013 (+ 017) (posts)", () => {
+describe("fresh schema.sql matches v1 + 002..013 (+ 017, 021) (posts)", () => {
   const shape = async (db: PGlite) => ({
     columns: (await db.query(`select column_name, data_type, is_nullable, column_default from information_schema.columns
       where table_schema='public' and table_name='posts' order by column_name`)).rows,
@@ -61,6 +61,7 @@ describe("fresh schema.sql matches v1 + 002..013 (+ 017) (posts)", () => {
   it("has the same posts columns, constraints and indexes", async () => {
     const db = await migratedDb();
     await db.exec(stripSupabase(read("supabase", "migrations", "017_initials_posts.sql")));
+    await db.exec(stripSupabase(read("supabase", "migrations", "021_facebook_posting.sql"))); // 021: posts.fb_* (Post now / Schedule)
     const want = await shape(db);
     expect((want.columns as { column_name: string }[]).map((c) => c.column_name)).toContain("letter");
     expect(await shape(await freshDb())).toEqual(want);

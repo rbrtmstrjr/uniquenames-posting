@@ -7,8 +7,13 @@ import { Textarea } from "@/components/ui/shadcn/textarea";
 import { rewriteCaptionAction, updateCaptionAction } from "@/lib/actions/posts";
 import { callAction, optimistic } from "@/lib/actions/call";
 
-export function CaptionBox({ postId, initial }: { postId: string; initial: string }) {
+export function CaptionBox({ postId, initial, onTextChange }: {
+  postId: string; initial: string;
+  /** The text as it is in the box now (Post now / Schedule send exactly this). */
+  onTextChange?: (text: string) => void;
+}) {
   const [text, setText] = useState(initial);
+  useEffect(() => { onTextChange?.(text); }, [text, onTextChange]);
   const [saved, setSaved] = useState(initial);
   const [copied, setCopied] = useState(false);
   const [saving, setSaving] = useState(false);

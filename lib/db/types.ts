@@ -47,7 +47,12 @@ export interface PostRow {
   letter?: string | null;
   /** Migration 017 (absent before it runs): a post by initials' two capitals ('AR' = first name A, middle name R); null otherwise. */
   initials?: string | null;
+  /** Migration 021 (absent before it runs): Post now / Schedule to Facebook. fb_state guards against posting twice. */
+  fb_post_id?: string | null; fb_permalink?: string | null; fb_state?: FacebookState | null;
+  fb_scheduled_for?: string | null; fb_attempt_at?: string | null; fb_error?: string | null;
 }
+/** publishing = sending now; failed = Facebook said no before the post existed (safe to retry); unsure = no answer. */
+export type FacebookState = "publishing" | "published" | "scheduled" | "failed" | "unsure";
 export interface CardRow {
   id: string; post_id: string | null; theme_id: string; kind: CardKind; position: number; name_id: string | null;
   name: string; meaning: string; shot: string; prompt: string; seed: number; status: CardStatus; error: string | null;
