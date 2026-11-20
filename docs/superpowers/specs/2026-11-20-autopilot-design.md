@@ -59,8 +59,10 @@ Owner decisions (2026-11-20):
      A meaning that is not the standard accepted one is corrected (or the name fails if it has none).
   3. Short of the target: ask the AI for more (the existing By letter suggestions; for a name theme, the existing name
      suggestions with the theme as the wish), then parent-check those. At most 2 extra rounds.
-  4. New names that pass are saved to Names (available, then used by the post as usual). Saved names that fail are set
-     to `skip` with the reason ("Skipped by Autopilot: hard to say"); nothing is deleted and the owner can restore them.
+  4. New names that pass are saved to Names (available, then used by the post as usual). Saved names that fail the
+     parent check are set to `skip` with the reason ("Skipped by Autopilot: hard to say"); nothing is deleted and the
+     owner can restore them. A saved name that is fine but does not fit this post (another theme, too close to another
+     name in the post) is simply not used.
 - A post needs at least **8** good names. Fewer after the extra rounds: the post is **held** ("needs names for S").
 
 ### Photos: checked one by one
@@ -72,9 +74,10 @@ Owner decisions (2026-11-20):
   stamped name covering the baby's face; an extra baby or stray body parts.
   Still-life cards (no baby, by design) are judged on the same rules that apply to them.
 - A failed card is **remade**: new seed, same shot (the existing New picture path). Up to **2 remakes** per card.
-- When every card of a post has passed, a **look-alike check** sees all the post's cards together (smaller copies) and
-  names cards that look too alike (same pose, angle and props). Each named card is remade once; the remade cards get the
-  normal check, not a second look-alike round.
+- When every card of a post has passed, a **look-alike check** sees all the post's cards together and names cards that
+  look too alike (same pose, angle and props), at most 3. Each named card is remade once; the remade cards get the
+  normal check, not a second look-alike round. If the look-alike check itself cannot run, it is skipped (each card was
+  already checked on its own).
 - A card that still fails after its remakes is unselected (kept, not uploaded). The post goes out with fewer cards if it
   still has at least 8 name cards; otherwise it is **held**.
 - A check that cannot run (AI error, refusal, timeout) counts as not passed: the card is remade once; if it still cannot
@@ -97,8 +100,8 @@ with its reason. The run continues with the next post.
 - **Website (Vercel):** all decisions. A server route `POST /api/autopilot/tick` does the next bounded step(s) of the
   active run and returns. All AI calls, Facebook calls and database writes happen there. It reuses createPost (with
   chosen names), the letter and name suggestions, New picture, the AI caption and the Facebook schedule core.
-- **PC worker:** makes the cards as today, and is the run's clock. While a run is active, it calls the tick route about
-  every 30 seconds, and right after finishing a card of an Autopilot post. It learns that a run is active from its
+- **PC worker:** makes the cards as today, and is the run's clock. While a run is active, a small background thread
+  calls the tick route about every 30 seconds (also while a card is being made). It learns that a run is active from its
   normal poll (`claim_next_job` answers with an `autopilot` flag), so on days without a run nothing changes.
 - **One post at a time:** a new post is created only when no Autopilot post is still picking names and at most one is
   making cards, so remakes are not stuck behind a long queue.
@@ -120,10 +123,11 @@ Every step is safe to repeat: a tick that dies halfway is finished by the next o
 - `settings.autopilot_name_themes` text: one name theme per line, in order (starter list as the default).
 - `posts.name_theme` text: the label of a name-theme post (null otherwise), like `posts.letter`.
 - `autopilot_runs`: id, status (`running` / `waiting` / `paused` / `done` / `stopped`), days, first_day,
-  created_at, finished_at, tick_until, message (why it waits or stopped), summary jsonb, input/output tokens and cost.
+  created_at, finished_at, tick_until, message (why it waits or paused), events jsonb (the run's activity: names added
+  or skipped, cards remade or removed, posts scheduled or held; the summary is built from it), input/output tokens.
 - `autopilot_items`: one row per planned post: run_id, day, slot (`morning` / `afternoon`), gender, scheduled_for
-  (the random time), letter or name_theme, post_id (once created), state (`planned` / `naming` / `making` /
-  `checking` / `scheduled` / `held`), note.
+  (the random time), letter or name_theme, name_count, post_id (once created), state (`planned` / `naming` /
+  `making` / `checking` / `scheduled` / `held`), lookalike_done, attempts (name-picking tries), note.
 - `cards`: check_state (`pending` / `passed` / `failed` / `removed`), check_note, remakes (count).
 - `claim_next_job` also returns `autopilot: true` while a run is `running` or `waiting`.
 - RLS: the owner reads and writes as for other tables; the tick route uses the service role.
