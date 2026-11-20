@@ -24,6 +24,7 @@ import re
 import threading
 import time
 
+import autopilot
 import photo_look
 from jobs import HEARTBEAT_SECONDS, Runner, idle_poll_seconds
 from reels import ReelRunner
@@ -38,7 +39,7 @@ REQUIRED = ("SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY")
 
 
 class Page:
-    def __init__(self, id, label, url, key, output_root, reels_dir, cache_dir, preview_cast, source, look_cfg=None):
+    def __init__(self, id, label, url, key, output_root, reels_dir, cache_dir, preview_cast, source, look_cfg=None, autopilot_cfg=None):
         self.id = id                      # also the ComfyUI namespace: <id>/raw..., client id <id>-worker
         self.label = label
         self.url = url
@@ -49,6 +50,7 @@ class Page:
         self.preview_cast = preview_cast  # theme-preview moment / cast (None = today's)
         self.source = source              # "worker.env" or "pages\<file>.env"
         self.look_cfg = look_cfg or {}    # this page's own PHOTO_VIBRANCE / PHOTO_TEXTURE (2.7.2; unset = worker.env's)
+        self.autopilot_cfg = autopilot_cfg or {}  # AUTOPILOT_URL / AUTOPILOT_SECRET (2.9.0; unset = Autopilot off)
 
     def __repr__(self):
         return "Page(%s, %s)" % (self.id, self.source)
@@ -72,7 +74,8 @@ def _page(cfg, page_id, here, source):
     return Page(page_id, label, cfg["SUPABASE_URL"].strip(), cfg["SUPABASE_SERVICE_ROLE_KEY"].strip(),
                 (cfg.get("OUTPUT_ROOT") or "").strip() or default_output_root(label),
                 (cfg.get("REELS_OUTPUT") or "").strip() or None, cache, cast or None, source,
-                {k: cfg[k] for k in photo_look.KEYS if (cfg.get(k) or "").strip()})
+                {k: cfg[k] for k in photo_look.KEYS if (cfg.get(k) or "").strip()},
+                autopilot_cfg={k: cfg[k] for k in ("AUTOPILOT_URL", "AUTOPILOT_SECRET") if (cfg.get(k) or "").strip()})
 
 
 def discover_pages(here, base_cfg):
@@ -129,7 +132,8 @@ def build_runner(page, base_cfg, log, prefix=False):
     # minutes without one, so an old worker.env's HEARTBEAT_SECONDS=15 is not used any more.
     return Runner(supa, renderer, page.output_root, page.cache_dir,
                   float(base_cfg.get("POLL_SECONDS", "3")), HEARTBEAT_SECONDS,
-                  log=plog, reels=reels, look=photo_look.settings(page.look_cfg, base_cfg, log=plog))
+                  log=plog, reels=reels, look=photo_look.settings(page.look_cfg, base_cfg, log=plog),
+                  autopilot=autopilot.from_env(page.autopilot_cfg, log=plog))
 
 
 class _Slot:
@@ -193,6 +197,7 @@ class MultiRunner:
         for slot in self.slots:
             t = threading.Thread(target=slot.runner._heartbeat_loop, name="heartbeat-" + slot.id, daemon=True)
             t.start()
+            slot.runner.start_autopilot()
             threads.append(t)
         return threads
 
