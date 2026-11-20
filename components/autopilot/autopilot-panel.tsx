@@ -18,6 +18,13 @@ import { summarize } from "@/lib/autopilot/summary";
 const ACTIVE = new Set(["running", "waiting", "paused"]);
 const STATE_TEXT: Record<AutopilotItemState, string> = { planned: "Waiting", naming: "Picking names", making: "Making cards", checking: "Checking", scheduled: "Scheduled", held: "Held" };
 const STATE_TONE: Record<AutopilotItemState, "ok" | "warn" | "muted" | "accent"> = { planned: "muted", naming: "accent", making: "accent", checking: "accent", scheduled: "ok", held: "warn" };
+/** " done/total" while cards are being made or checked; nothing when there are no cards yet. */
+function progress(state: AutopilotItemState, st: CardStats | undefined): string {
+  if (!st || st.total === 0) return "";
+  if (state === "making") return ` ${st.done}/${st.total}`;
+  if (state === "checking") return ` ${st.passed}/${st.total}`;
+  return "";
+}
 const TIME = new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit", timeZone: "Asia/Manila" });
 
 export function AutopilotPanel({ run, items, stats }: { run: AutopilotRunRow | null; items: AutopilotItemRow[]; stats: Record<string, CardStats> }) {
@@ -83,10 +90,13 @@ function StartView({ last, items }: { last: AutopilotRunRow | null; items: Autop
 function LastRun({ run, items }: { run: AutopilotRunRow; items: AutopilotItemRow[] }) {
   const s = summarize(run, items);
   return (
+    <>
+    <NeedsYou items={items.filter((i) => i.state === "held")} />
     <Panel title={run.status === "done" ? "Last run: finished" : "Last run: stopped"}>
       <p className="text-sm text-ink">{s.scheduled} scheduled · {s.held} held · {s.namesAdded} names added · {s.namesSkipped} names skipped · {s.remade} cards remade · {s.removed} removed · checks cost about ${s.costUsd.toFixed(2)}</p>
       <Activity run={run} />
     </Panel>
+    </>
   );
 }
 
@@ -111,7 +121,7 @@ function RunView({ run, items, stats }: { run: AutopilotRunRow; items: Autopilot
       <Panel title="Autopilot" action={<Button variant="ghost" size="sm" onClick={() => setAsk(true)} disabled={busy !== null}><Square className="size-4" /> Stop</Button>}>
         {run.status === "paused" ? (
           <div className="mb-3 space-y-2 rounded-xl border border-bad/40 bg-bad/10 p-3 text-sm text-bad" role="alert">
-            <p>{run.message}</p>
+            <p>{run.message || "Autopilot paused. Press Resume to carry on."}</p>
             <Button size="sm" onClick={() => void act("resume")} loading={busy === "resume"}><RotateCw className="size-4" /> Resume</Button>
           </div>
         ) : run.status === "waiting" ? (
@@ -132,7 +142,7 @@ function RunView({ run, items, stats }: { run: AutopilotRunRow; items: Autopilot
                       <li key={i.id} className="flex flex-wrap items-center gap-2 text-sm">
                         <span className="w-20 shrink-0 tabular-nums text-muted">{TIME.format(new Date(i.scheduled_for))}</span>
                         <span className="font-semibold capitalize text-ink">{i.gender}</span>
-                        <Badge tone={STATE_TONE[i.state]}>{STATE_TEXT[i.state]}{(i.state === "making" || i.state === "checking") && st ? ` · ${st.passed}/${st.total} checked` : ""}</Badge>
+                        <Badge tone={STATE_TONE[i.state]}>{STATE_TEXT[i.state]}{progress(i.state, st)}</Badge>
                         {st && st.remade > 0 && <span className="text-xs text-muted">{st.remade} remade</span>}
                         {i.post_id && <Link href={`/posts/${i.post_id}`} className="text-xs font-semibold text-accent underline-offset-2 hover:underline">Open post</Link>}
                         {i.note && i.state !== "scheduled" && i.state !== "held" && <p className="w-full text-xs text-muted">{i.note}</p>}
@@ -145,20 +155,7 @@ function RunView({ run, items, stats }: { run: AutopilotRunRow; items: Autopilot
           })}
         </ol>
       </Panel>
-      {held.length > 0 && (
-        <section aria-label="Needs you">
-          <Panel title="Needs you">
-            <ul className="space-y-2 text-sm">
-              {held.map((i) => (
-                <li key={i.id}>
-                  <span className="font-semibold text-ink">{dayLabel(i.day)} · {labelText(i)} · <span className="capitalize">{i.gender}</span>:</span> <span className="text-muted">{i.note}</span>
-                  {i.post_id && <> <Link href={`/posts/${i.post_id}`} className="font-semibold text-accent hover:underline">Open post</Link></>}
-                </li>
-              ))}
-            </ul>
-          </Panel>
-        </section>
-      )}
+      <NeedsYou items={held} />
       <Panel title="Activity"><Activity run={run} /></Panel>
       <Dialog open={ask} onOpenChange={(o) => !o && setAsk(false)} title="Stop Autopilot?"
         description="Nothing new is made or scheduled. Posts already scheduled stay on Facebook (cancel one on its post page if you want). Posts being made stay on Posts, not scheduled.">
@@ -168,6 +165,24 @@ function RunView({ run, items, stats }: { run: AutopilotRunRow; items: Autopilot
         </div>
       </Dialog>
     </div>
+  );
+}
+
+function NeedsYou({ items }: { items: AutopilotItemRow[] }) {
+  if (items.length === 0) return null;
+  return (
+    <section aria-label="Needs you">
+      <Panel title="Needs you">
+        <ul className="space-y-2 text-sm">
+          {items.map((i) => (
+            <li key={i.id}>
+              <span className="font-semibold text-ink">{dayLabel(i.day)} · {labelText(i)} · <span className="capitalize">{i.gender}</span>:</span> <span className="text-muted">{i.note}</span>
+              {i.post_id && <> <Link href={`/posts/${i.post_id}`} className="font-semibold text-accent hover:underline">Open post</Link></>}
+            </li>
+          ))}
+        </ul>
+      </Panel>
+    </section>
   );
 }
 

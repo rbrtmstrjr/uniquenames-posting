@@ -24,14 +24,14 @@ describe("getAutopilotData", () => {
       if (q.table === "autopilot_runs") return { data: [{ id: "r1" }] };
       if (q.table === "autopilot_items") return { data: [{ id: "i1", post_id: "p1" }, { id: "i2", post_id: null }] };
       if (q.table === "cards") return { data: [
-        { post_id: "p1", check_state: "passed", remakes: 0 }, { post_id: "p1", check_state: "passed", remakes: 1 },
-        { post_id: "p1", check_state: "removed", remakes: 2 }, { post_id: "p1", check_state: null, remakes: 0 }] };
+        { post_id: "p1", status: "done", check_state: "passed", remakes: 0 }, { post_id: "p1", status: "done", check_state: "passed", remakes: 1 },
+        { post_id: "p1", status: "done", check_state: "removed", remakes: 2 }, { post_id: "p1", status: "queued", check_state: null, remakes: 0 }] };
       return undefined;
     };
     const r = await getAutopilotData();
     expect(r.needs022).toBe(false);
     expect(r.items).toHaveLength(2);
     expect(r.nameThemes).toBe("Biblical");
-    expect(r.stats).toEqual({ p1: { total: 4, passed: 2, remade: 2, removed: 1 } });
+    expect(r.stats).toEqual({ p1: { total: 4, done: 3, passed: 2, remade: 2, removed: 1 } });
   });
 });

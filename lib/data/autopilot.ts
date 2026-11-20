@@ -4,7 +4,7 @@ import type { AutopilotItemRow, AutopilotRunRow, CardCheckState, SettingsRow } f
 import { DEFAULT_NAME_THEMES } from "@/lib/autopilot/name-themes";
 import { missing022 } from "@/lib/autopilot/prepare";
 
-export interface CardStats { total: number; passed: number; remade: number; removed: number }
+export interface CardStats { total: number; done: number; passed: number; remade: number; removed: number }
 
 /** The Autopilot page: the latest run, its planned posts, card counts per post, the name-theme list. */
 export async function getAutopilotData(): Promise<{ needs022: boolean; run: AutopilotRunRow | null; items: AutopilotItemRow[]; stats: Record<string, CardStats>; nameThemes: string }> {
@@ -27,11 +27,12 @@ export async function getAutopilotData(): Promise<{ needs022: boolean; run: Auto
   const postIds = items.flatMap((i) => (i.post_id ? [i.post_id] : []));
   const stats: Record<string, CardStats> = {};
   if (postIds.length) {
-    const { data: cards, error: cardsErr } = await sb.from("cards").select("post_id, check_state, remakes").in("post_id", postIds);
+    const { data: cards, error: cardsErr } = await sb.from("cards").select("post_id, status, check_state, remakes").in("post_id", postIds);
     if (cardsErr) throw new Error(`Could not load Autopilot: ${cardsErr.message}`);
-    for (const c of (cards ?? []) as { post_id: string; check_state: CardCheckState | null; remakes: number }[]) {
-      const s = (stats[c.post_id] ??= { total: 0, passed: 0, remade: 0, removed: 0 });
+    for (const c of (cards ?? []) as { post_id: string; status: string; check_state: CardCheckState | null; remakes: number }[]) {
+      const s = (stats[c.post_id] ??= { total: 0, done: 0, passed: 0, remade: 0, removed: 0 });
       s.total++;
+      if (c.status === "done") s.done++;
       if (c.check_state === "passed") s.passed++;
       if (c.check_state === "removed") s.removed++;
       if (c.remakes > 0) s.remade++;
