@@ -19,6 +19,8 @@ export interface PlanInput {
     age?: AgeChoice | null;
     /** A post by letter: only names starting with it (for two-word names, the first name). */
     letter?: string | null;
+    /** Autopilot: exactly these available names, all of them (count must be null). */
+    nameIds?: string[] | null;
   };
   names: NameRow[]; themes: ThemeRow[];
   settings: Pick<SettingsRow, "caption_template" | "hashtags" | "min_images" | "max_images">;
@@ -49,7 +51,13 @@ export function nextTheme(themes: ThemeRow[], gender: Gender): ThemeRow | undefi
 export function planPost(input: PlanInput): PlanResult {
   const { request: r, settings: s } = input;
   const label = r.gender;
-  const pool = availablePool(input.names, r.gender, r.style).filter((n) => !r.letter || startsWith(n.name, r.letter));
+  const only = r.nameIds?.length ? new Set(r.nameIds) : null;
+  const pool = availablePool(input.names, r.gender, r.style)
+    .filter((n) => (!r.letter || startsWith(n.name, r.letter)) && (!only || only.has(n.id)));
+  if (only && pool.length < only.size) {
+    const gone = only.size - pool.length;
+    return { ok: false, reason: `${gone} of the chosen names ${gone === 1 ? "is" : "are"} no longer available.` };
+  }
   if (r.letter) {
     const need = r.count ?? s.min_images;
     if (pool.length < need) {
@@ -70,7 +78,7 @@ export function planPost(input: PlanInput): PlanResult {
     if (!theme) return { ok: false, reason: `No unused ${label} theme is left. Add a theme on the Themes page.` };
   }
   const rng = seededRandom(hashSeed(`${r.postDate}|${r.gender}|${r.style}`));
-  const want = r.count ?? s.min_images + Math.floor(rng() * (s.max_images - s.min_images + 1));
+  const want = only ? pool.length : r.count ?? s.min_images + Math.floor(rng() * (s.max_images - s.min_images + 1));
   if (r.count !== null && (r.count < s.min_images || r.count > s.max_images)) {
     return { ok: false, reason: `Number of cards must be ${s.min_images} to ${s.max_images}.` };
   }

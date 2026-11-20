@@ -4,14 +4,13 @@ import type { CardRow } from "@/lib/db/types";
 import { validateName } from "./validate";
 import { nextSeed, normalizeName, restampMode, styleOf } from "./helpers";
 import { generateLockReason } from "./generate-guard";
+import { REQUEUE } from "@/lib/cards/remake";
 import { fail, requireOwner, type ActionResult } from "./result";
 import { textChanged } from "@/lib/status/card-dialog";
 import { resolveCta, validateCtaMessage } from "@/lib/cta/messages";
 import type { Gender } from "@/lib/db/types";
 
 type SB = Awaited<ReturnType<typeof createClient>>;
-
-const REQUEUE = { status: "queued", claimed_at: null, started_at: null, finished_at: null, error: null, attempts: 0 };
 
 /** The card plus the Generate lock (worker health), read in parallel. */
 async function getCard(id: string) {
