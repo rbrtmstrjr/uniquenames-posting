@@ -50,7 +50,8 @@ export async function startAutopilotAction(days: number): Promise<ActionResult<{
     run_id: runId, day: i.day, slot: i.slot, gender: i.gender, scheduled_for: i.scheduledFor, letter: i.letter, name_theme: i.nameTheme, name_count: i.nameCount,
   })));
   if (itemsErr) {
-    await sb.from("autopilot_runs").delete().eq("id", runId);
+    const { error: undoErr } = await sb.from("autopilot_runs").delete().eq("id", runId);
+    if (undoErr) return fail(`Could not save the plan: ${itemsErr.message}. Also could not undo the started run (${undoErr.message}): press Stop on the Autopilot page before starting again.`);
     return fail(`Could not save the plan: ${itemsErr.message}`);
   }
   revalidatePath("/autopilot");
@@ -62,9 +63,10 @@ export async function stopAutopilotAction(runId: string): Promise<ActionResult> 
   await requireOwner();
   if (!UUID_RE.test(runId ?? "")) return fail("Run not found.");
   const sb = await createClient();
-  const { error } = await sb.from("autopilot_runs").update({ status: "stopped", message: null, finished_at: new Date().toISOString() })
+  const { data, error } = await sb.from("autopilot_runs").update({ status: "stopped", message: null, finished_at: new Date().toISOString() })
     .eq("id", runId).in("status", ["running", "waiting", "paused"]).select("id");
   if (error) return fail(error.message);
+  if (!data?.length) return fail("That run is no longer active.");
   revalidatePath("/autopilot");
   return { ok: true };
 }
@@ -74,8 +76,9 @@ export async function resumeAutopilotAction(runId: string): Promise<ActionResult
   await requireOwner();
   if (!UUID_RE.test(runId ?? "")) return fail("Run not found.");
   const sb = await createClient();
-  const { error } = await sb.from("autopilot_runs").update({ status: "running", message: null }).eq("id", runId).eq("status", "paused").select("id");
+  const { data, error } = await sb.from("autopilot_runs").update({ status: "running", message: null }).eq("id", runId).eq("status", "paused").select("id");
   if (error) return fail(error.message);
+  if (!data?.length) return fail("That run isn't paused.");
   revalidatePath("/autopilot");
   return { ok: true };
 }

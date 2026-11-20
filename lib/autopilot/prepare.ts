@@ -5,7 +5,7 @@ import { dayLabel, firstDay, labelText, lastFacebook, planProblems, planRun, typ
 import { parseNameThemes } from "./name-themes";
 
 export const NEEDS_022 = "Autopilot needs a database update first: run supabase/migrations/022_autopilot.sql in Supabase.";
-const missing022 = (e: { message: string; code?: string }) => e.code === "PGRST204" || e.code === "42703" || e.code === "42P01" || e.code === "PGRST205" || /schema cache|does not exist/i.test(e.message);
+export const missing022 = (e: { message: string; code?: string }) => e.code === "PGRST204" || e.code === "42703" || e.code === "42P01" || e.code === "PGRST205" || /schema cache|does not exist/i.test(e.message);
 
 export interface RunPreview { range: string; posts: number; days: { day: string; dayLabel: string; label: string }[]; problems: string[] }
 
@@ -14,7 +14,7 @@ export async function preparePlan(sb: SupabaseClient, days: number, rng: () => n
   Promise<{ ok: true; first: string; items: PlannedItem[]; preview: RunPreview } | { ok: false; error: string }> {
   const [posts, settings, themes] = await Promise.all([
     sb.from("posts").select("fb_state, fb_scheduled_for, posted_at, letter, name_theme").in("fb_state", ["scheduled", "published"])
-      .order("posted_at", { ascending: false }).limit(60),
+      .order("posted_at", { ascending: false, nullsFirst: false }).order("fb_scheduled_for", { ascending: false, nullsFirst: false }).limit(60),
     sb.from("settings").select("*").eq("id", 1).single(),
     sb.from("themes").select("gender").eq("status", "available"),
   ]);

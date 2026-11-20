@@ -67,4 +67,34 @@ describe("Autopilot actions", () => {
     expect(await saveNameThemesAction("  Biblical \n\n Soft and cool ")).toEqual({ ok: true });
     expect(op(fake.queries.filter((q) => q.table === "settings" && isUpdate(q)).at(-1)!, "update")![1]).toEqual({ autopilot_name_themes: "Biblical\nSoft and cool" });
   });
+
+  it("says so when stop or resume changed nothing, and filters by status", async () => {
+    await stopAutopilotAction(RUN);
+    const stop = fake.queries.filter((q) => q.table === "autopilot_runs" && isUpdate(q)).at(-1)!;
+    expect(op(stop, "in")!.slice(1)).toEqual(["status", ["running", "waiting", "paused"]]);
+    await resumeAutopilotAction(RUN);
+    const resume = fake.queries.filter((q) => q.table === "autopilot_runs" && isUpdate(q)).at(-1)!;
+    expect(resume.ops.filter((o) => o[0] === "eq").map((o) => o.slice(1))).toContainEqual(["status", "paused"]);
+    const base = respond;
+    respond = (q) => (q.table === "autopilot_runs" && isUpdate(q) ? { data: [] } : base(q));
+    expect(await stopAutopilotAction(RUN)).toEqual({ ok: false, error: "That run is no longer active." });
+    expect(await resumeAutopilotAction(RUN)).toEqual({ ok: false, error: "That run isn't paused." });
+  });
+
+  it("removes the run when the plan cannot be saved, and says so if it cannot", async () => {
+    const base = respond;
+    respond = (q) => (q.table === "autopilot_items" && op(q, "insert") ? { error: { message: "boom" } } : base(q));
+    expect(await startAutopilotAction(2)).toEqual({ ok: false, error: "Could not save the plan: boom" });
+    expect(fake.queries.some((q) => q.table === "autopilot_runs" && op(q, "delete"))).toBe(true);
+    respond = (q) => (q.table === "autopilot_items" && op(q, "insert") ? { error: { message: "boom" } }
+      : q.table === "autopilot_runs" && op(q, "delete") ? { error: { message: "nope" } } : base(q));
+    expect(await startAutopilotAction(2)).toEqual({ ok: false, error: "Could not save the plan: boom. Also could not undo the started run (nope): press Stop on the Autopilot page before starting again." });
+  });
+
+  it("reads the newest Facebook posts first, nulls last", async () => {
+    await previewAutopilotAction(1);
+    const q = fake.queries.find((x) => x.table === "posts")!;
+    expect(q.ops.filter((o) => o[0] === "order").map((o) => o.slice(1))).toEqual([
+      ["posted_at", { ascending: false, nullsFirst: false }], ["fb_scheduled_for", { ascending: false, nullsFirst: false }]]);
+  });
 });
