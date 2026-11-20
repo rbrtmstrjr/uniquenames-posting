@@ -31,8 +31,12 @@ export function autopilotDeps(sb: SupabaseClient): EngineDeps {
     pickNames: (item, hint, deadline) => pickNames({ repo, judge: judgeNames, suggest, rng: Math.random }, item, hint, deadline),
     createPost: (input) => createPostCore(sb, input),
     schedule: async (postId, at) => {
-      const { data } = await sb.from("posts").select("caption").eq("id", postId).maybeSingle();
-      return publishPost(sb, postId, { caption: (data as { caption?: string } | null)?.caption ?? "", scheduledAt: at });
+      const { data, error } = await sb.from("posts").select("caption").eq("id", postId).maybeSingle();
+      const caption = (data as { caption?: unknown } | null)?.caption;
+      if (error || typeof caption !== "string") {
+        return { ok: false, error: "Couldn't read the post's caption, so it was not scheduled.", errorKind: "db" };
+      }
+      return publishPost(sb, postId, { caption, scheduledAt: at });
     },
     remake: (card, extra) => remakeCard(sb, card, extra),
     judgeCard: (card, url) => judgeCard(card, url),

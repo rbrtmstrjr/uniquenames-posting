@@ -37,4 +37,12 @@ describe("the tick route", () => {
     expect(ok.status).toBe(200);
     expect(await ok.json()).toEqual({ ok: true, ran: true, status: "running" });
   });
+  it("answers JSON 500 when the tick throws", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    tick.mockRejectedValueOnce(new Error("boom"));
+    const r = await POST(req(SECRET));
+    expect(r.status).toBe(500);
+    expect(await r.json()).toEqual({ ok: false, error: "The tick failed. It will be tried again." });
+    spy.mockRestore();
+  });
 });

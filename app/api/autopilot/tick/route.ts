@@ -16,5 +16,10 @@ export async function POST(req: Request) {
   if (!keyOk(req.headers.get("x-autopilot-key"), secret)) return NextResponse.json({ ok: false, error: "Wrong key." }, { status: 401 });
   const sb = createAdminClient();
   if (!sb) return NextResponse.json({ ok: false, error: "Set SUPABASE_SERVICE_ROLE_KEY in Vercel." }, { status: 503 });
-  return NextResponse.json({ ok: true, ...(await tick(autopilotDeps(sb))) });
+  try {
+    return NextResponse.json({ ok: true, ...(await tick(autopilotDeps(sb))) });
+  } catch (e) {
+    console.error("autopilot tick route", e);
+    return NextResponse.json({ ok: false, error: "The tick failed. It will be tried again." }, { status: 500 });
+  }
 }
