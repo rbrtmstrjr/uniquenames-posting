@@ -50,6 +50,14 @@ describe("planPost with chosen names", () => {
     const r = planPost({ request: { gender: "girl", style: "single", count: null, postDate: "2026-11-21", nameIds: ["n-Abigail", "n-gone"] }, names, themes: [theme], settings });
     expect(r).toEqual({ ok: false, reason: "1 of the chosen names is no longer available." });
   });
+  it("fails on an empty list of chosen names", () => {
+    const r = planPost({ request: { gender: "girl", style: "single", count: null, postDate: "2026-11-21", nameIds: [] }, names, themes: [theme], settings });
+    expect(r).toEqual({ ok: false, reason: "No names were chosen for this post." });
+  });
+  it("fails when more names are chosen than a post can have", () => {
+    const r = planPost({ request: { gender: "girl", style: "single", count: null, postDate: "2026-11-21", nameIds: names.slice(0, 8).map((n) => n.id) }, names, themes: [theme], settings: { ...settings, max_images: 7 } });
+    expect(r).toEqual({ ok: false, reason: "This post has more chosen names than the 7 cards a post can have." });
+  });
 });
 
 describe("createPostCore for Autopilot", () => {

@@ -51,7 +51,9 @@ export function nextTheme(themes: ThemeRow[], gender: Gender): ThemeRow | undefi
 export function planPost(input: PlanInput): PlanResult {
   const { request: r, settings: s } = input;
   const label = r.gender;
-  const only = r.nameIds?.length ? new Set(r.nameIds) : null;
+  if (r.nameIds != null && !r.nameIds.length) return { ok: false, reason: "No names were chosen for this post." };
+  if (r.nameIds && r.nameIds.length > s.max_images) return { ok: false, reason: `This post has more chosen names than the ${s.max_images} cards a post can have.` };
+  const only = r.nameIds ? new Set(r.nameIds) : null;
   const pool = availablePool(input.names, r.gender, r.style)
     .filter((n) => (!r.letter || startsWith(n.name, r.letter)) && (!only || only.has(n.id)));
   if (only && pool.length < only.size) {
