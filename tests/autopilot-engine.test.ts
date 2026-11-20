@@ -56,7 +56,7 @@ describe("tick", () => {
   it("a name-theme post gets its title and the hint from the settings", async () => {
     const { d } = setup({ items: [item("i1", { letter: null, name_theme: "Biblical" })] });
     await tick(d);
-    expect(d.pickNames).toHaveBeenCalledWith(expect.objectContaining({ id: "i1" }), "names from the Bible");
+    expect(d.pickNames).toHaveBeenCalledWith(expect.objectContaining({ id: "i1" }), "names from the Bible", expect.any(Number));
     expect(d.createPost).toHaveBeenCalledWith(expect.objectContaining({ nameTheme: { title: "Biblical", hint: "names from the Bible" } }));
   });
 
@@ -156,9 +156,96 @@ describe("tick", () => {
   });
 
   it("at most two posts are being made at once", async () => {
-    const { d } = setup({ items: [item("a", { state: "making", post_id: "pa" }), item("b", { state: "making", post_id: "pb" }), item("c")] });
+    // (each post has a card still being made: a post with no cards at all is held, see below)
+    const { d } = setup({ items: [item("a", { state: "making", post_id: "pa" }), item("b", { state: "making", post_id: "pb" }), item("c")],
+      cards: [card("ca", { post_id: "pa", status: "queued" }), card("cb", { post_id: "pb", status: "queued" })] });
     await tick(d);
     expect(d.pickNames).not.toHaveBeenCalled();
+  });
+
+  it("a deleted post (no post id) or a post with no cards is held, and the run can finish", async () => {
+    const gone = setup({ items: [item("i1", { state: "making", post_id: null })] });
+    expect(await tick(gone.d)).toEqual({ ran: true, status: "done" });
+    expect(gone.m.db.items[0]).toMatchObject({ state: "held", note: "The post was deleted. Make it on Today if you still want it." });
+    const empty = setup({ items: [item("i1", { state: "making", post_id: "p1" })] });
+    await tick(empty.d);
+    expect(empty.m.db.items[0]).toMatchObject({ state: "held", note: "The post has no cards left. Make it on Today if you still want it." });
+  });
+
+  it("a selected card with no check state is checked first; nothing is scheduled before it passes", async () => {
+    const judgeCard = vi.fn(async () => fail("skin"));
+    const cards = [...tenCards({ check_state: "passed" }), card("late", { check_state: null, position: 11 })];
+    const { m, d } = setup({ items: [item("i1", { state: "checking", post_id: "p1", lookalike_done: true })], cards }, { judgeCard });
+    await tick(d);
+    expect(judgeCard).toHaveBeenCalledTimes(1);
+    expect(m.db.cards.find((c) => c.id === "late")).toMatchObject({ check_state: "pending", remakes: 1 });
+    expect(d.schedule).not.toHaveBeenCalled();
+    // Unselected cards are not checked and do not block.
+    const un = setup({ items: [item("i1", { state: "checking", post_id: "p1", lookalike_done: true })], cards: [...tenCards({ check_state: "passed" }), card("off", { check_state: null, selected: false })] });
+    await tick(un.d);
+    expect(un.d.schedule).toHaveBeenCalled();
+  });
+
+  it("Stop pressed while names are picked: the post is not made", async () => {
+    const st = setup({ items: [item("i1")] });
+    st.d.pickNames = vi.fn(async () => { st.m.db.runs[0].status = "stopped"; return { kind: "ok" as const, nameIds: ["n0"], usage, added: [], skipped: [] }; });
+    expect(await tick(st.d)).toEqual({ ran: true, status: "stopped" });
+    expect(st.d.createPost).not.toHaveBeenCalled();
+  });
+
+  it("a tick that died after the post was made is finished by the next: no names picked twice", async () => {
+    // Variant 1: the item could not be saved after createPost; the next tick adopts the post by its request id.
+    const a = setup({ items: [item("i1")], cards: tenCards({ check_state: null }) });
+    a.d.createPost = vi.fn(async () => { a.m.db.requestPosts["i1"] = "p1"; return { ok: true as const, postId: "p1" }; });
+    const realUpdate = a.m.repo.updateItem;
+    let failOnce = true;
+    a.m.repo.updateItem = async (id, patch) => { if (failOnce && patch.state === "making") { failOnce = false; throw new Error("db down"); } return realUpdate(id, patch); };
+    await tick(a.d);
+    expect(a.m.db.items[0].state).toBe("naming");
+    expect(a.d.pickNames).toHaveBeenCalledTimes(1);
+    await tick(a.d);
+    expect(a.d.pickNames).toHaveBeenCalledTimes(1);
+    expect(a.m.db.items[0]).toMatchObject({ state: "making", post_id: "p1" });
+    expect(a.m.db.cards.every((c) => c.check_state === "pending")).toBe(true);
+    // Variant 2: marking the cards failed after the item was saved; the next tick marks them and carries on.
+    const b = setup({ items: [item("i1")], cards: tenCards({ check_state: null }) });
+    const realMark = b.m.repo.markCardsPending;
+    let once = true;
+    b.m.repo.markCardsPending = async (id) => { if (once) { once = false; throw new Error("db down"); } return realMark(id); };
+    await tick(b.d);
+    expect(b.m.db.items[0]).toMatchObject({ state: "making", post_id: "p1" });
+    await tick(b.d);
+    expect(b.d.pickNames).toHaveBeenCalledTimes(1);
+    expect(b.m.db.cards.every((c) => c.check_state !== null)).toBe(true);
+  });
+
+  it("an unexpected error: a plain event, the lock is freed, the status is unchanged", async () => {
+    const { m, d } = setup({ items: [item("i1")] });
+    m.repo.items = async () => { throw new Error("connection reset by peer 10.0.0.1"); };
+    expect(await tick(d)).toEqual({ ran: true, status: "running" });
+    expect(m.db.runs[0].tick_until).toBeNull();
+    expect(m.db.runs[0].events.map((e) => e.text)).toEqual(["Something went wrong (a database or network hiccup). Autopilot tries again in a moment."]);
+  });
+
+  it("could not check, at the remake limit: the card fails (post held); a remake is logged", async () => {
+    const judgeCard = vi.fn(async () => ({ ok: false as const, error: "Claude timed out.", usage, stop: false }));
+    const { m, d } = setup({ items: [item("i1", { state: "making", post_id: "p1" })], cards: [card("c0", { remakes: MAX_REMAKES }), card("c1")] }, { judgeCard });
+    await tick(d);
+    expect(m.db.cards[0].check_state).toBe("failed");
+    expect(m.db.cards[1].remakes).toBe(1);
+    expect(m.db.runs[0].events.filter((e) => e.kind === "card_remade")).toHaveLength(1);
+  });
+
+  it("progress is saved mid-tick, and the event trim keeps every counted event", async () => {
+    const many = Array.from({ length: 400 }, (_, i) => ({ at: "", kind: i % 2 ? ("name_added" as const) : ("run" as const), text: String(i) }));
+    const { m, d } = setup({ runs: [run({ events: many })], items: [item("i1", { state: "making", post_id: "p1" })], cards: [card("c0", { status: "queued" })] });
+    const save = vi.spyOn(m.repo, "saveProgress");
+    await tick(d);
+    expect(save).toHaveBeenCalledTimes(2);
+    const ev = m.db.runs[0].events;
+    expect(ev.filter((e) => e.kind === "name_added")).toHaveLength(200);
+    expect(ev.filter((e) => e.kind === "run").length).toBeLessThanOrEqual(50);
+    expect(ev.map((e) => Number(e.text)).filter((n) => !Number.isNaN(n))).toEqual([...ev.map((e) => Number(e.text)).filter((n) => !Number.isNaN(n))].sort((x, y) => x - y));
   });
 
   it("Stop wins: nothing is scheduled and the run stays stopped", async () => {

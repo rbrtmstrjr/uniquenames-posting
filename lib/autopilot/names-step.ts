@@ -10,6 +10,8 @@ import type { AutopilotRepo } from "./repo";
 import { MIN_GOOD_NAMES } from "./plan";
 
 export const EXTRA_ROUNDS = 2;
+/** An extra AI round starts only with this much time left before the deadline. */
+export const ROUND_NEEDS_MS = 100_000;
 /** Asked for on top of the names still missing (the checks drop some). */
 export const ASK_EXTRA = 4;
 /** Most saved names judged for a name-theme post (one Claude batch). */
@@ -21,6 +23,8 @@ export interface NamesDeps {
   judge: (i: { gender: Gender; target: NameTarget; names: Simple[] }) => Promise<JudgeResult<NameVerdict[]>>;
   suggest: (i: { gender: Gender; target: NameTarget; want: number; allNames: string[]; existing: string[] }) => Promise<{ ok: true; names: Simple[] } | { ok: false; error: string }>;
   rng: () => number;
+  /** The clock (ms); tests set it. Defaults to Date.now. */
+  now?: () => number;
 }
 type Base = { usage: Usage; added: string[]; skipped: { name: string; why: string }[] };
 export type NamesOutcome = Base & (
@@ -30,7 +34,7 @@ export type NamesOutcome = Base & (
   | { kind: "stop"; error: string }
 );
 
-export async function pickNames(d: NamesDeps, item: Pick<AutopilotItemRow, "gender" | "letter" | "name_theme" | "name_count">, hint: string | null): Promise<NamesOutcome> {
+export async function pickNames(d: NamesDeps, item: Pick<AutopilotItemRow, "gender" | "letter" | "name_theme" | "name_count">, hint: string | null, deadline?: number): Promise<NamesOutcome> {
   const base: Base = { usage: { input: 0, output: 0 }, added: [], skipped: [] };
   const target: NameTarget = item.letter ? { kind: "letter", letter: item.letter } : { kind: "theme", title: item.name_theme ?? "", hint };
   const label = item.letter ? `letter ${item.letter}` : `"${item.name_theme}"`;
@@ -69,7 +73,9 @@ export async function pickNames(d: NamesDeps, item: Pick<AutopilotItemRow, "gend
   // 2. More from the AI while short, checked the same way.
   const known = new Set(all.map((n) => n.name.toLowerCase()));
   let lastError: string | null = null;
+  let outOfTime = false;
   for (let round = 0; round < EXTRA_ROUNDS && good.length < item.name_count; round++) {
+    if (deadline !== undefined && deadline - (d.now ?? Date.now)() < ROUND_NEEDS_MS) { outOfTime = true; break; }
     const s = await d.suggest({
       gender: item.gender, target, want: item.name_count - good.length + ASK_EXTRA,
       allNames: [...all.map((n) => n.name), ...base.added], existing: [...sameKind.map((n) => n.name), ...base.added],
@@ -89,6 +95,7 @@ export async function pickNames(d: NamesDeps, item: Pick<AutopilotItemRow, "gend
 
   if (good.length < MIN_GOOD_NAMES) {
     // A failed suggestion round is a temporary outage, not the owner's problem: try again later.
+    if (outOfTime) return { ...base, kind: "retry", error: "Ran out of time picking names; trying again." };
     if (lastError) return { ...base, kind: "retry", error: lastError };
     return { ...base, kind: "hold", why: `Only ${good.length} good ${item.gender} names for ${label} (${MIN_GOOD_NAMES} needed). Add names, then make this post on Today.` };
   }

@@ -98,4 +98,14 @@ describe("pickNames", () => {
     const flaky = vi.fn(async () => ({ ok: false as const, error: "Claude timed out.", usage, stop: false }));
     expect(await pickNames(deps(S.map((n) => nm(n)), flaky).d, item, null)).toMatchObject({ kind: "retry", error: "Claude timed out." });
   });
+
+  it("with little time left before the deadline it skips the extra AI round and asks to retry", async () => {
+    const { d } = deps(S.slice(0, 5).map((n) => nm(n)), judgeWith());
+    const r = await pickNames({ ...d, now: () => 1_000_000 }, item, null, 1_000_000 + 99_000);
+    expect(d.suggest).not.toHaveBeenCalled();
+    expect(r).toMatchObject({ kind: "retry", error: "Ran out of time picking names; trying again." });
+    // With enough time the round runs as before.
+    await pickNames({ ...d, now: () => 1_000_000 }, item, null, 1_000_000 + 200_000);
+    expect(d.suggest).toHaveBeenCalled();
+  });
 });

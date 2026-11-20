@@ -6,6 +6,7 @@ import type { AutopilotItemRow, AutopilotRunRow, AutopilotRunStatus, CardRow, Ge
 import { workerHealth, type WorkerHealth } from "@/lib/status/worker-health";
 
 export type RepoName = Pick<NameRow, "id" | "name" | "meaning" | "gender" | "style" | "status">;
+export type RunProgress = Pick<AutopilotRunRow, "events" | "input_tokens" | "output_tokens">;
 export type TickPatch = Pick<AutopilotRunRow, "status" | "message" | "events" | "input_tokens" | "output_tokens"> & { finished_at?: string };
 
 export interface AutopilotRepo {
@@ -15,6 +16,10 @@ export interface AutopilotRepo {
   runStatus(runId: string): Promise<AutopilotRunStatus | null>;
   /** Save the tick's results and free the lock; never brings a stopped run back. */
   finishTick(runId: string, patch: TickPatch): Promise<void>;
+  /** Save events and token totals part-way through a tick (not the status), so a killed tick keeps them. */
+  saveProgress(runId: string, p: RunProgress): Promise<void>;
+  /** The post already made with this request id (a tick that died after making it), or null. */
+  postIdForRequest(requestId: string): Promise<string | null>;
   items(runId: string): Promise<AutopilotItemRow[]>;
   updateItem(id: string, patch: Partial<AutopilotItemRow>): Promise<void>;
   cards(postIds: string[]): Promise<CardRow[]>;
@@ -58,6 +63,11 @@ export function supabaseRepo(sb: SupabaseClient): AutopilotRepo {
       const rows = must(await sb.from("autopilot_runs").update({ ...rest, status, message, ...(finished_at ? { finished_at } : {}), tick_until: null })
         .eq("id", runId).neq("status", "stopped").select("id"), "save the run");
       if (!(rows as unknown[] | null)?.length) must(await sb.from("autopilot_runs").update({ ...rest, tick_until: null }).eq("id", runId).select("id"), "save the run");
+    },
+    async saveProgress(runId, p) { must(await sb.from("autopilot_runs").update({ events: p.events, input_tokens: p.input_tokens, output_tokens: p.output_tokens }).eq("id", runId).select("id"), "save the run's progress"); },
+    async postIdForRequest(requestId) {
+      const row = must(await sb.from("posts").select("id").eq("request_id", requestId).maybeSingle(), "look for the post");
+      return (row as { id: string } | null)?.id ?? null;
     },
     async items(runId) {
       return (must(await sb.from("autopilot_items").select("*").eq("run_id", runId).order("scheduled_for"), "read the plan") ?? []) as AutopilotItemRow[];
