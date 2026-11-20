@@ -72,7 +72,7 @@ describe("proxy matcher", () => {
 describe("isPublicPath (the names PDF shop)", () => {
   const T = "a".repeat(96);
   it("opens exactly the shop pages and endpoints", () => {
-    for (const p of ["/shop", "/shop/thanks", `/shop/download/${T}`, "/api/shop/checkout", "/api/shop/status", "/api/paymongo/webhook"]) {
+    for (const p of ["/shop", "/shop/thanks", `/shop/download/${T}`, "/api/shop/checkout", "/api/shop/status", "/api/paymongo/webhook", "/api/autopilot/tick"]) {
       expect(isPublicPath(p), p).toBe(true);
     }
   });
