@@ -12,6 +12,7 @@ const { judgeNames } = await import("@/lib/autopilot/judge-names");
 const { judgeCard, judgeLookAlike } = await import("@/lib/autopilot/judge-photos");
 const { parsePhotoVerdict, parseLookAlike } = await import("@/lib/autopilot/photo-problems");
 const { CLAUDE_CREDITS_OUT } = await import("@/lib/ai/claude");
+const { APIError, APIConnectionTimeoutError } = await import("@anthropic-ai/sdk");
 
 const answer = (json: unknown, o: { stop?: string; input?: number; output?: number } = {}) => ({
   stop_reason: o.stop ?? "end_turn", content: [{ type: "text", text: JSON.stringify(json) }],
@@ -89,5 +90,46 @@ describe("photo checks", () => {
     expect(r.ok && r.data).toEqual([2]);
     const content = create.mock.calls[0][0].messages[0].content;
     expect(content.map((c: { type: string; text?: string }) => c.text ?? c.type)).toEqual(["Card 1:", "image", "Card 2:", "image"]);
+  });
+});
+
+describe("judgeJson stop and retry paths", () => {
+  const run = () => judgeJson({ system: "s", content: [], schema: { type: "OBJECT", properties: {} }, parse: (x) => x });
+  it("a 401 stops the run", async () => {
+    create.mockRejectedValueOnce(APIError.generate(401, { error: { message: "invalid x-api-key" } }, "401", new Headers()));
+    expect(await run()).toMatchObject({ ok: false, stop: true, error: expect.stringMatching(/\(401\)/) });
+  });
+  it("empty credits stop the run with the credits message", async () => {
+    create.mockRejectedValueOnce(APIError.generate(400, { error: { message: "Your credit balance is too low" } }, "400", new Headers()));
+    expect(await run()).toMatchObject({ ok: false, stop: true, error: CLAUDE_CREDITS_OUT });
+  });
+  it("a timeout is a failed check, not a stop", async () => {
+    create.mockRejectedValueOnce(new APIConnectionTimeoutError());
+    expect(await run()).toMatchObject({ ok: false, stop: false, error: "Claude timed out." });
+  });
+  it("max_tokens is a failed check, not a stop", async () => {
+    create.mockResolvedValueOnce(answer({}, { stop: "max_tokens" }));
+    expect(await run()).toMatchObject({ ok: false, stop: false });
+  });
+});
+
+describe("judgeNames robustness and batching", () => {
+  it("an empty or junk answer is a failed (retryable) check, not 'not judged' for all", async () => {
+    create.mockResolvedValueOnce(answer({ names: [] }));
+    const target = { kind: "letter" as const, letter: "S" };
+    const names = [{ name: "Sabina", meaning: "x" }];
+    expect(await judgeNames({ gender: "girl", target, names })).toMatchObject({ ok: false, stop: false });
+    create.mockResolvedValueOnce(answer({ names: [1, "a", null] }));
+    expect(await judgeNames({ gender: "girl", target, names })).toMatchObject({ ok: false, stop: false });
+  });
+  it("61 names make two calls and the usage adds up", async () => {
+    const names = Array.from({ length: 61 }, (_, k) => ({ name: `S${k}`, meaning: "m" }));
+    const verdicts = (ns: { name: string }[]) => ({ names: ns.map((n) => ({ name: n.name, good: true, fits: true, reason: "", meaning: "fine" })) });
+    create.mockResolvedValueOnce(answer(verdicts(names.slice(0, 60)), { input: 1000, output: 100 }));
+    create.mockResolvedValueOnce(answer(verdicts(names.slice(60)), { input: 500, output: 50 }));
+    const r = await judgeNames({ gender: "girl", target: { kind: "letter", letter: "S" }, names });
+    expect(create).toHaveBeenCalledTimes(2);
+    expect(r.ok && r.data.length).toBe(61);
+    expect(r.usage).toEqual({ input: 1500, output: 150 });
   });
 });

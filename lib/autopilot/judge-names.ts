@@ -57,9 +57,10 @@ const cleanMeaning = (m: string) => m.toLowerCase().replace(/[^\p{L}\s'-]/gu, " 
 function parseVerdicts(raw: unknown): NameVerdict[] | null {
   const list = raw && typeof raw === "object" ? (raw as { names?: unknown }).names : null;
   if (!Array.isArray(list)) return null;
-  return list.filter((v): v is NameVerdict => !!v && typeof v === "object"
+  const valid = list.filter((v): v is NameVerdict => !!v && typeof v === "object"
     && typeof (v as NameVerdict).name === "string" && typeof (v as NameVerdict).good === "boolean" && typeof (v as NameVerdict).fits === "boolean"
     && typeof (v as NameVerdict).reason === "string" && typeof (v as NameVerdict).meaning === "string");
+  return valid.length ? valid : null;
 }
 
 /** Claude's verdicts in the order of `names` (matched by name, any case); a name it skipped fails as "not judged". */
