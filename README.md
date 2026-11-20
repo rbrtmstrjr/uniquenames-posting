@@ -42,6 +42,9 @@ conditional update before anything is sent, and a post whose creation got no ans
 the Page. Needs migration `021_facebook_posting.sql` and three Vercel variables (`docs/SETUP.md`, "Posting to Facebook").
 Design: `docs/superpowers/specs/2026-11-04-facebook-posting-design.md`; research: `reports/Facebook auto posting monetization risk.md`.
 
+## Autopilot (2026-11-20)
+- Autopilot: Make 7 days makes, checks (Claude Opus) and schedules the next week of posts by itself (`docs/SETUP.md`, Autopilot).
+
 ## Story shots (2026-10-18)
 Each post is now shot the way a photographer works through a session: one set, and the camera moves in. About 80% of
 frames are close-ups or macros, each with ONE hero: the child's face, a detail (hands, feet), or one prop from the

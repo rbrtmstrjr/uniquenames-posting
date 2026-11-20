@@ -219,6 +219,30 @@ posts the same album twice: if Facebook doesn't answer while the post is being c
 waits for you to check your Page (and press **Retry anyway** only if the post isn't there). **Save to phone** and the zip
 still work as before.
 
+## Autopilot (Make 7 days)
+The Autopilot page makes, checks and schedules the next days of posts by itself: one boy and one girl post a day, the
+morning one between 8 and 10 AM and the afternoon one between 1 and 2 PM (random minutes), following your name flow
+(A to Z, then your name themes, then A again). Claude Opus checks every name like a parent would and every card photo
+(hands, feet, faces, too much skin, split frames, look-alikes); bad cards are remade. Nothing is scheduled unchecked.
+A name-theme post checks at most 60 saved names at a time.
+Spec: `docs/superpowers/specs/2026-11-20-autopilot-design.md`.
+
+1. Facebook posting must already work (the section above).
+2. Supabase **SQL Editor**: run `supabase/migrations/022_autopilot.sql` (safe to run again).
+3. Make a secret: in PowerShell, `[Convert]::ToBase64String((1..36 | ForEach-Object { Get-Random -Max 256 }))`. Copy it.
+4. **Vercel** > Settings > Environment Variables (tick **Sensitive**, Production): `AUTOPILOT_SECRET` (the secret),
+   `SUPABASE_SERVICE_ROLE_KEY` (Supabase > Project Settings > API keys > service_role / secret key), and
+   `ANTHROPIC_API_KEY` if it is not there yet. Redeploy.
+5. **Your PC**: in `worker/worker.env` add `AUTOPILOT_URL=https://<your site>.vercel.app` and
+   `AUTOPILOT_SECRET=<the same secret>`. Restart the worker (Task Scheduler: end and run "Unique Names card worker").
+   `worker/worker.log` says "worker 2.9.0".
+6. Open **Autopilot** (sidebar; on a phone: More > Autopilot), pick **1 day** for the first try, press **Start**, and
+   watch it: names, cards, checks, then both posts scheduled. Open each post and look at it before trusting 7 days.
+
+Cost: the checks use Claude Opus 5.5, about $5 for a 7-day run (the page shows the real cost after each run).
+If a run pauses (Claude credits, a key), fix it and press **Resume**. **Stop** ends a run at once; scheduled posts stay.
+Stop and Resume say so when nothing changed. Posts that need you stay listed under "Needs you" after a run ends.
+
 ## When something is wrong
 - Header dot red, "PC offline": turn on the PC. The worker starts at login. **Generate** is disabled (the button says why) until the PC is back. "PC offline" shows 3 minutes after the PC stopped.
 - Amber dot, "ComfyUI closed": open ComfyUI Desktop. **Generate** stays disabled until then; text edits and Re-stamp still work.
