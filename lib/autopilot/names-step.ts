@@ -12,6 +12,8 @@ import { MIN_GOOD_NAMES } from "./plan";
 export const EXTRA_ROUNDS = 2;
 /** Asked for on top of the names still missing (the checks drop some). */
 export const ASK_EXTRA = 4;
+/** Most saved names judged for a name-theme post (one Claude batch). */
+export const THEME_STOCK_MAX = 60;
 
 type Simple = { name: string; meaning: string };
 export interface NamesDeps {
@@ -44,7 +46,9 @@ export async function pickNames(d: NamesDeps, item: Pick<AutopilotItemRow, "gend
   const failed = (r: { error: string; stop: boolean }): NamesOutcome => (r.stop ? { ...base, kind: "stop", error: r.error } : { ...base, kind: "retry", error: r.error });
 
   // 1. The saved names.
-  const stock = sameKind.filter((n) => n.status === "available");
+  let stock = sameKind.filter((n) => n.status === "available");
+  // A name-theme post has the whole list to pick from: judge one batch (a random sample) to stay inside the tick's time.
+  if (!item.letter && stock.length > THEME_STOCK_MAX) stock = shuffle(stock, d.rng).slice(0, THEME_STOCK_MAX);
   if (stock.length) {
     const r = await judge(stock.map((n) => ({ name: n.name, meaning: n.meaning })));
     if (!r.ok) return failed(r);
@@ -84,7 +88,8 @@ export async function pickNames(d: NamesDeps, item: Pick<AutopilotItemRow, "gend
   }
 
   if (good.length < MIN_GOOD_NAMES) {
-    if (lastError && good.length === 0) return { ...base, kind: "retry", error: lastError };
+    // A failed suggestion round is a temporary outage, not the owner's problem: try again later.
+    if (lastError) return { ...base, kind: "retry", error: lastError };
     return { ...base, kind: "hold", why: `Only ${good.length} good ${item.gender} names for ${label} (${MIN_GOOD_NAMES} needed). Add names, then make this post on Today.` };
   }
   // shuffle() already returns a new array, so `good` is not mutated.

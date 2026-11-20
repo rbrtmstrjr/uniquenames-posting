@@ -74,6 +74,24 @@ describe("pickNames", () => {
     expect(m.db.skipped).toEqual([]);
   });
 
+  it("a name-theme post judges at most 60 saved names, all from the stock", async () => {
+    const stock = Array.from({ length: 70 }, (_, i) => nm(`Name${i}`));
+    const judge = judgeWith();
+    const { d } = deps(stock, judge);
+    await pickNames(d, { gender: "girl", letter: null, name_theme: "Biblical", name_count: 10 }, null);
+    const sent: string[] = judge.mock.calls[0][0].names.map((n: { name: string }) => n.name);
+    expect(sent).toHaveLength(60);
+    expect(sent.every((n) => stock.some((s) => s.name === n))).toBe(true);
+    expect(new Set(sent).size).toBe(60);
+  });
+
+  it("retries (does not hold) when the AI could not suggest names and the post is short", async () => {
+    const suggest = vi.fn(async () => ({ ok: false as const, error: "Claude timed out." }));
+    const { d } = deps(S.slice(0, 5).map((n) => nm(n)), judgeWith(), suggest);
+    expect(await pickNames(d, item, null)).toMatchObject({ kind: "retry", error: "Claude timed out." });
+    expect(suggest).toHaveBeenCalledTimes(2);
+  });
+
   it("an AI stop (credits, key) stops; any other AI failure is retried later", async () => {
     const stop = vi.fn(async () => ({ ok: false as const, error: "Your Claude credits have run out.", usage, stop: true }));
     expect(await pickNames(deps(S.map((n) => nm(n)), stop).d, item, null)).toMatchObject({ kind: "stop" });

@@ -76,7 +76,8 @@ export function supabaseRepo(sb: SupabaseClient): AutopilotRepo {
       return (data ?? []).map((l) => l.signedUrl ?? "");
     },
     async pcHealth(now) {
-      const { data } = await sb.from("worker_status").select("*").eq("id", 1).maybeSingle();
+      const { data, error } = await sb.from("worker_status").select("*").eq("id", 1).maybeSingle();
+      if (error) throw new Error(`Could not read the PC status: ${error.message}`);
       return workerHealth((data ?? null) as WorkerStatusRow | null, now);
     },
     async themesLeft(gender) {
@@ -107,7 +108,11 @@ export function supabaseRepo(sb: SupabaseClient): AutopilotRepo {
       const out: { id: string; name: string }[] = [];
       for (const r of full) {
         const one = await sb.from("names").insert(r).select("id, name").single();
-        if (!one.error && one.data) out.push(one.data as { id: string; name: string });
+        if (one.error) {
+          if (one.error.code === "23505") continue;
+          throw new Error(`Could not add names: ${one.error.message}`);
+        }
+        if (one.data) out.push(one.data as { id: string; name: string });
       }
       return out;
     },
