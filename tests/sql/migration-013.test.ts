@@ -62,6 +62,7 @@ describe("fresh schema.sql matches v1 + 002..013 (+ 017, 021) (posts)", () => {
     const db = await migratedDb();
     await db.exec(stripSupabase(read("supabase", "migrations", "017_initials_posts.sql")));
     await db.exec(stripSupabase(read("supabase", "migrations", "021_facebook_posting.sql"))); // 021: posts.fb_* (Post now / Schedule)
+    await db.exec(stripSupabase(read("supabase", "migrations", "022_autopilot.sql"))); // 022: Autopilot (settings, posts, names, cards)
     const want = await shape(db);
     expect((want.columns as { column_name: string }[]).map((c) => c.column_name)).toContain("letter");
     expect(await shape(await freshDb())).toEqual(want);

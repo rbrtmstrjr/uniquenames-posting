@@ -76,6 +76,8 @@ describe("fresh schema.sql matches v1 + 002..015 (+ 018) (names, settings)", () 
     const migrated = await migratedDb();
     await migrated.exec(stripSupabase(read("supabase", "migrations", "018_names_pdf.sql")));
     await migrated.exec(stripSupabase(read("supabase", "migrations", "019_shop.sql"))); // 019: settings.shop_enabled
+    await migrated.exec(stripSupabase(read("supabase", "migrations", "021_facebook_posting.sql")));
+    await migrated.exec(stripSupabase(read("supabase", "migrations", "022_autopilot.sql"))); // 022: Autopilot (settings)
     const want = await shape(migrated);
     const cols = (want.columns as { table_name: string; column_name: string }[]).map((c) => `${c.table_name}.${c.column_name}`);
     expect(cols).toEqual(expect.arrayContaining(["names.origin", "names.us_rank", "names.us_year", "settings.card_layout"]));

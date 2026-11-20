@@ -26,6 +26,8 @@ async function liveDb(skip015 = false) {
 async function migratedDb() {
   const db = await liveDb();
   await db.exec(m018);
+  await db.exec(stripSupabase(read("supabase", "migrations", "021_facebook_posting.sql")));
+  await db.exec(stripSupabase(read("supabase", "migrations", "022_autopilot.sql"))); // 022: Autopilot (settings, posts, names, cards)
   return db;
 }
 const addName = async (db: PGlite, name: string) =>
