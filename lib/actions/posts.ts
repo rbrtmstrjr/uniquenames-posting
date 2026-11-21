@@ -17,6 +17,7 @@ import { fontsOf, validateFonts, type PostFonts } from "@/lib/fonts/post-fonts";
 import { addClosingCard } from "@/lib/cta/card";
 import { seriesPart } from "@/lib/series/az";
 import { isLetter } from "@/lib/series/letter";
+import { parseNameThemes } from "@/lib/autopilot/name-themes";
 import { initialsText, isInitials } from "@/lib/series/initials";
 import { planInitialsNames } from "@/lib/data/initials";
 
@@ -109,11 +110,16 @@ export async function rewriteCaptionAction(postId: string): Promise<ActionResult
   const letter = isLetter(p.letter) ? p.letter : null;
   // A post by initials (017) keeps saying its initials.
   const initials = isInitials(p.initials) ? p.initials : null;
+  // An Autopilot name-theme post (022) keeps naming its theme, with its theme tag.
+  const nameTheme = p.name_theme
+    ? { title: p.name_theme, hint: parseNameThemes((settings as SettingsRow).autopilot_name_themes)
+        .find((x) => x.title.toLowerCase() === p.name_theme!.toLowerCase())?.hint ?? null }
+    : null;
   const ai = await aiCaptionLine({
-    theme: theme as ThemeRow, gender: p.gender, style: p.style, captionStyle, names, recent: history.texts, recentTags: recentTags(history), series, letter, initials,
+    theme: theme as ThemeRow, gender: p.gender, style: p.style, captionStyle, names, recent: history.texts, recentTags: recentTags(history), series, letter, initials, nameTheme,
   }, REWRITE_TIMEOUT_MS);
   if (!ai) return fail("Could not write a new caption right now. Your caption is unchanged — try again in a moment.");
-  const { caption, caption_style, hashtag_set } = composePostCaption({ ai, aiOn: true, captionStyle, gender: p.gender, settings: settings as SettingsRow, history, series, letter, initials });
+  const { caption, caption_style, hashtag_set } = composePostCaption({ ai, aiOn: true, captionStyle, gender: p.gender, settings: settings as SettingsRow, history, series, letter, initials, nameTheme: nameTheme?.title ?? null });
   let { data, error } = await sb.from("posts").update({ caption, caption_style, hashtag_set }).eq("id", postId).select("id");
   // Before 009 there is no style / hashtag set column: save the caption alone.
   if (missing009(error)) ({ data, error } = await sb.from("posts").update({ caption }).eq("id", postId).select("id"));

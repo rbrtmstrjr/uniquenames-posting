@@ -84,6 +84,8 @@ export async function askCaption(o: {
   system: string; prompt: string; maxTags: number; max: number; min: number; timeoutMs: number; label: string;
   problem: (line: string) => string | null;
   attempts?: number; penalty?: (line: string) => number;
+  /** A check a caption must pass to be kept at all; a failure earns the corrective retry like `problem`, but such a caption is never returned. */
+  required?: (line: string) => string | null;
 }): Promise<AiCaption | null> {
   const deadline = Date.now() + o.timeoutMs;
   let usable: AiCaption | null = null;
@@ -105,6 +107,8 @@ export async function askCaption(o: {
     // simple global English: a Filipino / Tagalog word or expert jargon is never accepted (like bait)
     const plain = plainWordsProblem(line);
     if (plain) { note = `\n\nYour last caption ("${line}") ${plain}. Write a new one.`; continue; }
+    const must = o.required?.(line);
+    if (must) { note = `\n\nYour last caption ("${line}") ${must}. Write a new one.`; continue; }
     const result = { line, tags: Array.isArray(r.data.tags) ? r.data.tags : [] };
     const problem = o.problem(line);
     if (!problem) return result;

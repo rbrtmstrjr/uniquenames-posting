@@ -32,7 +32,7 @@ const POST = { id: POST_ID, gender: "boy", style: "two-word", theme_id: THEME_ID
   caption_style: "story", hashtag_set: "#uniquenames #babynames" };
 const CARDS = [{ name: "Marina", meaning: "of the sea", position: 1 }, { name: "Kai", meaning: "sea, Hawaiian", position: 2 }];
 
-function world(settings: Record<string, unknown> = legacySettings, o: { history?: Record<string, unknown>[]; pre009?: boolean } = {}) {
+function world(settings: Record<string, unknown> = legacySettings, o: { history?: Record<string, unknown>[]; pre009?: boolean; post?: Record<string, unknown> } = {}) {
   fake = fakeSupabase((q) => respond(q));
   respond = (q: Query) => {
     if (q.table === "settings" && isUpdate(q)) return undefined;
@@ -52,7 +52,7 @@ function world(settings: Record<string, unknown> = legacySettings, o: { history?
       return { data: o.history ?? [] };
     }
     if (q.table === "posts") {
-      if (!o.pre009) return { data: POST };
+      if (!o.pre009) return { data: { ...POST, ...o.post } };
       const { caption_style: _s, hashtag_set: _h, ...old } = POST;
       void _s; void _h;
       return { data: old };
@@ -187,6 +187,16 @@ describe("updateCaptionAction (hand edits and Undo)", () => {
     await updateCaptionAction(POST_ID, "Old seaside words. Which one?");
     expect(postUpdates()).toEqual([{ caption: "Old seaside words. Which one?", hashtag_set: null, caption_style: "story" }]);
   });
+  it("an Autopilot name-theme post keeps naming its theme, with its theme tag", async () => {
+    world({ ...s009, autopilot_name_themes: "Biblical (stories from the Bible)" }, { post: { name_theme: "Biblical" } });
+    generateJson.mockResolvedValueOnce({ ok: true, data: { caption: "Looking for faith in a name? These Biblical baby boy names carry strength." } });
+    expect((await rewriteCaptionAction(POST_ID)).ok).toBe(true);
+    const prompt = generateJson.mock.calls[0][0].prompt as string;
+    expect(prompt).toContain("biblical names");
+    expect(prompt).toContain("stories from the Bible");
+    expect(postUpdates()[0].caption).toMatch(/#biblicalnames/);
+  });
+
   it("before 009: saves the caption alone", async () => {
     world(legacySettings, { pre009: true });
     expect(await updateCaptionAction(POST_ID, "Mine now #babynames")).toEqual({ ok: true });
