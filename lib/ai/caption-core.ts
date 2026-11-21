@@ -91,7 +91,9 @@ export async function askCaption(o: {
   let usable: AiCaption | null = null;
   let usablePenalty = Infinity;
   let note = "";
+  let must: string | null | undefined = null;
   for (let attempt = 0; attempt < (o.attempts ?? 2); attempt++) {
+    must = null;
     const left = deadline - Date.now();
     if (left <= 0 || (attempt > 0 && left < RETRY_MIN_MS)) break;
     const r = await aiJson({
@@ -107,7 +109,7 @@ export async function askCaption(o: {
     // simple global English: a Filipino / Tagalog word or expert jargon is never accepted (like bait)
     const plain = plainWordsProblem(line);
     if (plain) { note = `\n\nYour last caption ("${line}") ${plain}. Write a new one.`; continue; }
-    const must = o.required?.(line);
+    must = o.required?.(line);
     if (must) { note = `\n\nYour last caption ("${line}") ${must}. Write a new one.`; continue; }
     const result = { line, tags: Array.isArray(r.data.tags) ? r.data.tags : [] };
     const problem = o.problem(line);
@@ -116,5 +118,6 @@ export async function askCaption(o: {
     if (penalty <= usablePenalty) { usable = result; usablePenalty = penalty; }
     note = `\n\nYour last caption ("${line}") ${problem}. Write a clearly different one.`;
   }
+  if (!usable && must) console.warn(`${o.label}: never named the theme: ${must}`);
   return usable;
 }

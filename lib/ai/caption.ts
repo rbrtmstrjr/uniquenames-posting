@@ -129,7 +129,7 @@ const partRe = (part: AzPart) => PART_RE[part];
 const letterRe = (l: string) => new RegExp([
   String.raw`[Ll]etter\s+["'“‘]?${l}(?!\p{L})`,
   String.raw`\b(?:[Ss]tart|[Bb]egin)\w*\s+with\s+(?:an?\s+|the\s+letter\s+)?["'“‘]?${l}(?!\p{L})`,
-  String.raw`(?<!\p{L})${l}[-\s]names\b`,
+  String.raw`(?<!\p{L})${l}[-\s](?:baby\s+)?(?:boy\s+|girl\s+)?names\b`,
 ].join("|"), "u");
 
 /** The initials named as such: "initials A & R", "A and R", "A.R.", "A·R" (the capitals themselves). */
@@ -142,8 +142,23 @@ const initialsRe = (ab: string) => {
   ].join("|"), "u");
 };
 
-/** The word that shows the theme was named: its first word of 3+ letters ("Unique and modern" -> "Unique"). */
-const themeWord = (title: string) => title.split(/[^\p{L}]+/u).find((w) => w.length >= 3) ?? title;
+const NAME_THEME_FILLER = new Set(["the", "and", "for", "with", "from", "name", "names", "baby", "boy", "girl"]);
+/** A word of the caption (letters, apostrophes), as a regex. */
+const WORD = String.raw`[\p{L}'’]+`;
+
+/**
+ * A name-theme post names its theme when a content word of the title sits next to "names" ("Biblical baby boy names",
+ * "names that feel soft and gentle"). Content words = the title's words of 3+ letters, minus filler; none left = the
+ * title's first word of 3+ letters, anywhere.
+ */
+function nameThemeRe(title: string): RegExp {
+  const words = title.split(/[^\p{L}]+/u).filter((w) => w.length >= 3);
+  const content = words.filter((w) => !NAME_THEME_FILLER.has(w.toLowerCase()));
+  if (!content.length) return new RegExp(String.raw`(?<!\p{L})${escapeRe(words[0] ?? title)}`, "iu");
+  const cw = `(?:${content.map(escapeRe).join("|")})`;
+  return new RegExp(
+    String.raw`(?<!\p{L})${cw}(?!\p{L})(?:[\s-]+${WORD}){0,4}[\s-]+names(?!\p{L})|(?<!\p{L})names(?!\p{L})(?:[\s-]+${WORD}){0,3}[\s-]+${cw}(?!\p{L})`, "iu");
+}
 
 /** The prompt asks for the theme within this many characters: what a reader sees at a glance. */
 export const THEME_LEAD_CHARS = 100;
@@ -165,7 +180,7 @@ export function themePhrase(i: ThemeInput): string {
 /** "boy names", "girl's names", "names for your (baby) son": a plain post names its gender's names. */
 const plainRe = (g: Gender) => {
   const who = g === "boy" ? "(?:boy|son)" : "(?:girl|daughter)";
-  return new RegExp(String.raw`\b${who}(?:'s)?\s+names\b|\bnames\s+for\s+(?:your\s+|a\s+)?(?:baby\s+|little\s+)?${who}\b`, "i");
+  return new RegExp(String.raw`\b${who}s?(?:['’]s?)?\s+names\b|\bnames\s+for\s+(?:your\s+|a\s+)?(?:baby\s+|little\s+)?${who}s?\b`, "i");
 };
 
 /** Where this post's theme is first named in `line`, or -1. */
@@ -173,7 +188,7 @@ function themeIndex(line: string, i: ThemeInput): number {
   const re = i.series ? partRe(i.series.part)
     : isLetter(i.letter) ? letterRe(i.letter)
       : isInitials(i.initials) ? initialsRe(i.initials)
-        : i.nameTheme ? new RegExp(`(?<!\\p{L})${escapeRe(themeWord(i.nameTheme.title))}`, "iu")
+        : i.nameTheme ? nameThemeRe(i.nameTheme.title)
           : plainRe(i.gender);
   return re.exec(line)?.index ?? -1;
 }
@@ -198,7 +213,7 @@ export function captionProblem(line: string, input: Pick<CaptionInput, "captionS
   if (input.series && !partRe(input.series.part).test(line)) return `does not say it is Part ${input.series.part} of the A to Z series`;
   if (isLetter(input.letter) && !letterRe(input.letter).test(line)) return `does not say the names start with the letter ${input.letter}`;
   if (isInitials(input.initials) && !initialsRe(input.initials).test(line)) return `does not say the names have the initials ${input.initials[0]} & ${input.initials[1]}`;
-  if (input.nameTheme && !new RegExp(`(?<!\\p{L})${escapeRe(themeWord(input.nameTheme.title))}`, "iu").test(line)) {
+  if (input.nameTheme && !nameThemeRe(input.nameTheme.title).test(line)) {
     return `does not say these are ${input.nameTheme.title} names`;
   }
   const need = input.captionStyle === "choice" ? 2 : NAME_STYLES.includes(input.captionStyle) ? 1 : 0;

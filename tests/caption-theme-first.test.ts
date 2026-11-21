@@ -9,7 +9,7 @@ vi.mock("@/packs", async (real) => {
 });
 const { generateJson } = vi.hoisted(() => ({ generateJson: vi.fn() }));
 vi.mock("@/lib/ai/gemini", () => ({ generateJson }));
-const { THEME_CHECK_CHARS, THEME_LEAD_CHARS, aiCaptionLine, captionPrompt, themeLeadProblem, themePhrase } = await import("@/lib/ai/caption");
+const { THEME_CHECK_CHARS, THEME_LEAD_CHARS, aiCaptionLine, captionPrompt, captionProblem, themeLeadProblem, themePhrase } = await import("@/lib/ai/caption");
 
 const theme = { title: "Country Barn Boy", backdrop: "barn red wall", outfit: "denim overalls", props: "plush cow", lighting: "golden light", palette: "red, cream" };
 const ok = (caption: string) => ({ ok: true, data: { caption, tags: [] } });
@@ -44,6 +44,44 @@ describe("theme phrase and the 100-character rule", () => {
   });
 });
 
+describe("matchers (a miss is a hard failure, so they accept close wording)", () => {
+  const girl = { gender: "girl" as const };
+  const nt = (title: string, gender: "boy" | "girl" = "boy") => ({ gender, nameTheme: { title, hint: null } });
+  it("plain posts accept plurals and both apostrophes, and still reject the singular", () => {
+    for (const c of ["Sweet baby names for girls, each with a meaning.", "Pretty names for little girls, each one easy to love.", "Lovely names for baby girls to say all day.",
+      "Pretty girl’s names to save for later.", "Pretty girls' names to save for later.", "Pretty girls names to save for later."]) {
+      expect(themeLeadProblem(c, girl), c).toBeNull();
+    }
+    expect(themeLeadProblem("Looking for a girl name that feels right?", girl)).toMatch(/does not name/);
+  });
+  it("letter posts accept 'R girl names' and 'R baby girl names'", () => {
+    const i = { gender: "girl" as const, letter: "R" };
+    expect(themeLeadProblem("These R girl names are pretty enough to say all day.", i)).toBeNull();
+    expect(themeLeadProblem("These R baby girl names are pretty enough to say all day.", i)).toBeNull();
+    expect(themeLeadProblem("Meet a girl named Rosa, who loves to sing and dance.", i)).toMatch(/does not name/);
+  });
+  it("name themes need a content word of the title next to 'names'", () => {
+    const pass: [string, string, "boy" | "girl"][] = [
+      ["These Biblical baby boy names carry strength", "Biblical", "boy"],
+      ["Soft and cool baby girl names for your little one", "Soft and cool", "girl"],
+      ["Nature-inspired baby boy names", "Nature-inspired", "boy"],
+      ["Heavenly baby girl names", "Heavenly", "girl"],
+      ["Timeless baby boy names", "Classic and timeless", "boy"],
+      ["Names that feel soft and gentle", "Soft and cool", "girl"],
+    ];
+    for (const [c, title, g] of pass) {
+      expect(themeLeadProblem(c, nt(title, g)), c).toBeNull();
+      expect(captionProblem(c, { captionStyle: "question", ...nt(title, g) }), c).toBeNull();
+    }
+    for (const [c, title] of [["Want a strong name your son can grow into? Every name here carries a meaning worth keeping.", "Strong and brave"],
+      ["Looking for something unique for your little girl? Each one is easy to love.", "Unique and modern"]]) {
+      expect(themeLeadProblem(c, nt(title)), c).toMatch(/does not name/);
+      expect(captionProblem(c, { captionStyle: "question", ...nt(title) }), c).toMatch(/does not say/);
+    }
+    expect(themeLeadProblem("The classics in baby boy names that last.", nt("The classics"))).toBeNull();
+  });
+});
+
 describe("captionPrompt flags", () => {
   it("titleOnly: only the photoshoot title, marked for hashtags; no set details", () => {
     pack.captions = { titleOnly: true, themeFirst: false };
@@ -64,12 +102,44 @@ describe("captionPrompt flags", () => {
 });
 
 describe("the hard check", () => {
-  it("a caption that names the theme too late is retried and never kept", async () => {
+  it("a caption that does not name the theme is retried and never kept", async () => {
     pack.captions = { titleOnly: true, themeFirst: true };
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     generateJson.mockResolvedValue(ok("Sweet names for your little one, picked with love."));
     expect(await aiCaptionLine({ theme, gender: "girl", captionStyle: "question", letter: "R" })).toBeNull();
     expect(generateJson).toHaveBeenCalledTimes(2);
     expect(generateJson.mock.calls[1][0].prompt).toMatch(/does not name/);
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/never named the theme/));
+    warn.mockRestore();
+  });
+  it("a caption that names the theme only after 120 characters is retried and never kept", async () => {
+    pack.captions = { titleOnly: true, themeFirst: true };
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    generateJson.mockResolvedValue(ok(`${"A soft and gentle opening line about the joy of waiting for a baby, ".repeat(2)}these baby girl names that start with R.`));
+    expect(await aiCaptionLine({ theme, gender: "girl", captionStyle: "question", letter: "R" })).toBeNull();
+    expect(generateJson).toHaveBeenCalledTimes(2);
+    expect(generateJson.mock.calls[1][0].prompt).toMatch(/too late/);
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/never named the theme/));
+    warn.mockRestore();
+  });
+  it("a caption that never names the theme is logged once as a fallback", async () => {
+    pack.captions = { titleOnly: true, themeFirst: true };
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    generateJson.mockResolvedValue(ok("Sweet names for your little one, picked with love."));
+    expect(await aiCaptionLine({ theme, gender: "girl", captionStyle: "question", letter: "R" })).toBeNull();
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/never named the theme: does not name/));
+    warn.mockRestore();
+  });
+  it("a first attempt that passes the hard check but has a soft problem wins over a second that fails it", async () => {
+    pack.captions = { titleOnly: true, themeFirst: true };
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const first = "Still looking for something sweet? These baby girl names that start with R might be the one.";
+    generateJson.mockResolvedValueOnce(ok(first)).mockResolvedValueOnce(ok("Sweet names for your little one, picked with love."));
+    const r = await aiCaptionLine({ theme, gender: "girl", captionStyle: "question", letter: "R", recent: ["Still here, still sweet."] });
+    expect(r?.line).toBe(first);
+    expect(generateJson).toHaveBeenCalledTimes(2);
+    warn.mockRestore();
   });
   it("the retry that fixes it is kept", async () => {
     pack.captions = { titleOnly: true, themeFirst: true };

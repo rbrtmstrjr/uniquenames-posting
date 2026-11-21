@@ -188,16 +188,6 @@ describe("updateCaptionAction (hand edits and Undo)", () => {
     await updateCaptionAction(POST_ID, "Old seaside words. Which one?");
     expect(postUpdates()).toEqual([{ caption: "Old seaside words. Which one?", hashtag_set: null, caption_style: "story" }]);
   });
-  it("an Autopilot name-theme post keeps naming its theme, with its theme tag", async () => {
-    world({ ...s009, autopilot_name_themes: "Biblical (stories from the Bible)" }, { post: { name_theme: "Biblical" } });
-    generateJson.mockResolvedValueOnce({ ok: true, data: { caption: "Looking for faith in a name? These Biblical baby boy names carry strength." } });
-    expect((await rewriteCaptionAction(POST_ID)).ok).toBe(true);
-    const prompt = generateJson.mock.calls[0][0].prompt as string;
-    expect(prompt).toContain("biblical names");
-    expect(prompt).toContain("stories from the Bible");
-    expect(postUpdates()[0].caption).toMatch(/#biblicalnames/);
-  });
-
   it("before 009: saves the caption alone", async () => {
     world(legacySettings, { pre009: true });
     expect(await updateCaptionAction(POST_ID, "Mine now #babynames")).toEqual({ ok: true });
@@ -213,6 +203,15 @@ describe("updateCaptionAction (hand edits and Undo)", () => {
 });
 
 describe("rewriteCaptionAction", () => {
+  it("an Autopilot name-theme post keeps naming its theme, with its theme tag", async () => {
+    world({ ...s009, autopilot_name_themes: "Biblical (stories from the Bible)" }, { post: { name_theme: "Biblical" } });
+    generateJson.mockResolvedValueOnce({ ok: true, data: { caption: "Looking for faith in a name? These Biblical baby boy names carry strength." } });
+    expect((await rewriteCaptionAction(POST_ID)).ok).toBe(true);
+    const prompt = generateJson.mock.calls[0][0].prompt as string;
+    expect(prompt).toContain("biblical names");
+    expect(prompt).toContain("stories from the Bible");
+    expect(postUpdates()[0].caption).toMatch(/#biblicalnames/);
+  });
   it("writes, saves and returns a new caption: a new style and a new hashtag set (never the post's own)", async () => {
     world(s009);
     generateJson.mockResolvedValueOnce({ ok: true, data: { caption: "Little sailors, big dreams: baby boy names for the beach lovers. Which is your favorite?" } });
