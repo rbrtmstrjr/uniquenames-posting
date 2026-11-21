@@ -31,7 +31,7 @@ export async function preparePlan(sb: SupabaseClient, days: number, rng: () => n
   const dayList = [...new Set(items.map((i) => i.day))].map((day) => ({ day, dayLabel: dayLabel(day), label: labelText(items.find((i) => i.day === day)!) }));
   const preview: RunPreview = {
     range: dayList.length > 1 ? `${dayList[0].dayLabel} – ${dayList.at(-1)!.dayLabel}` : dayList[0]?.dayLabel ?? "",
-    posts: items.length, days: dayList, problems: planProblems(items, left),
+    posts: items.length, days: dayList, problems: planProblems(items, left, now),
   };
   return { ok: true, first, items, preview };
 }

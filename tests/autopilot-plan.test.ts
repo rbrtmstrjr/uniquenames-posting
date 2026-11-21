@@ -79,4 +79,13 @@ describe("planProblems", () => {
     expect(labelText({ letter: "S" })).toBe("Letter S");
     expect(labelText({ letter: null, nameTheme: "Biblical" })).toBe("Biblical names");
   });
+  it("says when the plan reaches past Facebook's 29 days (the posts after it would be held)", () => {
+    const now = Date.parse("2026-11-20T03:00:00Z"); // Fri Nov 20, 11:00 AM Manila; the limit is Sat Dec 19, 11:00 AM
+    const near = planRun({ firstDay: "2026-11-21", days: 7, last: null, themes: [], minImages: 6, maxImages: 26, rng: seededRandom(1) });
+    expect(planProblems(near, { boy: 9, girl: 9 }, now)).toEqual([]);
+    const far = planRun({ firstDay: "2026-12-15", days: 7, last: null, themes: [], minImages: 6, maxImages: 26, rng: seededRandom(1) });
+    expect(planProblems(far, { boy: 9, girl: 9 }, now)).toEqual(["Facebook schedules up to 29 days ahead: the posts after Sat, Dec 19, 11:00 AM would be held. Pick fewer days."]);
+    // Without a clock (older callers) only the theme check runs.
+    expect(planProblems(far, { boy: 9, girl: 9 })).toEqual([]);
+  });
 });

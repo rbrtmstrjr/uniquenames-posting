@@ -224,12 +224,15 @@ The Autopilot page makes, checks and schedules the next days of posts by itself:
 morning one between 8 and 10 AM and the afternoon one between 1 and 2 PM (random minutes), following your name flow
 (A to Z, then your name themes, then A again). Claude Opus checks every name like a parent would and every card photo
 (hands, feet, faces, too much skin, split frames, look-alikes); bad cards are remade. Nothing is scheduled unchecked.
-A name-theme post checks at most 60 saved names at a time.
+Each post checks at most 60 saved names at a time (a random pick when there are more). A name Autopilot skipped shows
+why on the Names page (Skip); if you bring it back, Autopilot never skips it again.
 Spec: `docs/superpowers/specs/2026-11-20-autopilot-design.md`.
 
 1. Facebook posting must already work (the section above).
 2. Supabase **SQL Editor**: run `supabase/migrations/022_autopilot.sql` (safe to run again).
-3. Make a secret: in PowerShell, `[Convert]::ToBase64String((1..36 | ForEach-Object { Get-Random -Max 256 }))`. Copy it.
+3. Make a secret: in PowerShell,
+   `$b = New-Object byte[] 36; [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b); [Convert]::ToBase64String($b)`.
+   Copy it.
 4. **Vercel** > Settings > Environment Variables (tick **Sensitive**, Production): `AUTOPILOT_SECRET` (the secret),
    `SUPABASE_SERVICE_ROLE_KEY` (Supabase > Project Settings > API keys > service_role / secret key), and
    `ANTHROPIC_API_KEY` if it is not there yet. Redeploy.

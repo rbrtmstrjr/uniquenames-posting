@@ -2,6 +2,7 @@
 // in the morning, the random times inside the windows and how many names each post gets.
 import type { Gender, PostRow } from "@/lib/db/types";
 import { AZ_LETTERS } from "@/lib/series/az";
+import { SCHEDULE_MAX_MS, manilaLabel } from "@/lib/facebook/schedule";
 import { nameThemeLabel } from "./name-themes";
 
 /** Minutes after midnight, Manila: morning 8:00–9:59 AM, afternoon 1:00–1:59 PM. */
@@ -105,9 +106,16 @@ export function labelText(p: { letter: string | null; name_theme?: string | null
   return nameThemeLabel({ name_theme: p.name_theme ?? p.nameTheme ?? null }) ?? "";
 }
 
-/** What the owner should know before starting (themes run out). */
-export function planProblems(items: PlannedItem[], themesLeft: Record<Gender, number>): string[] {
+/** What the owner should know before starting (themes run out; with `now`, posts beyond Facebook's 29 days). */
+export function planProblems(items: PlannedItem[], themesLeft: Record<Gender, number>, now?: number): string[] {
   const out: string[] = [];
+  if (now !== undefined) {
+    // Facebook refuses a time more than 29 days ahead: those posts would be made and then held.
+    const limit = now + SCHEDULE_MAX_MS;
+    if (items.some((i) => Date.parse(i.scheduledFor) > limit)) {
+      out.push(`Facebook schedules up to 29 days ahead: the posts after ${manilaLabel(new Date(limit).toISOString())} would be held. Pick fewer days.`);
+    }
+  }
   for (const g of ["girl", "boy"] as const) {
     const mine = items.filter((i) => i.gender === g);
     const left = themesLeft[g] ?? 0;
