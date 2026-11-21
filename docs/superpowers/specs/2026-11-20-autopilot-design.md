@@ -41,8 +41,8 @@ Owner decisions (2026-11-20):
     Royal and elegant, Strong and brave, Heavenly (stars, sky, light).
   - After the last name theme, back to A. Names never repeat (used names stay used).
   - If the last label is a name theme no longer in the list, the flow continues at the first name theme.
-- **Each post:** single names only, a random **10 to 15 names** (kept inside the Settings min/max) plus the closing
-  card. Photoshoot theme: the planner's usual pick among the available themes of that gender (as Today does when none
+- **Each post:** single names only, a random **9 to 15 names** (kept inside the Settings min/max) plus the closing
+  card, so 10 to 16 cards (owner, 2026-11-21; it was 10 to 15 names). Photoshoot theme: the planner's usual pick among the available themes of that gender (as Today does when none
   is chosen). Child's age: Random. Fonts and text: Settings. Caption: the usual AI caption.
 - **Name-theme posts** carry a label like letter posts do ("Biblical names" on Posts, Today and the post page), a
   caption line that mentions the theme, and a theme hashtag in a theme-tag slot: `#` + the title in lowercase letters
