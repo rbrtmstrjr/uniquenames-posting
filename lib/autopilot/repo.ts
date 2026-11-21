@@ -2,7 +2,7 @@
 // implementation for the tick route (service-role client). Every method throws on a database error; the engine turns
 // that into a logged event and tries again on the next tick.
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { AutopilotItemRow, AutopilotRunRow, AutopilotRunStatus, CardRow, Gender, NameRow, SettingsRow, WorkerStatusRow } from "@/lib/db/types";
+import type { AutopilotItemRow, AutopilotRunRow, AutopilotRunStatus, CardRow, FacebookState, Gender, NameRow, SettingsRow, WorkerStatusRow } from "@/lib/db/types";
 import { workerHealth, type WorkerHealth } from "@/lib/status/worker-health";
 
 /** `autopilot_note`: why Autopilot once skipped it; on an available name it means the owner brought it back. */
@@ -21,6 +21,8 @@ export interface AutopilotRepo {
   saveProgress(runId: string, p: RunProgress): Promise<void>;
   /** The post already made with this request id (a tick that died after making it), or null. */
   postIdForRequest(requestId: string): Promise<string | null>;
+  /** The post's Facebook state (migration 021), or null (not sent, or no such post). */
+  facebookState(postId: string): Promise<FacebookState | null>;
   items(runId: string): Promise<AutopilotItemRow[]>;
   updateItem(id: string, patch: Partial<AutopilotItemRow>): Promise<void>;
   cards(postIds: string[]): Promise<CardRow[]>;
@@ -69,6 +71,10 @@ export function supabaseRepo(sb: SupabaseClient): AutopilotRepo {
     async postIdForRequest(requestId) {
       const row = must(await sb.from("posts").select("id").eq("request_id", requestId).maybeSingle(), "look for the post");
       return (row as { id: string } | null)?.id ?? null;
+    },
+    async facebookState(postId) {
+      const row = must(await sb.from("posts").select("fb_state").eq("id", postId).maybeSingle(), "read the post's Facebook state");
+      return (row as { fb_state: FacebookState | null } | null)?.fb_state ?? null;
     },
     async items(runId) {
       return (must(await sb.from("autopilot_items").select("*").eq("run_id", runId).order("scheduled_for"), "read the plan") ?? []) as AutopilotItemRow[];

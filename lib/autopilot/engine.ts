@@ -6,6 +6,7 @@ import type { AutopilotEvent, AutopilotEventKind, AutopilotItemRow, AutopilotRun
 import type { CreatePostInput } from "@/lib/posts/create";
 import type { PublishResult } from "@/lib/facebook/publish";
 import { CARD_CHANGED_AFTER_CHECK, manilaLabel } from "@/lib/facebook/schedule";
+import { cardOrder } from "@/lib/files/save";
 import type { JudgeResult, Usage } from "./claude-judge";
 import type { NamesOutcome } from "./names-step";
 import type { AutopilotRepo } from "./repo";
@@ -41,6 +42,8 @@ export const MAX_RUN_EVENTS = 50;
 /** A card-check batch starts only with this much time left; the look-alike check needs more (it can take 150 s). */
 export const CHECK_NEEDS_MS = 95_000;
 export const LOOKALIKE_NEEDS_MS = 155_000;
+/** Scheduling (signed links, the uploads, the Facebook post) starts only with this much time left; else the next tick does it. */
+export const SCHEDULE_NEEDS_MS = 45_000;
 const POST_DELETED = "The post was deleted. Make it on Today if you still want it.";
 const NO_CARDS = "The post has no cards left. Make it on Today if you still want it.";
 export const LOOKALIKE_MAX = 3;
@@ -89,6 +92,8 @@ class Tick {
   private finished: string | null = null;
   /** Stop was pressed: do nothing further this tick. */
   private halted = false;
+  /** Cards whose remake failed this tick (one event each). */
+  private remakeFailed = new Set<string>();
 
   constructor(private d: EngineDeps, private runRow: AutopilotRunRow, private start: number) {
     this.status = runRow.status;
@@ -114,10 +119,18 @@ class Tick {
     this.halted = true;
     return true;
   }
-  /** Remake a card unless Stop was pressed. */
-  private async remakeCard(c: CardRow, extra: Partial<CardRow>) {
+  /**
+   * Remake a card unless Stop was pressed. A remake that did not go through (the card changed meanwhile, or a database
+   * error) is logged once per card per tick, so a stuck card shows; `after` says what happens next.
+   */
+  private async remakeCard(c: CardRow, extra: Partial<CardRow>, after = "trying again next time") {
     if (await this.stopped()) return false;
-    return this.d.remake(c, extra);
+    const ok = await this.d.remake(c, extra);
+    if (!ok && !this.remakeFailed.has(c.id)) {
+      this.remakeFailed.add(c.id);
+      this.event("run", `${itemLabel(this.itemOf(c))}: couldn't remake ${cardName(c)}; ${after}.`);
+    }
+    return ok;
   }
   private trimmed() {
     let runs = 0;
@@ -256,6 +269,8 @@ class Tick {
         await this.hold(item, `It was ready too late for ${manilaLabel(item.scheduled_for)}. Schedule or post it yourself.`);
         continue;
       }
+      // Scheduling uploads every card: not started at the end of the tick's time (the next tick schedules it).
+      if (this.left() < SCHEDULE_NEEDS_MS) continue;
       if (await this.stopped()) return;
       const r = await this.d.schedule(item.post_id!, item.scheduled_for);
       if (r.ok) {
@@ -267,12 +282,21 @@ class Tick {
       } else if (r.errorKind === "auth" || r.errorKind === "not_connected") {
         throw new Pause(`${r.error} Then press Resume.`);
       } else {
-        await this.hold(item, r.error);
+        // Already on Facebook (a tick that died after scheduling it, or the owner scheduled it): done, not held.
+        const fb = await this.d.repo.facebookState(item.post_id!);
+        if (fb === "scheduled" || fb === "published") {
+          await this.setItem(item, { state: "scheduled", note: null });
+          this.event("post_scheduled", `${itemLabel(item)}: already ${fb === "published" ? "posted" : "scheduled"} on Facebook.`);
+        } else {
+          await this.hold(item, r.error);
+        }
       }
     }
   }
 
-  private async lookAlike(item: AutopilotItemRow, passed: CardRow[]): Promise<boolean> {
+  private async lookAlike(item: AutopilotItemRow, cards: CardRow[]): Promise<boolean> {
+    // In posting order, so "card 1" is the album's first card (the judge keeps the earlier of two look-alikes).
+    const passed = [...cards].sort(cardOrder);
     const urls = await this.d.repo.signedUrls(passed.map((c) => c.card_path!));
     const r = await this.d.judgeLookAlike(passed.map((card, k) => ({ card, url: urls[k] })));
     this.addUsage(r.usage);
@@ -286,7 +310,7 @@ class Tick {
       const c = passed[n - 1];
       if (!c) continue;
       const extra = { check_state: "pending" as const, check_note: "Remade: looked like another card", remakes: (c.remakes ?? 0) + 1 };
-      if (await this.remakeCard(c, extra)) {
+      if (await this.remakeCard(c, extra, "it stays as it is")) {
         Object.assign(c, extra, { status: "queued" });
         remade = true;
         this.event("card_remade", `${itemLabel(item)}: ${cardName(c)} remade (looked like another card).`);

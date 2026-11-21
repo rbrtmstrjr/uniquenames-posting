@@ -176,6 +176,70 @@ describe("tick", () => {
     expect(m.db.cards.find((c) => c.id === "back")!.check_state).toBe("passed");
   });
 
+  it("with less than 45 s of the tick left, a ready post is scheduled by the next tick", async () => {
+    let t = NOW;
+    const { m, d } = setup({ items: [item("i1", { state: "checking", post_id: "p1", lookalike_done: true })], cards: tenCards({ check_state: "passed" }) }, { now: () => t });
+    m.repo.pcHealth = async () => { t += 200_000; return "ready"; }; // the tick's first 200 s go by
+    await tick(d);
+    expect(d.schedule).not.toHaveBeenCalled();
+    expect(m.db.items[0].state).toBe("checking");
+    m.db.runs[0].tick_until = null;
+    m.repo.pcHealth = async () => "ready";
+    expect(await tick(d)).toEqual({ ran: true, status: "done" });
+    expect(d.schedule).toHaveBeenCalledTimes(1);
+    expect(m.db.items[0].state).toBe("scheduled");
+  });
+
+  it("a schedule that fails because the post is already on Facebook marks it scheduled, not held", async () => {
+    const already = vi.fn(async () => ({ ok: false as const, error: "This post is already on Facebook.", errorKind: "invalid" as const }));
+    for (const fb of ["scheduled", "published"] as const) {
+      const { m, d } = setup({ items: [item("i1", { state: "checking", post_id: "p1", lookalike_done: true })], cards: tenCards({ check_state: "passed" }) }, { schedule: already });
+      m.db.fbStates["p1"] = fb;
+      expect(await tick(d)).toEqual({ ran: true, status: "done" });
+      expect(m.db.items[0]).toMatchObject({ state: "scheduled", note: null });
+      expect(m.db.runs[0].events.map((e) => e.kind)).toContain("post_scheduled");
+      expect(m.db.runs[0].events.map((e) => e.kind)).not.toContain("post_held");
+    }
+    // Not on Facebook (it failed there): held with Facebook's message.
+    const failed = setup({ items: [item("i1", { state: "checking", post_id: "p1", lookalike_done: true })], cards: tenCards({ check_state: "passed" }) },
+      { schedule: vi.fn(async () => ({ ok: false as const, error: "Facebook refused: x", errorKind: "other" as const })) });
+    failed.m.db.fbStates["p1"] = "failed";
+    await tick(failed.d);
+    expect(failed.m.db.items[0]).toMatchObject({ state: "held", note: "Facebook refused: x" });
+  });
+
+  it("the look-alike check sees the cards in posting order (the closing card last), so card 1 is the album's first", async () => {
+    const judgeLookAlike = vi.fn(async () => ({ ok: true as const, data: [2], usage }));
+    const cards = [
+      card("cta", { kind: "cta", order_index: 1, position: 11, check_state: "passed" }),
+      ...tenCards({ check_state: "passed" }).map((c, i) => ({ ...c, order_index: 10 - i, position: i + 1 })),
+    ];
+    const { d } = setup({ items: [item("i1", { state: "checking", post_id: "p1" })], cards }, { judgeLookAlike });
+    await tick(d);
+    const sent = (judgeLookAlike.mock.calls[0] as unknown as [{ card: CardRow; url: string }[]])[0];
+    expect(sent.map((x) => x.card.id)).toEqual(["c9", "c8", "c7", "c6", "c5", "c4", "c3", "c2", "c1", "c0", "cta"]);
+    expect(sent[0].url).toBe("https://signed/cards/c9.jpg");
+    expect(d.remake).toHaveBeenCalledWith(expect.objectContaining({ id: "c8" }), expect.objectContaining({ check_note: "Remade: looked like another card" }));
+  });
+
+  it("a remake that does not go through is logged once for that card in that tick", async () => {
+    const remake = vi.fn(async () => false);
+    const { m, d } = setup({ items: [item("i1", { state: "making", post_id: "p1" })], cards: [card("c0"), card("c1", { status: "failed" })] }, { judgeCard: vi.fn(async () => fail("hands")), remake });
+    await tick(d);
+    expect(remake).toHaveBeenCalledTimes(2);
+    const runEvents = m.db.runs[0].events.filter((e) => e.kind === "run").map((e) => e.text);
+    expect(runEvents).toEqual([
+      "Sat, Nov 21 · Letter S · girl: couldn't remake c1; trying again next time.",
+      "Sat, Nov 21 · Letter S · girl: couldn't remake c0; trying again next time.",
+    ]);
+    expect(m.db.runs[0].events.filter((e) => e.kind === "card_remade")).toEqual([]);
+    // The card stays waiting for its check, and the next tick tries again (one more event).
+    expect(m.db.cards[0].check_state).toBe("pending");
+    m.db.runs[0].tick_until = null;
+    await tick(d);
+    expect(m.db.runs[0].events.filter((e) => e.kind === "run" && e.text.includes("couldn't remake c0"))).toHaveLength(2);
+  });
+
   it("names: hold, retry (3 tries), no theme left", async () => {
     const hold = setup({ items: [item("i1")] }, { pickNames: vi.fn(async () => ({ kind: "hold" as const, why: "Only 5 good girl names", usage, added: [], skipped: [] })) });
     await tick(hold.d);

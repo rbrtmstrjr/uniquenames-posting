@@ -15,8 +15,20 @@ const MAX_TOKENS = 16000;
 export interface Usage { input: number; output: number }
 export type JudgeResult<T> = { ok: true; data: T; usage: Usage } | { ok: false; error: string; usage: Usage; stop: boolean };
 
-/** Errors that stop the whole run until the owner fixes something (credits, key). */
-export const isStopError = (msg: string) => msg === CLAUDE_CREDITS_OUT || /\((401|403)\)/.test(msg) || /ANTHROPIC_API_KEY is not set/.test(msg);
+/** Errors that stop the whole run until the owner fixes something (credits, key, a model Claude does not know). */
+export const isStopError = (msg: string) => msg === CLAUDE_CREDITS_OUT || /\((401|403|404)\)/.test(msg) || /ANTHROPIC_API_KEY is not set/.test(msg);
+
+type UsageEntry = { input_tokens: number; output_tokens: number; cache_read_input_tokens?: number | null; cache_creation_input_tokens?: number | null };
+const inputOf = (u: UsageEntry) => u.input_tokens + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0);
+
+/**
+ * The tokens of the whole call. With the refusal fallback, the top-level usage covers only the attempt that answered;
+ * `usage.iterations` lists every attempt (a declined one included), so it is summed when present.
+ */
+function usageOf(u: UsageEntry & { iterations?: UsageEntry[] | null }): Usage {
+  if (u.iterations?.length) return u.iterations.reduce((s, it) => ({ input: s.input + inputOf(it), output: s.output + it.output_tokens }), { input: 0, output: 0 });
+  return { input: inputOf(u), output: u.output_tokens };
+}
 
 export async function judgeJson<T>(i: {
   system: string; content: Anthropic.Beta.Messages.BetaContentBlockParam[]; schema: GeminiSchema; parse: (raw: unknown) => T | null; timeoutMs?: number;
@@ -37,8 +49,7 @@ export async function judgeJson<T>(i: {
       messages: [{ role: "user", content: i.content }],
       output_config: { effort: JUDGE_EFFORT, format: { type: "json_schema", schema: toClaudeSchema(i.schema) } },
     }, { signal: ctrl.signal });
-    const u = msg.usage;
-    const usage: Usage = { input: u.input_tokens + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0), output: u.output_tokens };
+    const usage = usageOf(msg.usage);
     if (msg.stop_reason === "refusal") return { ok: false, error: "Claude declined to check this.", usage, stop: false };
     if (msg.stop_reason === "max_tokens") return { ok: false, error: "Claude ran out of room before finishing.", usage, stop: false };
     const text = msg.content.map((b) => (b.type === "text" ? b.text : "")).join("").trim();

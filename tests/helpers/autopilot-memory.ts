@@ -1,4 +1,4 @@
-import type { AutopilotItemRow, AutopilotRunRow, CardRow, Gender, SettingsRow } from "@/lib/db/types";
+import type { AutopilotItemRow, AutopilotRunRow, CardRow, FacebookState, Gender, SettingsRow } from "@/lib/db/types";
 import type { WorkerHealth } from "@/lib/status/worker-health";
 import type { AutopilotRepo, RepoName, TickPatch } from "@/lib/autopilot/repo";
 
@@ -11,7 +11,7 @@ export function memoryRepo(o: {
     runs: o.runs ?? [], items: o.items ?? [], cards: o.cards ?? [], names: o.names ?? [],
     health: o.health ?? ("ready" as WorkerHealth), themesLeft: { boy: 5, girl: 5, ...o.themesLeft },
     settings: { min_images: 6, max_images: 26, autopilot_name_themes: "Biblical (names from the Bible)\nSoft and cool", ...o.settings } as SettingsRow,
-    requestPosts: {} as Record<string, string>, skipped: [] as { id: string; note: string }[], meanings: [] as { id: string; meaning: string }[], nextId: 1,
+    requestPosts: {} as Record<string, string>, fbStates: {} as Record<string, FacebookState>, skipped: [] as { id: string; note: string }[], meanings: [] as { id: string; meaning: string }[], nextId: 1,
   };
   const repo: AutopilotRepo = {
     async activeRun() { return db.runs.find((r) => ["running", "waiting", "paused"].includes(r.status)) ?? null; },
@@ -30,6 +30,7 @@ export function memoryRepo(o: {
     },
     async saveProgress(id, p) { Object.assign(db.runs.find((x) => x.id === id)!, p); },
     async postIdForRequest(requestId) { return db.requestPosts[requestId] ?? null; },
+    async facebookState(postId) { return db.fbStates[postId] ?? null; },
     async items(runId) { return db.items.filter((i) => i.run_id === runId).map((i) => ({ ...i })); },
     async updateItem(id, patch) { Object.assign(db.items.find((i) => i.id === id)!, patch); },
     async cards(postIds) { return db.cards.filter((c) => c.post_id && postIds.includes(c.post_id)).map((c) => ({ ...c })); },

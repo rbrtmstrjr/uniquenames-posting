@@ -119,6 +119,23 @@ describe("judgeJson stop and retry paths", () => {
     create.mockRejectedValueOnce(APIError.generate(400, { error: { message: "Your credit balance is too low" } }, "400", new Headers()));
     expect(await run()).toMatchObject({ ok: false, stop: true, error: CLAUDE_CREDITS_OUT });
   });
+  it("a 404 (a model Claude does not know) stops the run", async () => {
+    create.mockRejectedValueOnce(APIError.generate(404, { error: { message: "model: claude-opus-5-5" } }, "404", new Headers()));
+    expect(await run()).toMatchObject({ ok: false, stop: true, error: expect.stringMatching(/\(404\)/) });
+    expect(isStopError("Claude does not know that model (404): x")).toBe(true);
+  });
+  it("with the refusal fallback, the usage adds up every attempt (the declined one too)", async () => {
+    const msg = answer({}, { input: 900, output: 80 });
+    Object.assign(msg.usage, { iterations: [
+      { type: "message", input_tokens: 1000, output_tokens: 40, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+      { type: "fallback_message", input_tokens: 900, output_tokens: 80, cache_read_input_tokens: 100, cache_creation_input_tokens: 0 },
+    ] });
+    create.mockResolvedValueOnce(msg);
+    expect(await run()).toMatchObject({ ok: true, usage: { input: 2000, output: 120 } });
+    // Without iterations, the top-level usage is the call's.
+    create.mockResolvedValueOnce(answer({}, { input: 700, output: 70 }));
+    expect(await run()).toMatchObject({ ok: true, usage: { input: 700, output: 70 } });
+  });
   it("a timeout is a failed check, not a stop", async () => {
     create.mockRejectedValueOnce(new APIConnectionTimeoutError());
     expect(await run()).toMatchObject({ ok: false, stop: false, error: "Claude timed out." });

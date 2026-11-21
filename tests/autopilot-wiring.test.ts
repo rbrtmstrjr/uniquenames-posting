@@ -54,3 +54,21 @@ describe("autopilotDeps", () => {
     expect(r.names?.map((n) => n.name)).toEqual(["Zephyr"]);
   });
 });
+
+describe("supabaseRepo", () => {
+  it("reads every name with Autopilot's note (a restored name keeps it)", async () => {
+    const { supabaseRepo } = await import("@/lib/autopilot/repo");
+    const fake = fakeSupabase(() => ({ data: [{ id: "n1", name: "Saoirse", meaning: "m", gender: "girl", style: "single", status: "available", autopilot_note: "Skipped by Autopilot: hard to say" }] }));
+    const names = await supabaseRepo(fake.client as never).allNames();
+    expect(names[0].autopilot_note).toBe("Skipped by Autopilot: hard to say");
+    expect(fake.queries[0].ops).toContainEqual(["select", "id, name, meaning, gender, style, status, autopilot_note"]);
+  });
+
+  it("reads a post's Facebook state", async () => {
+    const { supabaseRepo } = await import("@/lib/autopilot/repo");
+    const fake = fakeSupabase(() => ({ data: { fb_state: "scheduled" } }));
+    expect(await supabaseRepo(fake.client as never).facebookState("p1")).toBe("scheduled");
+    expect(fake.queries[0]).toMatchObject({ table: "posts", ops: expect.arrayContaining([["select", "fb_state"], ["eq", "id", "p1"]]) });
+    expect(await supabaseRepo(fakeSupabase(() => ({ data: null })).client as never).facebookState("p1")).toBeNull();
+  });
+});
