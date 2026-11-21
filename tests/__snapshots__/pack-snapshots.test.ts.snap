@@ -8184,20 +8184,28 @@ No text, no letters, no words, no logo, no watermark anywhere.",
 
 exports[`unique-names golden outputs (niche pack must keep these byte-for-byte) > post caption prompts and templates 1`] = `
 {
-  "CAPTION_SYSTEM": "You write the Facebook post caption for @unique_names, a warm, friendly page that shares unique baby names.
-Each post is a themed baby photoshoot: a set of photo cards, each showing one baby name and its meaning on the picture.
-Write 1 or 2 short, natural sentences (at most 220 characters in total) in the caption style the prompt asks for.
-Sound like a real person who loves baby names talking to parents-to-be: warm, plain everyday words, normal capitalization, not salesy or flowery.
-The readers are parents around the world (most in the Philippines, others in the US, Africa, Australia and beyond): write simple, warm English anyone understands, with no region-specific slang, and never a Filipino or Tagalog word or Taglish (no anak, mahal, ganda, salamat, naman, lang, mga), even next to a Filipino name; a name's meaning is given in plain English.
+  "CAPTION_SYSTEM": "You write the Facebook post caption for @unique_names, a page where moms and moms-to-be find unique baby names.
+Each post is an album of baby name cards (a name and its meaning on each photo), all on one theme: a letter, a name theme such as Biblical names, or a pair of initials.
+Write 1 or 2 short sentences (at most 220 characters in total) in the angle the prompt asks for.
+Talk the way one mom talks to another: warm, simple, everyday English a busy mom gets at a glance, speaking to the reader (you, your baby, your daughter, your son). Catchy, never salesy or flowery.
+Name the post's theme exactly as the prompt gives it, in the first sentence or right after one short opening line, so readers see at once what the album is.
+Never describe the photos: no props, outfits, colors, lighting, backdrop or setting. Talk about the names and the feeling of choosing one.
+The readers are moms around the world, most in the Philippines: simple English anyone understands, no region-specific slang, and never a Filipino or Tagalog word or Taglish (no anak, mahal, ganda, salamat, naman, lang, mga), even next to a Filipino name.
+This is a page, not a person: never write as if a real baby or family exists (no my baby, our little one, we loved).
 Every caption must read clearly different from the recent captions in the prompt: a different opening word, a different sentence shape and a different question. Never reuse their phrases.
-Avoid stock openers and cliches such as "Get ready", "Look no further", "Introducing", "These lovely", "Calling all" or "swoon".
-Say "baby boy names" or "baby girl names" (or close wording) once so readers know what the post is.
-Only mention a name when the style asks for one, and then only names from the list in the prompt, spelled exactly. When you say what a name means, use only the meaning given for it: never invent a meaning, an origin or a fact.
+Avoid stock openers and cliches such as Get ready, Look no further, Introducing, These lovely, Calling all, swoon.
+Only mention a name when the angle asks for one, and then only names from the list in the prompt, spelled exactly. When you say what a name means, use only the meaning given for it: never invent a meaning, an origin or a fact.
 Do not mention how many names there are.
-The photos are a styled photoshoot set for name ideas, not a real family: never write as if a real baby or family exists (no "our little one", "we loved watching", "my baby"); talk about the set, the mood and the names.
-At most one question, and it must be genuine and open. Never engagement bait: no "comment YES", "tag a friend", "share if", "like if", "in the comments", and never ask anyone to follow, like or share.
+At most one question, and it must be genuine and open. Never engagement bait: no comment YES, tag a friend, share if, like if, in the comments, and never ask anyone to follow, like, share or save.
 Use at most one emoji, or none. No hashtags in the caption, no @mentions, no links, no quotation marks.
-Also suggest 1 or 2 hashtags specific to this photoshoot's theme (e.g. #autumnbaby, #oceanbaby), not generic baby-name tags like #babynames or #babyboynames: lowercase letters and digits only, at most 24 characters, right for the post's gender, never #fyp, #foryou, #follow..., #viral or other bait, no other platforms' tags (#tiktok...), and not one of the recent hashtags.
+Examples of the tone (for tone only: never copy their words or their shape):
+- Still looking for a girl name that's sweet but not too common? 💕 These baby girl names that start with R might be the one.
+- Choosing a name is one of the first gifts you give your baby. These Biblical baby boy names carry faith and strength 🙏
+- Rosalie, Raya or Reign? Baby girl names that start with R, each one pretty enough to say all day.
+- Want a name your son can be proud of? These Biblical baby boy names all have a meaning worth keeping.
+- Imagine calling her name across the room for the very first time. These soft and cool baby girl names make that moment sweet.
+- Kai or Kian for your little boy? Baby boy names that start with K, short and easy to love.
+Also suggest 1 or 2 hashtags for this photoshoot's title (e.g. #countrybarnboy, #oceanbaby), not generic baby-name tags like #babynames or #babyboynames: lowercase letters and digits only, at most 24 characters, right for the post's gender, never #fyp, #foryou, #follow..., #viral or other bait, no other platforms' tags (#tiktok...), and not one of the recent hashtags.
 Return JSON: {"caption": "...", "tags": ["#..."]}.",
   "composed|boy|ai": "A cozy set for little dreamers.
 
@@ -8212,13 +8220,8 @@ Return JSON: {"caption": "...", "tags": ["#..."]}.",
 
 #uniquenames #babynames #babygirlnames",
   "prompt|boy|choice": "Today's post: baby boy names (first + middle name pairs).
-Caption style: A or B. Pick two names from the list and ask, naturally, which one readers would choose (for example "Name or Name for ...?"), with a short line about the photoshoot and these baby boy names. You may add the meaning of one or both.
-Photoshoot theme: Boho Pampas
-Backdrop: smooth seamless chocolate brown studio backdrop with a soft darker vignette
-Outfit: a tiny cream knitted romper with a little collar
-Props: wicker basket, pampas grass, felt bunny
-Lighting: soft warm light from the left, gentle shadows, cozy
-Colors: brown, cream, oat and soft gold
+Caption style: A or B. Pick two names from the list and ask which one readers would choose for their son (for example Name or Name for your son?), and name the theme. You may add the meaning of one or both.
+Photoshoot title (only for the hashtags; do not describe the photos): Boho Pampas
 
 Names in this post with their real meanings (use only these, spelled exactly):
 - Agirlname: meaning of agirlname
@@ -8234,26 +8237,20 @@ Names in this post with their real meanings (use only these, spelled exactly):
 - Kgirlname: meaning of kgirlname
 - Lgirlname: meaning of lgirlname
 - Mgirlname: meaning of mgirlname
+
+This post's theme: baby boy names. Name it in the first sentence, or right after one short opening line (within the first 100 characters).
 
 Write the caption and suggest the theme hashtags.",
   "prompt|boy|compliment": "Today's post: baby boy names (first + middle name pairs).
-Caption style: Warm compliment. Open with a kind, specific line to moms and moms-to-be (for example the love and care that goes into choosing a name), then these baby boy names and the photoshoot's mood. A question is optional. Do not name any names.
-Photoshoot theme: Boho Pampas
-Backdrop: smooth seamless chocolate brown studio backdrop with a soft darker vignette
-Outfit: a tiny cream knitted romper with a little collar
-Props: wicker basket, pampas grass, felt bunny
-Lighting: soft warm light from the left, gentle shadows, cozy
-Colors: brown, cream, oat and soft gold
+Caption style: Encouragement. Open with one kind, specific line to moms and moms-to-be about choosing a name for their son, then name the theme. A question is optional. Do not name any names.
+Photoshoot title (only for the hashtags; do not describe the photos): Boho Pampas
+
+This post's theme: baby boy names. Name it in the first sentence, or right after one short opening line (within the first 100 characters).
 
 Write the caption and suggest the theme hashtags.",
   "prompt|boy|fact": "Today's post: baby boy names (first + middle name pairs).
-Caption style: Fun name fact. Share one small fact that follows directly from a given meaning (what the meaning brings to mind, or an origin only if the meaning states it), naming that name, then tie in these baby boy names. No outside facts. You may end with a short open question.
-Photoshoot theme: Boho Pampas
-Backdrop: smooth seamless chocolate brown studio backdrop with a soft darker vignette
-Outfit: a tiny cream knitted romper with a little collar
-Props: wicker basket, pampas grass, felt bunny
-Lighting: soft warm light from the left, gentle shadows, cozy
-Colors: brown, cream, oat and soft gold
+Caption style: Name teaser. Open with 2 or 3 names from the list as a playful line (for example Name, Name or Name?), then name the theme in a warm line about baby boy names. Add a meaning only if it is given.
+Photoshoot title (only for the hashtags; do not describe the photos): Boho Pampas
 
 Names in this post with their real meanings (use only these, spelled exactly):
 - Agirlname: meaning of agirlname
@@ -8270,38 +8267,29 @@ Names in this post with their real meanings (use only these, spelled exactly):
 - Lgirlname: meaning of lgirlname
 - Mgirlname: meaning of mgirlname
 
+This post's theme: baby boy names. Name it in the first sentence, or right after one short opening line (within the first 100 characters).
+
 Write the caption and suggest the theme hashtags.",
   "prompt|boy|letter": "Today's post: baby boy names.
-Caption style: Story moment. Open inside the photoshoot with one small, concrete moment or detail (a prop, the outfit, the light), then tie it to these baby boy names. You may end with a short open question. Do not name any names.
-Photoshoot theme: Boho Pampas
-Backdrop: smooth seamless chocolate brown studio backdrop with a soft darker vignette
-Outfit: a tiny cream knitted romper with a little collar
-Props: wicker basket, pampas grass, felt bunny
-Lighting: soft warm light from the left, gentle shadows, cozy
-Colors: brown, cream, oat and soft gold
+Caption style: Mom's moment. Open with one small, relatable moment of choosing or using a name (saying it out loud, calling your son by it for the first time), then name the theme. Do not name any names.
+Photoshoot title (only for the hashtags; do not describe the photos): Boho Pampas
 
 Every name in this post starts with the letter K: baby boy names starting with K.
 Say naturally that these are baby boy names starting with the letter K, for example "baby boy names that start with K".
 
+This post's theme: baby boy names that start with K. Name it in the first sentence, or right after one short opening line (within the first 100 characters).
+
 Write the caption and suggest the theme hashtags.",
   "prompt|boy|question": "Today's post: baby boy names (first + middle name pairs).
-Caption style: Gentle question. Open with a soft, genuine question to parents-to-be about choosing a name (the question is the first sentence), then one short line tying in the photoshoot and these baby boy names. No second question. Do not name any names.
-Photoshoot theme: Boho Pampas
-Backdrop: smooth seamless chocolate brown studio backdrop with a soft darker vignette
-Outfit: a tiny cream knitted romper with a little collar
-Props: wicker basket, pampas grass, felt bunny
-Lighting: soft warm light from the left, gentle shadows, cozy
-Colors: brown, cream, oat and soft gold
+Caption style: Feeling question. Open with one soft, genuine question about what a mom feels while looking for a boy name (for example wanting something sweet but not too common), then name the theme. No second question. Do not name any names.
+Photoshoot title (only for the hashtags; do not describe the photos): Boho Pampas
+
+This post's theme: baby boy names. Name it in the first sentence, or right after one short opening line (within the first 100 characters).
 
 Write the caption and suggest the theme hashtags.",
   "prompt|boy|series": "Today's post: baby boy names.
-Caption style: Name spotlight. Feature 1 or 2 names from the list with their given meanings, woven into a warm sentence about these baby boy names. You may end with a short open question.
-Photoshoot theme: Boho Pampas
-Backdrop: smooth seamless chocolate brown studio backdrop with a soft darker vignette
-Outfit: a tiny cream knitted romper with a little collar
-Props: wicker basket, pampas grass, felt bunny
-Lighting: soft warm light from the left, gentle shadows, cozy
-Colors: brown, cream, oat and soft gold
+Caption style: Meaning hook. Name the theme and feature 1 or 2 names from the list with their given meanings, framed for a mom (a name your son can be proud of, a name that means something). You may end with a short open question.
+Photoshoot title (only for the hashtags; do not describe the photos): Boho Pampas
 
 Names in this post with their real meanings (use only these, spelled exactly):
 - Agirlname: meaning of agirlname
@@ -8321,6 +8309,8 @@ Names in this post with their real meanings (use only these, spelled exactly):
 This post is Part 2 of 2 of an A to Z series of single-word baby boy names: one name for each letter from N to Z.
 Say naturally that it is Part 2 of the A to Z series, for example "Part 2 of our A to Z baby boy names, N to Z".
 
+This post's theme: Part 2 of our A to Z baby boy names. Name it in the first sentence, or right after one short opening line (within the first 100 characters).
+
 Recent captions on the page, newest first. Yours must read clearly different (opening word, sentence shape, question):
 1. Tiny boots, big dreams.
 2. Soft light and softer names.
@@ -8330,13 +8320,8 @@ Hashtags used recently (suggest different ones): #autumnbaby #babynames
 
 Write the caption and suggest the theme hashtags.",
   "prompt|boy|spotlight": "Today's post: baby boy names (first + middle name pairs).
-Caption style: Name spotlight. Feature 1 or 2 names from the list with their given meanings, woven into a warm sentence about these baby boy names. You may end with a short open question.
-Photoshoot theme: Boho Pampas
-Backdrop: smooth seamless chocolate brown studio backdrop with a soft darker vignette
-Outfit: a tiny cream knitted romper with a little collar
-Props: wicker basket, pampas grass, felt bunny
-Lighting: soft warm light from the left, gentle shadows, cozy
-Colors: brown, cream, oat and soft gold
+Caption style: Meaning hook. Name the theme and feature 1 or 2 names from the list with their given meanings, framed for a mom (a name your son can be proud of, a name that means something). You may end with a short open question.
+Photoshoot title (only for the hashtags; do not describe the photos): Boho Pampas
 
 Names in this post with their real meanings (use only these, spelled exactly):
 - Agirlname: meaning of agirlname
@@ -8352,26 +8337,20 @@ Names in this post with their real meanings (use only these, spelled exactly):
 - Kgirlname: meaning of kgirlname
 - Lgirlname: meaning of lgirlname
 - Mgirlname: meaning of mgirlname
+
+This post's theme: baby boy names. Name it in the first sentence, or right after one short opening line (within the first 100 characters).
 
 Write the caption and suggest the theme hashtags.",
   "prompt|boy|story": "Today's post: baby boy names (first + middle name pairs).
-Caption style: Story moment. Open inside the photoshoot with one small, concrete moment or detail (a prop, the outfit, the light), then tie it to these baby boy names. You may end with a short open question. Do not name any names.
-Photoshoot theme: Boho Pampas
-Backdrop: smooth seamless chocolate brown studio backdrop with a soft darker vignette
-Outfit: a tiny cream knitted romper with a little collar
-Props: wicker basket, pampas grass, felt bunny
-Lighting: soft warm light from the left, gentle shadows, cozy
-Colors: brown, cream, oat and soft gold
+Caption style: Mom's moment. Open with one small, relatable moment of choosing or using a name (saying it out loud, calling your son by it for the first time), then name the theme. Do not name any names.
+Photoshoot title (only for the hashtags; do not describe the photos): Boho Pampas
+
+This post's theme: baby boy names. Name it in the first sentence, or right after one short opening line (within the first 100 characters).
 
 Write the caption and suggest the theme hashtags.",
   "prompt|girl|choice": "Today's post: baby girl names (first + middle name pairs).
-Caption style: A or B. Pick two names from the list and ask, naturally, which one readers would choose (for example "Name or Name for ...?"), with a short line about the photoshoot and these baby girl names. You may add the meaning of one or both.
-Photoshoot theme: Blush Floral
-Backdrop: smooth seamless chocolate brown studio backdrop with a soft darker vignette
-Outfit: a tiny cream knitted romper with a little collar
-Props: wicker basket, pampas grass, felt bunny
-Lighting: soft warm light from the left, gentle shadows, cozy
-Colors: brown, cream, oat and soft gold
+Caption style: A or B. Pick two names from the list and ask which one readers would choose for their daughter (for example Name or Name for your daughter?), and name the theme. You may add the meaning of one or both.
+Photoshoot title (only for the hashtags; do not describe the photos): Blush Floral
 
 Names in this post with their real meanings (use only these, spelled exactly):
 - Agirlname: meaning of agirlname
@@ -8387,26 +8366,20 @@ Names in this post with their real meanings (use only these, spelled exactly):
 - Kgirlname: meaning of kgirlname
 - Lgirlname: meaning of lgirlname
 - Mgirlname: meaning of mgirlname
+
+This post's theme: baby girl names. Name it in the first sentence, or right after one short opening line (within the first 100 characters).
 
 Write the caption and suggest the theme hashtags.",
   "prompt|girl|compliment": "Today's post: baby girl names (first + middle name pairs).
-Caption style: Warm compliment. Open with a kind, specific line to moms and moms-to-be (for example the love and care that goes into choosing a name), then these baby girl names and the photoshoot's mood. A question is optional. Do not name any names.
-Photoshoot theme: Blush Floral
-Backdrop: smooth seamless chocolate brown studio backdrop with a soft darker vignette
-Outfit: a tiny cream knitted romper with a little collar
-Props: wicker basket, pampas grass, felt bunny
-Lighting: soft warm light from the left, gentle shadows, cozy
-Colors: brown, cream, oat and soft gold
+Caption style: Encouragement. Open with one kind, specific line to moms and moms-to-be about choosing a name for their daughter, then name the theme. A question is optional. Do not name any names.
+Photoshoot title (only for the hashtags; do not describe the photos): Blush Floral
+
+This post's theme: baby girl names. Name it in the first sentence, or right after one short opening line (within the first 100 characters).
 
 Write the caption and suggest the theme hashtags.",
   "prompt|girl|fact": "Today's post: baby girl names (first + middle name pairs).
-Caption style: Fun name fact. Share one small fact that follows directly from a given meaning (what the meaning brings to mind, or an origin only if the meaning states it), naming that name, then tie in these baby girl names. No outside facts. You may end with a short open question.
-Photoshoot theme: Blush Floral
-Backdrop: smooth seamless chocolate brown studio backdrop with a soft darker vignette
-Outfit: a tiny cream knitted romper with a little collar
-Props: wicker basket, pampas grass, felt bunny
-Lighting: soft warm light from the left, gentle shadows, cozy
-Colors: brown, cream, oat and soft gold
+Caption style: Name teaser. Open with 2 or 3 names from the list as a playful line (for example Name, Name or Name?), then name the theme in a warm line about baby girl names. Add a meaning only if it is given.
+Photoshoot title (only for the hashtags; do not describe the photos): Blush Floral
 
 Names in this post with their real meanings (use only these, spelled exactly):
 - Agirlname: meaning of agirlname
@@ -8423,38 +8396,29 @@ Names in this post with their real meanings (use only these, spelled exactly):
 - Lgirlname: meaning of lgirlname
 - Mgirlname: meaning of mgirlname
 
+This post's theme: baby girl names. Name it in the first sentence, or right after one short opening line (within the first 100 characters).
+
 Write the caption and suggest the theme hashtags.",
   "prompt|girl|letter": "Today's post: baby girl names.
-Caption style: Story moment. Open inside the photoshoot with one small, concrete moment or detail (a prop, the outfit, the light), then tie it to these baby girl names. You may end with a short open question. Do not name any names.
-Photoshoot theme: Blush Floral
-Backdrop: smooth seamless chocolate brown studio backdrop with a soft darker vignette
-Outfit: a tiny cream knitted romper with a little collar
-Props: wicker basket, pampas grass, felt bunny
-Lighting: soft warm light from the left, gentle shadows, cozy
-Colors: brown, cream, oat and soft gold
+Caption style: Mom's moment. Open with one small, relatable moment of choosing or using a name (saying it out loud, calling your daughter by it for the first time), then name the theme. Do not name any names.
+Photoshoot title (only for the hashtags; do not describe the photos): Blush Floral
 
 Every name in this post starts with the letter K: baby girl names starting with K.
 Say naturally that these are baby girl names starting with the letter K, for example "baby girl names that start with K".
 
+This post's theme: baby girl names that start with K. Name it in the first sentence, or right after one short opening line (within the first 100 characters).
+
 Write the caption and suggest the theme hashtags.",
   "prompt|girl|question": "Today's post: baby girl names (first + middle name pairs).
-Caption style: Gentle question. Open with a soft, genuine question to parents-to-be about choosing a name (the question is the first sentence), then one short line tying in the photoshoot and these baby girl names. No second question. Do not name any names.
-Photoshoot theme: Blush Floral
-Backdrop: smooth seamless chocolate brown studio backdrop with a soft darker vignette
-Outfit: a tiny cream knitted romper with a little collar
-Props: wicker basket, pampas grass, felt bunny
-Lighting: soft warm light from the left, gentle shadows, cozy
-Colors: brown, cream, oat and soft gold
+Caption style: Feeling question. Open with one soft, genuine question about what a mom feels while looking for a girl name (for example wanting something sweet but not too common), then name the theme. No second question. Do not name any names.
+Photoshoot title (only for the hashtags; do not describe the photos): Blush Floral
+
+This post's theme: baby girl names. Name it in the first sentence, or right after one short opening line (within the first 100 characters).
 
 Write the caption and suggest the theme hashtags.",
   "prompt|girl|series": "Today's post: baby girl names.
-Caption style: Name spotlight. Feature 1 or 2 names from the list with their given meanings, woven into a warm sentence about these baby girl names. You may end with a short open question.
-Photoshoot theme: Blush Floral
-Backdrop: smooth seamless chocolate brown studio backdrop with a soft darker vignette
-Outfit: a tiny cream knitted romper with a little collar
-Props: wicker basket, pampas grass, felt bunny
-Lighting: soft warm light from the left, gentle shadows, cozy
-Colors: brown, cream, oat and soft gold
+Caption style: Meaning hook. Name the theme and feature 1 or 2 names from the list with their given meanings, framed for a mom (a name your daughter can be proud of, a name that means something). You may end with a short open question.
+Photoshoot title (only for the hashtags; do not describe the photos): Blush Floral
 
 Names in this post with their real meanings (use only these, spelled exactly):
 - Agirlname: meaning of agirlname
@@ -8474,6 +8438,8 @@ Names in this post with their real meanings (use only these, spelled exactly):
 This post is Part 2 of 2 of an A to Z series of single-word baby girl names: one name for each letter from N to Z.
 Say naturally that it is Part 2 of the A to Z series, for example "Part 2 of our A to Z baby girl names, N to Z".
 
+This post's theme: Part 2 of our A to Z baby girl names. Name it in the first sentence, or right after one short opening line (within the first 100 characters).
+
 Recent captions on the page, newest first. Yours must read clearly different (opening word, sentence shape, question):
 1. Tiny boots, big dreams.
 2. Soft light and softer names.
@@ -8483,13 +8449,8 @@ Hashtags used recently (suggest different ones): #autumnbaby #babynames
 
 Write the caption and suggest the theme hashtags.",
   "prompt|girl|spotlight": "Today's post: baby girl names (first + middle name pairs).
-Caption style: Name spotlight. Feature 1 or 2 names from the list with their given meanings, woven into a warm sentence about these baby girl names. You may end with a short open question.
-Photoshoot theme: Blush Floral
-Backdrop: smooth seamless chocolate brown studio backdrop with a soft darker vignette
-Outfit: a tiny cream knitted romper with a little collar
-Props: wicker basket, pampas grass, felt bunny
-Lighting: soft warm light from the left, gentle shadows, cozy
-Colors: brown, cream, oat and soft gold
+Caption style: Meaning hook. Name the theme and feature 1 or 2 names from the list with their given meanings, framed for a mom (a name your daughter can be proud of, a name that means something). You may end with a short open question.
+Photoshoot title (only for the hashtags; do not describe the photos): Blush Floral
 
 Names in this post with their real meanings (use only these, spelled exactly):
 - Agirlname: meaning of agirlname
@@ -8506,29 +8467,28 @@ Names in this post with their real meanings (use only these, spelled exactly):
 - Lgirlname: meaning of lgirlname
 - Mgirlname: meaning of mgirlname
 
-Write the caption and suggest the theme hashtags.",
-  "prompt|girl|story": "Today's post: baby girl names (first + middle name pairs).
-Caption style: Story moment. Open inside the photoshoot with one small, concrete moment or detail (a prop, the outfit, the light), then tie it to these baby girl names. You may end with a short open question. Do not name any names.
-Photoshoot theme: Blush Floral
-Backdrop: smooth seamless chocolate brown studio backdrop with a soft darker vignette
-Outfit: a tiny cream knitted romper with a little collar
-Props: wicker basket, pampas grass, felt bunny
-Lighting: soft warm light from the left, gentle shadows, cozy
-Colors: brown, cream, oat and soft gold
+This post's theme: baby girl names. Name it in the first sentence, or right after one short opening line (within the first 100 characters).
 
 Write the caption and suggest the theme hashtags.",
-  "style|boy|choice": "A or B. Pick two names from the list and ask, naturally, which one readers would choose (for example "Name or Name for ...?"), with a short line about the photoshoot and these baby boy names. You may add the meaning of one or both.",
-  "style|boy|compliment": "Warm compliment. Open with a kind, specific line to moms and moms-to-be (for example the love and care that goes into choosing a name), then these baby boy names and the photoshoot's mood. A question is optional. Do not name any names.",
-  "style|boy|fact": "Fun name fact. Share one small fact that follows directly from a given meaning (what the meaning brings to mind, or an origin only if the meaning states it), naming that name, then tie in these baby boy names. No outside facts. You may end with a short open question.",
-  "style|boy|question": "Gentle question. Open with a soft, genuine question to parents-to-be about choosing a name (the question is the first sentence), then one short line tying in the photoshoot and these baby boy names. No second question. Do not name any names.",
-  "style|boy|spotlight": "Name spotlight. Feature 1 or 2 names from the list with their given meanings, woven into a warm sentence about these baby boy names. You may end with a short open question.",
-  "style|boy|story": "Story moment. Open inside the photoshoot with one small, concrete moment or detail (a prop, the outfit, the light), then tie it to these baby boy names. You may end with a short open question. Do not name any names.",
-  "style|girl|choice": "A or B. Pick two names from the list and ask, naturally, which one readers would choose (for example "Name or Name for ...?"), with a short line about the photoshoot and these baby girl names. You may add the meaning of one or both.",
-  "style|girl|compliment": "Warm compliment. Open with a kind, specific line to moms and moms-to-be (for example the love and care that goes into choosing a name), then these baby girl names and the photoshoot's mood. A question is optional. Do not name any names.",
-  "style|girl|fact": "Fun name fact. Share one small fact that follows directly from a given meaning (what the meaning brings to mind, or an origin only if the meaning states it), naming that name, then tie in these baby girl names. No outside facts. You may end with a short open question.",
-  "style|girl|question": "Gentle question. Open with a soft, genuine question to parents-to-be about choosing a name (the question is the first sentence), then one short line tying in the photoshoot and these baby girl names. No second question. Do not name any names.",
-  "style|girl|spotlight": "Name spotlight. Feature 1 or 2 names from the list with their given meanings, woven into a warm sentence about these baby girl names. You may end with a short open question.",
-  "style|girl|story": "Story moment. Open inside the photoshoot with one small, concrete moment or detail (a prop, the outfit, the light), then tie it to these baby girl names. You may end with a short open question. Do not name any names.",
+  "prompt|girl|story": "Today's post: baby girl names (first + middle name pairs).
+Caption style: Mom's moment. Open with one small, relatable moment of choosing or using a name (saying it out loud, calling your daughter by it for the first time), then name the theme. Do not name any names.
+Photoshoot title (only for the hashtags; do not describe the photos): Blush Floral
+
+This post's theme: baby girl names. Name it in the first sentence, or right after one short opening line (within the first 100 characters).
+
+Write the caption and suggest the theme hashtags.",
+  "style|boy|choice": "A or B. Pick two names from the list and ask which one readers would choose for their son (for example Name or Name for your son?), and name the theme. You may add the meaning of one or both.",
+  "style|boy|compliment": "Encouragement. Open with one kind, specific line to moms and moms-to-be about choosing a name for their son, then name the theme. A question is optional. Do not name any names.",
+  "style|boy|fact": "Name teaser. Open with 2 or 3 names from the list as a playful line (for example Name, Name or Name?), then name the theme in a warm line about baby boy names. Add a meaning only if it is given.",
+  "style|boy|question": "Feeling question. Open with one soft, genuine question about what a mom feels while looking for a boy name (for example wanting something sweet but not too common), then name the theme. No second question. Do not name any names.",
+  "style|boy|spotlight": "Meaning hook. Name the theme and feature 1 or 2 names from the list with their given meanings, framed for a mom (a name your son can be proud of, a name that means something). You may end with a short open question.",
+  "style|boy|story": "Mom's moment. Open with one small, relatable moment of choosing or using a name (saying it out loud, calling your son by it for the first time), then name the theme. Do not name any names.",
+  "style|girl|choice": "A or B. Pick two names from the list and ask which one readers would choose for their daughter (for example Name or Name for your daughter?), and name the theme. You may add the meaning of one or both.",
+  "style|girl|compliment": "Encouragement. Open with one kind, specific line to moms and moms-to-be about choosing a name for their daughter, then name the theme. A question is optional. Do not name any names.",
+  "style|girl|fact": "Name teaser. Open with 2 or 3 names from the list as a playful line (for example Name, Name or Name?), then name the theme in a warm line about baby girl names. Add a meaning only if it is given.",
+  "style|girl|question": "Feeling question. Open with one soft, genuine question about what a mom feels while looking for a girl name (for example wanting something sweet but not too common), then name the theme. No second question. Do not name any names.",
+  "style|girl|spotlight": "Meaning hook. Name the theme and feature 1 or 2 names from the list with their given meanings, framed for a mom (a name your daughter can be proud of, a name that means something). You may end with a short open question.",
+  "style|girl|story": "Mom's moment. Open with one small, relatable moment of choosing or using a name (saying it out loud, calling your daughter by it for the first time), then name the theme. Do not name any names.",
   "template|boy": "Here are some beautiful names you can give to your baby boy. 🥰",
   "template|boy|letter": "Baby boy names starting with M. Here are some beautiful names you can give to your baby boy. 🥰",
   "template|boy|series": "A to Z baby boy names, Part 1 (A to M). Here are some beautiful names you can give to your baby boy. 🥰",

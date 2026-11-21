@@ -69,12 +69,13 @@ beforeEach(() => { generateJson.mockReset(); world(); vi.spyOn(Math, "random").m
 afterEach(() => { vi.restoreAllMocks(); });
 
 describe("createPostAction captions", () => {
-  it("uses the Gemini caption + hashtags, with the theme in the prompt (caption_ai undefined = on); style + set saved", async () => {
+  it("uses the Gemini caption + hashtags, with the photoshoot title (only) in the prompt (caption_ai undefined = on); style + set saved", async () => {
     generateJson.mockResolvedValueOnce({ ok: true, data: { caption: "Sea breezes and tiny sailboats set the scene for these baby boy names ⛵" } });
     expect(await createPostAction(createInput)).toEqual({ ok: true, postId: POST_ID });
     // Before 009 settings: the always-tag #uniquenames + the least recently used pool tag.
     expect(createdCaption()).toBe("Sea breezes and tiny sailboats set the scene for these baby boy names ⛵\n\n#uniquenames #babynames");
-    expect(generateJson.mock.calls[0][0].prompt).toContain("tiny sailboat and seashells");
+    expect(generateJson.mock.calls[0][0].prompt).toContain("Ocean Breeze");
+    expect(generateJson.mock.calls[0][0].prompt).not.toContain("tiny sailboat and seashells");
     expect(postUpdates()).toEqual([{ caption_style: "story", hashtag_set: "#uniquenames #babynames" }]);
   });
 
