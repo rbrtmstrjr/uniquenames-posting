@@ -8,7 +8,7 @@ import { nameThemeLabel } from "./name-themes";
 /** Minutes after midnight, Manila: morning 8:00–9:59 AM, afternoon 1:00–1:59 PM. */
 export const MORNING = { from: 8 * 60, to: 9 * 60 + 59 } as const;
 export const AFTERNOON = { from: 13 * 60, to: 13 * 60 + 59 } as const;
-export const NAMES_PER_POST = { min: 10, max: 15 } as const;
+export const NAMES_PER_POST = { min: 9, max: 15 } as const;
 /** A post needs at least this many good names (and passed name cards), or it is held. */
 export const MIN_GOOD_NAMES = 8;
 export const MAX_DAYS = 7;

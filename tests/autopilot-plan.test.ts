@@ -63,7 +63,12 @@ describe("planRun", () => {
     expect(afternoons.every((m) => m >= AFTERNOON.from && m <= AFTERNOON.to)).toBe(true);
     expect(new Set(mornings).size).toBeGreaterThan(3);
     expect(new Set(items.filter((i) => i.slot === "morning").map((i) => i.gender)).size).toBe(2);
-    expect(items.every((i) => i.nameCount >= 10 && i.nameCount <= 15)).toBe(true);
+    expect(items.every((i) => i.nameCount >= 9 && i.nameCount <= 15)).toBe(true);
+  });
+  it("9 to 15 names a post: 10 to 16 cards with the closing card (owner, 2026-11-21)", () => {
+    const at = (r: number) => planRun({ firstDay: "2026-11-21", days: 1, last: null, themes: [], minImages: 6, maxImages: 26, rng: () => r });
+    expect(at(0).every((i) => i.nameCount === 9)).toBe(true);
+    expect(at(0.999).every((i) => i.nameCount === 15)).toBe(true);
   });
   it("keeps the name count inside the settings min/max", () => {
     const items = planRun({ firstDay: "2026-11-21", days: 1, last: null, themes: [], minImages: 6, maxImages: 9, rng: () => 0.99 });
