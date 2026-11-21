@@ -60,13 +60,15 @@ export function planPost(input: PlanInput): PlanResult {
     const gone = only.size - pool.length;
     return { ok: false, reason: `${gone} of the chosen names ${gone === 1 ? "is" : "are"} no longer available.` };
   }
-  if (r.letter) {
+  // Chosen names (Autopilot) are a complete list: its names step already made sure there are enough (MIN_GOOD_NAMES),
+  // so the Settings minimum does not apply to them (only the maximum above).
+  if (r.letter && !only) {
     const need = r.count ?? s.min_images;
     if (pool.length < need) {
       return { ok: false, reason: `Only ${pool.length} unused ${label} ${r.style} names start with ${r.letter}; this post needs ${need}. Use Suggest with AI on Today to add more.` };
     }
   }
-  if (pool.length < s.min_images) {
+  if (!only && pool.length < s.min_images) {
     return { ok: false, reason: `Only ${pool.length} unused ${label} ${r.style} names are left; a post needs at least ${s.min_images}. Add names on the Names page.` };
   }
   let theme: ThemeRow | undefined;

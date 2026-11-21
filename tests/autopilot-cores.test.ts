@@ -54,6 +54,15 @@ describe("planPost with chosen names", () => {
     const r = planPost({ request: { gender: "girl", style: "single", count: null, postDate: "2026-11-21", nameIds: [] }, names, themes: [theme], settings });
     expect(r).toEqual({ ok: false, reason: "No names were chosen for this post." });
   });
+  it("8 chosen names are enough even when Settings ask for more cards (min_images), letter or not", () => {
+    const ids = names.slice(0, 8).map((n) => n.id);
+    const r = planPost({ request: { gender: "girl", style: "single", count: null, postDate: "2026-11-21", nameIds: ids }, names, themes: [theme], settings: { ...settings, min_images: 9 } });
+    expect(r.ok && r.cards).toHaveLength(8);
+    const letterNames = ["Sabina", "Selah", "Sienna", "Sloane", "Stella", "Sage", "Sora", "Saoirse"].map(nm);
+    const byLetter = planPost({ request: { gender: "girl", style: "single", count: null, postDate: "2026-11-21", letter: "S", nameIds: letterNames.map((n) => n.id) },
+      names: letterNames, themes: [theme], settings: { ...settings, min_images: 9 } });
+    expect(byLetter.ok && byLetter.cards).toHaveLength(8);
+  });
   it("fails when more names are chosen than a post can have", () => {
     const r = planPost({ request: { gender: "girl", style: "single", count: null, postDate: "2026-11-21", nameIds: names.slice(0, 8).map((n) => n.id) }, names, themes: [theme], settings: { ...settings, max_images: 7 } });
     expect(r).toEqual({ ok: false, reason: "This post has more chosen names than the 7 cards a post can have." });
@@ -74,6 +83,20 @@ describe("createPostCore for Autopilot", () => {
     expect((generateJson.mock.calls[0][0] as { prompt: string }).prompt).toContain("biblical names");
     const updates = fake.queries.filter((q) => q.table === "posts" && isUpdate(q)).map((q) => op(q, "update")![1]);
     expect(updates).toContainEqual({ name_theme: "Biblical" });
+  });
+  it("reads the chosen names by id (still available, of the gender and style), not the whole pool", async () => {
+    generateJson.mockResolvedValue({ ok: false, error: "off" });
+    const ids = names.slice(0, 10).map((n) => n.id);
+    await createPostCore(fake.client as never, { gender: "girl", style: "single", count: null, postDate: "2026-11-21", requestId: "44444444-4444-4444-8444-444444444444",
+      subjectAge: "random", nameIds: ids });
+    const reads = fake.queries.filter((q) => q.table === "names" && !isUpdate(q));
+    expect(reads.length).toBeGreaterThan(0);
+    for (const q of reads) {
+      expect(q.ops).toContainEqual(["in", "id", ids]);
+      expect(q.ops).toContainEqual(["eq", "gender", "girl"]);
+      expect(q.ops).toContainEqual(["eq", "style", "single"]);
+      expect(q.ops).toContainEqual(["eq", "status", "available"]);
+    }
   });
 });
 

@@ -60,11 +60,17 @@ export async function createPostCore(sb: SupabaseClient, input: CreatePostInput)
     return lines.get(key)!;
   };
   let fontsSaved = false;
+  // Chosen names (Autopilot) are read by id: the whole available pool can pass PostgREST's 1000-row cap, and a chosen
+  // name beyond it would look "no longer available".
+  const namesRead = () => {
+    const q = sb.from("names").select("*").eq("gender", input.gender).eq("style", input.style).eq("status", "available");
+    return input.nameIds ? q.in("id", input.nameIds) : q;
+  };
   for (let attempt = 0; attempt < 2; attempt++) {
     // The Generate lock is read in parallel with the first round of reads (no extra round trip).
     const [{ data: settings }, { data: names }, { data: themes }, lock, h] = await Promise.all([
       sb.from("settings").select("*").eq("id", 1).single(),
-      sb.from("names").select("*").eq("gender", input.gender).eq("style", input.style).eq("status", "available"),
+      namesRead(),
       sb.from("themes").select("*").eq("gender", input.gender).eq("status", "available"),
       attempt === 0 ? generateLockReason(sb) : Promise.resolve(null),
       historyRead,
