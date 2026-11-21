@@ -210,3 +210,26 @@ describe("swapCardNameAction: Save text with a name from the Names page", () => 
     });
   });
 });
+
+describe("swapCardNameAction on an Autopilot card (its photo check)", () => {
+  const checked = { ...card, check_state: "passed", check_note: "Checked" } as CardRow;
+  const cardUpdates = () => fake.queries.filter((q) => q.table === "cards" && isUpdate(q));
+  it("a checked card that takes another name is sent back to its check, right after the swap", async () => {
+    world({ card: checked });
+    expect(await swapCardNameAction(CARD, NEW, "sun")).toEqual({ ok: true, mode: "restamp" });
+    const u = cardUpdates();
+    expect(u).toHaveLength(1);
+    expect(op(u[0], "update")![1]).toEqual({ check_state: "pending", check_note: null });
+    expect(u[0].ops).toContainEqual(["eq", "id", CARD]);
+  });
+  it("before 016 the guarded card update itself carries it", async () => {
+    world({ card: checked, rpc: { error: { message: "Could not find the function public.swap_card_name(...) in the schema cache", code: "PGRST202" } } });
+    expect(await swapCardNameAction(CARD, NEW, "sun")).toEqual({ ok: true, mode: "restamp" });
+    expect(op(cardUpdates()[0], "update")![1]).toMatchObject({ status: "restamp", check_state: "pending", check_note: null });
+  });
+  it("a hand-made post's card (no check state) gets no check fields", async () => {
+    world({ card: { ...card, check_state: null } as CardRow });
+    expect(await swapCardNameAction(CARD, NEW, "sun")).toEqual({ ok: true, mode: "restamp" });
+    expect(cardUpdates()).toHaveLength(0);
+  });
+});

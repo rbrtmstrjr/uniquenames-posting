@@ -4,7 +4,7 @@ import type { CardRow } from "@/lib/db/types";
 import { validateName } from "./validate";
 import { nextSeed, normalizeName, restampMode, styleOf } from "./helpers";
 import { generateLockReason } from "./generate-guard";
-import { REQUEUE } from "@/lib/cards/remake";
+import { REQUEUE, recheck } from "@/lib/cards/remake";
 import { fail, requireOwner, type ActionResult } from "./result";
 import { textChanged } from "@/lib/status/card-dialog";
 import { resolveCta, validateCtaMessage } from "@/lib/cta/messages";
@@ -25,12 +25,6 @@ const DUP = "Another name in your list already has that spelling.";
 const CTA_TEXT = "The closing card has a message, not a name: edit it in its Message field.";
 
 const cleanText = (name: string, meaning: string) => ({ name: normalizeName(name), meaning: meaning.trim().toLowerCase() });
-
-/**
- * An Autopilot card (check_state set, migration 022) that gets a new image is checked again: a card that passed keeps
- * "passed" no more. Cards of hand-made posts (check_state null, or no column before 022) are left as they are.
- */
-const recheck = (card: CardRow) => (card.check_state != null ? { check_state: "pending" as const, check_note: null } : {});
 
 async function spellingTaken(sb: SB, card: CardRow, name: string) {
   if (!card.name_id) return false;

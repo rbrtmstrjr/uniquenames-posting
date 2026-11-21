@@ -76,3 +76,16 @@ describe("restampPostAction", () => {
     expect(await restampPostAction(POST)).toEqual({ ok: false, error: "boom" });
   });
 });
+
+describe("restampPostAction on an Autopilot post", () => {
+  it("each checked card's new stamp is checked again; a card with no check state gets no check fields", async () => {
+    const rows = [{ ...card("a", "done", true, 3), check_state: "passed" }, { ...card("b", "failed", true), check_state: null }];
+    fake = fakeSupabase((q) => (q.table === "cards" && isUpdate(q) ? { data: [{ id: q.ops.find((o) => o[0] === "eq" && o[1] === "id")![2] }] } : q.table === "cards" ? { data: rows } : undefined));
+    expect(await restampPostAction(POST)).toMatchObject({ ok: true, restamped: 2 });
+    const u = fake.queries.filter((q) => q.table === "cards" && isUpdate(q)).map((q) => op(q, "update")![1] as Record<string, unknown>);
+    expect(u[0]).toMatchObject({ status: "restamp", check_state: "pending", check_note: null });
+    expect(u[1]).not.toHaveProperty("check_state");
+    // select * reads check_state once 022 ran and still works before it.
+    expect(fake.queries.find((q) => q.table === "cards" && !isUpdate(q))!.ops).toContainEqual(["select", "*"]);
+  });
+});

@@ -5,6 +5,7 @@ import { createPostCore, type CreatePostInput } from "@/lib/posts/create";
 import { planExtraCard, storedAge, subjectKey } from "@/lib/planner";
 import type { CardRow, NameRow, PostRow, SettingsRow, ThemeRow } from "@/lib/db/types";
 import { restampSelection, UUID_RE } from "./helpers";
+import { recheck } from "@/lib/cards/remake";
 import { generateLockReason } from "./generate-guard";
 import { aiCaptionLine, composePostCaption, REWRITE_TIMEOUT_MS } from "@/lib/ai/caption";
 import { loadPostHistory, missingColumn as missing009 } from "@/lib/captions/load";
@@ -156,13 +157,15 @@ export async function restampPostAction(postId: string, fonts?: PostFonts): Prom
   }
   // Once the fonts are saved, a failure below must say so (they stay saved on the post).
   const failAfterFonts = (msg: string) => fail(fonts ? `The fonts were saved for this post, but nothing was re-stamped: ${msg}` : msg);
-  const { data, error } = await sb.from("cards").select("id, status, photo_path, version").eq("post_id", postId);
+  // select * (check_state is 022's column): works before and after the migration.
+  const { data, error } = await sb.from("cards").select("*").eq("post_id", postId);
   if (error) return failAfterFonts(error.message);
-  const { restamp, noPhoto } = restampSelection((data ?? []) as Pick<CardRow, "id" | "status" | "photo_path" | "version">[]);
+  const { restamp, noPhoto } = restampSelection((data ?? []) as Pick<CardRow, "id" | "status" | "photo_path" | "version" | "check_state">[]);
   if (!restamp.length) return failAfterFonts(noPhoto ? "These cards have no clean photo to re-stamp. Use New picture on a card instead." : "No finished cards to re-stamp yet.");
   const now = new Date().toISOString();
   const results = await Promise.all(restamp.map((c) =>
-    sb.from("cards").update({ status: "restamp", claimed_at: null, error: null, version: c.version + 1, queued_at: now })
+    // An Autopilot card's new stamp is checked again (recheck: nothing for a hand-made post's cards).
+    sb.from("cards").update({ ...recheck(c), status: "restamp", claimed_at: null, error: null, version: c.version + 1, queued_at: now })
       .eq("id", c.id).eq("version", c.version).in("status", ["done", "failed"]).select("id")));
   const failed = results.find((r) => r.error)?.error;
   // The ids really queued: the client drops its optimistic "updating text" look on the rest.

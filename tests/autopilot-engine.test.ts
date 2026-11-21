@@ -240,6 +240,15 @@ describe("tick", () => {
     expect(m.db.runs[0].events.filter((e) => e.kind === "run" && e.text.includes("couldn't remake c0"))).toHaveLength(2);
   });
 
+  it("a passed card the owner is having re-made or re-stamped goes back to its check; the post waits for it", async () => {
+    const cards = [...tenCards({ check_state: "passed" }), card("redo", { check_state: "passed", check_note: "Checked", status: "restamp", position: 11 })];
+    const { m, d } = setup({ items: [item("i1", { state: "checking", post_id: "p1", lookalike_done: true })], cards });
+    await tick(d);
+    expect(m.db.cards.find((c) => c.id === "redo")!.check_state).toBe("pending");
+    expect(d.schedule).not.toHaveBeenCalled();
+    expect(m.db.items[0].state).toBe("making");
+  });
+
   it("names: hold, retry (3 tries), no theme left", async () => {
     const hold = setup({ items: [item("i1")] }, { pickNames: vi.fn(async () => ({ kind: "hold" as const, why: "Only 5 good girl names", usage, added: [], skipped: [] })) });
     await tick(hold.d);

@@ -173,9 +173,11 @@ class Tick {
     const items = this.active();
     if (!items.length) return;
     this.cards = (await this.d.repo.cards(items.map((i) => i.post_id!))).filter((c) => c.selected);
-    // A card added after the post was made (check_state empty), or one the owner selected again after Autopilot removed
-    // it, is checked like the others: nothing is scheduled with a card that is not checked.
-    for (const c of this.cards.filter((x) => !x.check_state || x.check_state === "removed")) await this.setCard(c, { check_state: "pending" });
+    // Checked like the others (nothing is scheduled with a card that is not checked): a card added after the post was
+    // made (check_state empty), one the owner selected again after Autopilot removed it, and a passed card the owner is
+    // having re-made or re-stamped (Autopilot's own remakes always set pending in the same update).
+    const recheck = (x: CardRow) => !x.check_state || x.check_state === "removed" || (x.check_state === "passed" && x.status !== "done");
+    for (const c of this.cards.filter(recheck)) await this.setCard(c, { check_state: "pending" });
     for (const c of this.cards.filter((x) => x.check_state === "pending" && x.status === "failed")) {
       if (this.halted) return;
       await this.failCard(c, "the PC could not make it");
