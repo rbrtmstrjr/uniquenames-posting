@@ -113,8 +113,43 @@ describe("remakeCard", () => {
 });
 
 describe("publishPost", () => {
+  const FB = ["FACEBOOK_PAGE_ID", "FACEBOOK_PAGE_TOKEN", "FACEBOOK_APP_SECRET"];
+  afterEach(() => { for (const k of FB) delete process.env[k]; });
   it("says what kind of failure it was", async () => {
-    for (const k of ["FACEBOOK_PAGE_ID", "FACEBOOK_PAGE_TOKEN", "FACEBOOK_APP_SECRET"]) delete process.env[k];
+    for (const k of FB) delete process.env[k];
     expect(await publishPost(fake.client as never, POST_ID, { caption: "x" })).toMatchObject({ ok: false, errorKind: "not_connected" });
+  });
+
+  /** A connected Page; the post's cards as given; the fb lock is refused, so nothing is ever sent. */
+  const world = (cards: Record<string, unknown>[]) => {
+    Object.assign(process.env, { FACEBOOK_PAGE_ID: "111", FACEBOOK_PAGE_TOKEN: "tok", FACEBOOK_APP_SECRET: "sec" });
+    fake = fakeSupabase((q) => {
+      if (q.table === "posts" && isUpdate(q)) return { data: [] };
+      if (q.table === "posts") return { data: { id: POST_ID, caption: "c", fb_state: null } };
+      if (q.table === "cards") return { data: cards };
+      return undefined;
+    });
+  };
+  const cardRow = (id: string, check_state: string | null, o: Record<string, unknown> = {}) =>
+    ({ id, kind: "post", selected: true, status: "done", card_path: `cards/${id}.jpg`, order_index: 1, position: 1, check_state, ...o });
+  const at = () => new Date(Date.now() + 3 * 3600_000).toISOString();
+
+  it("with requireChecked, refuses when a selected card is not checked, before anything is locked or sent", async () => {
+    for (const state of ["pending", "failed", "removed", null]) {
+      world([cardRow("c1", "passed"), cardRow("c2", state), cardRow("off", "pending", { selected: false })]);
+      expect(await publishPost(fake.client as never, POST_ID, { caption: "x", scheduledAt: at(), requireChecked: true }))
+        .toEqual({ ok: false, errorKind: "invalid", error: "A card changed after it was checked; Autopilot will check it again." });
+      expect(fake.queries.some((q) => q.table === "posts" && isUpdate(q))).toBe(false);
+      expect(op(fake.queries.find((q) => q.table === "cards")!, "select")![1]).toContain("check_state");
+    }
+  });
+
+  it("with every selected card passed it goes on (here to the lock); without requireChecked check_state is not read", async () => {
+    world([cardRow("c1", "passed"), cardRow("off", "pending", { selected: false })]);
+    const r = await publishPost(fake.client as never, POST_ID, { caption: "x", scheduledAt: at(), requireChecked: true });
+    expect(r).toMatchObject({ ok: false, error: expect.stringMatching(/being sent to Facebook right now/) });
+    world([cardRow("c1", "pending")]);
+    await publishPost(fake.client as never, POST_ID, { caption: "x", scheduledAt: at() });
+    expect(op(fake.queries.find((q) => q.table === "cards")!, "select")![1]).not.toContain("check_state");
   });
 });

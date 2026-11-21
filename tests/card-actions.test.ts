@@ -6,7 +6,7 @@ let respond: Respond = () => undefined;
 let fake = fakeSupabase((q) => respond(q));
 vi.mock("@/lib/supabase/server", () => ({ createClient: async () => fake.client, getOwner: async () => ({ id: "owner" }) }));
 vi.mock("next/cache", () => ({ revalidatePath: () => {} }));
-const { regenerateCardAction, restampCardAction } = await import("@/lib/actions/cards");
+const { ctaTextAction, regenerateCardAction, restampCardAction } = await import("@/lib/actions/cards");
 const { addCardAction, createPostAction } = await import("@/lib/actions/posts");
 const { makePreviewAction } = await import("@/lib/actions/themes");
 
@@ -70,6 +70,42 @@ describe("regenerateCardAction: plain New picture / Retry", () => {
     expect(cardUpdates()).toHaveLength(0);
     world({ updated: false });
     expect(await regenerateCardAction(ID)).toMatchObject({ ok: false, error: expect.stringMatching(/just changed/) });
+  });
+});
+
+describe("Autopilot's photo check after an owner edit", () => {
+  const checked = { ...base, check_state: "passed" as const, check_note: "Checked" };
+  it("New picture / Retry on a checked card sets it back to pending (checked again)", async () => {
+    world({ card: checked });
+    expect(await regenerateCardAction(ID)).toEqual({ ok: true });
+    expect(patchOf(cardUpdates()[0])).toMatchObject({ status: "queued", check_state: "pending", check_note: null });
+  });
+  it("a re-stamp (and a text edit that regenerates) of a checked card sets it back to pending", async () => {
+    world({ card: checked });
+    expect(await restampCardAction(ID, "Arlo Zephyr", "gentle west wind")).toEqual({ ok: true, mode: "restamp" });
+    expect(patchOf(cardUpdates()[0])).toMatchObject({ status: "restamp", check_state: "pending", check_note: null });
+    world({ card: { ...checked, photo_path: null } });
+    expect(await restampCardAction(ID, "Arlo Zephyr", "gentle west wind")).toEqual({ ok: true, mode: "regenerate" });
+    expect(patchOf(cardUpdates()[0])).toMatchObject({ status: "queued", check_state: "pending", check_note: null });
+  });
+  it("new closing-card text on a checked card sets it back to pending", async () => {
+    const cta = { ...checked, kind: "cta" as const, name_id: null, name: "Follow / for more", meaning: "" };
+    for (const newPicture of [false, true]) {
+      world({ card: cta });
+      expect(await ctaTextAction(ID, "Follow us / for more", newPicture)).toMatchObject({ ok: true });
+      expect(patchOf(cardUpdates()[0])).toMatchObject({ check_state: "pending", check_note: null });
+    }
+  });
+  it("a card of a hand-made post (no check state) is left without one", async () => {
+    for (const card of [{ ...base, check_state: null }, base]) {
+      world({ card });
+      expect(await regenerateCardAction(ID)).toEqual({ ok: true });
+      expect(await restampCardAction(ID, "Arlo Zephyr", "gentle west wind")).toMatchObject({ ok: true });
+      for (const q of cardUpdates()) {
+        expect(patchOf(q)).not.toHaveProperty("check_state");
+        expect(patchOf(q)).not.toHaveProperty("check_note");
+      }
+    }
   });
 });
 

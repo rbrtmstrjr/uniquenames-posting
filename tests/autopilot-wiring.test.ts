@@ -28,13 +28,13 @@ describe("autopilotDeps", () => {
     expect(args.slice(1)).toEqual([item, "a hint", 12345]);
   });
 
-  it("schedules with the post's own caption and the given time", async () => {
+  it("schedules with the post's own caption and the given time, only with every selected card checked", async () => {
     await mk().schedule("post-1", "2026-11-21T00:00:00Z");
-    expect(publishPost).toHaveBeenCalledWith(expect.anything(), "post-1", { caption: "Hello caption", scheduledAt: "2026-11-21T00:00:00Z" });
+    expect(publishPost).toHaveBeenCalledWith(expect.anything(), "post-1", { caption: "Hello caption", scheduledAt: "2026-11-21T00:00:00Z", requireChecked: true });
   });
 
-  it("does not schedule when the caption cannot be read", async () => {
-    for (const r of [{ error: { message: "db down" } }, { data: null }, { data: { caption: null } }]) {
+  it("does not schedule when the caption cannot be read or is blank", async () => {
+    for (const r of [{ error: { message: "db down" } }, { data: null }, { data: { caption: null } }, { data: { caption: "" } }, { data: { caption: "  \n " } }]) {
       const out = await mk(() => r).schedule("post-1", "2026-11-21T00:00:00Z");
       expect(out).toEqual({ ok: false, error: "Couldn't read the post's caption, so it was not scheduled.", errorKind: "db" });
     }

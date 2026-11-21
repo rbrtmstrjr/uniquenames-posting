@@ -33,10 +33,12 @@ export function autopilotDeps(sb: SupabaseClient): EngineDeps {
     schedule: async (postId, at) => {
       const { data, error } = await sb.from("posts").select("caption").eq("id", postId).maybeSingle();
       const caption = (data as { caption?: unknown } | null)?.caption;
-      if (error || typeof caption !== "string") {
+      // A blank caption is refused like a missing one: Autopilot never posts an album with no words.
+      if (error || typeof caption !== "string" || !caption.trim()) {
         return { ok: false, error: "Couldn't read the post's caption, so it was not scheduled.", errorKind: "db" };
       }
-      return publishPost(sb, postId, { caption, scheduledAt: at });
+      // Nothing is scheduled with a card that is not checked (an owner edit after the check sets it back to pending).
+      return publishPost(sb, postId, { caption, scheduledAt: at, requireChecked: true });
     },
     remake: (card, extra) => remakeCard(sb, card, extra),
     judgeCard: (card, url) => judgeCard(card, url),

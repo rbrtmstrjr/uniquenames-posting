@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { AutopilotItemRow, AutopilotRunRow, CardRow } from "@/lib/db/types";
 import { memoryRepo } from "./helpers/autopilot-memory";
 import { MAX_REMAKES, WAIT_COMFY, tick, type EngineDeps } from "@/lib/autopilot/engine";
+import { CARD_CHANGED_AFTER_CHECK } from "@/lib/facebook/schedule";
 import { runCost, summarize } from "@/lib/autopilot/summary";
 
 const NOW = Date.parse("2026-11-20T03:00:00Z");
@@ -130,7 +131,8 @@ describe("tick", () => {
   });
 
   it("holds a post with fewer than 8 passed name cards, or one ready too late", async () => {
-    const { m, d } = setup({ items: [item("i1", { state: "checking", post_id: "p1", lookalike_done: true })], cards: tenCards({ check_state: "passed" }).map((c, i) => (i < 3 ? { ...c, check_state: "removed" as const } : c)) });
+    // (removed cards are unselected, as the engine leaves them)
+    const { m, d } = setup({ items: [item("i1", { state: "checking", post_id: "p1", lookalike_done: true })], cards: tenCards({ check_state: "passed" }).map((c, i) => (i < 3 ? { ...c, check_state: "removed" as const, selected: false } : c)) });
     await tick(d);
     expect(m.db.items[0]).toMatchObject({ state: "held", note: expect.stringMatching(/^Only 7 name cards passed/) });
     const late = setup({ items: [item("i1", { state: "checking", post_id: "p1", lookalike_done: true, scheduled_for: "2026-11-20T03:10:00Z" })], cards: tenCards({ check_state: "passed" }) });
@@ -147,6 +149,31 @@ describe("tick", () => {
       { schedule: vi.fn(async () => ({ ok: false as const, error: "Facebook refused: x", errorKind: "other" as const })) });
     await tick(other.d);
     expect(other.m.db.items[0]).toMatchObject({ state: "held", note: "Facebook refused: x" });
+  });
+
+  it("a schedule refused because a card changed after its check is not held: the next tick checks it again", async () => {
+    const schedule = vi.fn(async () => ({ ok: false as const, error: CARD_CHANGED_AFTER_CHECK, errorKind: "invalid" as const }));
+    const { m, d } = setup({ items: [item("i1", { state: "checking", post_id: "p1", lookalike_done: true })], cards: tenCards({ check_state: "passed" }) }, { schedule });
+    expect(await tick(d)).toEqual({ ran: true, status: "running" });
+    expect(schedule).toHaveBeenCalledTimes(1);
+    expect(m.db.items[0]).toMatchObject({ state: "checking", note: null });
+    expect(m.db.runs[0].events.filter((e) => e.kind === "post_held")).toEqual([]);
+    // The owner's New picture set the card back to pending: the next tick waits for it, then checks it.
+    Object.assign(m.db.cards[4], { check_state: "pending", status: "queued" });
+    m.db.runs[0].tick_until = null;
+    await tick(d);
+    expect(schedule).toHaveBeenCalledTimes(1);
+    expect(m.db.items[0].state).toBe("making");
+  });
+
+  it("a card the owner selected again after Autopilot removed it is checked before the post is scheduled", async () => {
+    const judgeCard = vi.fn(async () => pass);
+    const cards = [...tenCards({ check_state: "passed" }), card("back", { check_state: "removed", check_note: "Removed: odd hands or fingers", remakes: MAX_REMAKES, position: 11 })];
+    const { m, d } = setup({ items: [item("i1", { state: "checking", post_id: "p1", lookalike_done: true })], cards }, { judgeCard });
+    await tick(d);
+    expect(judgeCard).toHaveBeenCalledTimes(1);
+    expect(judgeCard).toHaveBeenCalledWith(expect.objectContaining({ id: "back" }), expect.any(String));
+    expect(m.db.cards.find((c) => c.id === "back")!.check_state).toBe("passed");
   });
 
   it("names: hold, retry (3 tries), no theme left", async () => {

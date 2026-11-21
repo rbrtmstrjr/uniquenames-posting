@@ -10,6 +10,8 @@ export const SCHEDULE_MIN_MS = 15 * 60_000;
 export const SCHEDULE_MAX_MS = 29 * 24 * 3600_000;
 /** A 'publishing' older than this was cut off mid-way: shown (and retried) as unsure. */
 export const STALE_PUBLISHING_MS = 10 * 60_000;
+/** Autopilot's schedule refused: a selected card is not (or no longer) checked. The engine waits for its check. */
+export const CARD_CHANGED_AFTER_CHECK = "A card changed after it was checked; Autopilot will check it again.";
 
 /** "2026-11-05T19:00": a <input type="datetime-local"> value for this moment in Manila. */
 export const manilaInputValue = (d: Date) => new Date(d.getTime() + MANILA_MS).toISOString().slice(0, 16);

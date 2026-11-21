@@ -6,7 +6,7 @@ import { FacebookError, facebookConfig, graphClient } from "./graph";
 import { cardOrder } from "@/lib/files/save";
 // Scheduling window (Facebook takes 10 minutes to 30 days; the margins leave time for the uploads) and the age at which
 // a cut-off 'publishing' counts as unsure: shared with the panel.
-import { SCHEDULE_MAX_MS, SCHEDULE_MIN_MS, STALE_PUBLISHING_MS } from "./schedule";
+import { CARD_CHANGED_AFTER_CHECK, SCHEDULE_MAX_MS, SCHEDULE_MIN_MS, STALE_PUBLISHING_MS } from "./schedule";
 import { UUID_RE } from "@/lib/actions/helpers";
 
 // Post now / Schedule to Facebook (2026-11-04, spec docs/superpowers/specs/2026-11-04-facebook-posting-design.md):
@@ -65,6 +65,8 @@ export async function publishPost(sb: SupabaseClient, postId: string, input: {
   /** The owner checked the Page after an "unsure" and chose Retry anyway. */
   retryUnsure?: boolean;
   beforeSend?: (p: PostRow) => Promise<string | null>;
+  /** Autopilot: refuse unless every selected card passed the photo check (an owner edit sets it back to pending). */
+  requireChecked?: boolean;
 }): Promise<PublishResult> {
   if (!UUID_RE.test(postId ?? "")) return no("Post not found.", "invalid");
   const cfg = facebookConfig();
@@ -80,20 +82,23 @@ export async function publishPost(sb: SupabaseClient, postId: string, input: {
     if (ahead > SCHEDULE_MAX_MS) return no("Facebook schedules up to 29 days ahead. Pick an earlier date.", "invalid");
   }
 
+  // check_state (migration 022) is read only for Autopilot, so Post now / Schedule work before 022 too.
+  const cardCols = `id, kind, selected, status, card_path, order_index, position${input.requireChecked ? ", check_state" : ""}`;
   const [{ data: post, error: postErr }, { data: cardRows, error: cardsErr }] = await Promise.all([
     sb.from("posts").select("*").eq("id", postId).maybeSingle(),
-    sb.from("cards").select("id, kind, selected, status, card_path, order_index, position").eq("post_id", postId),
+    sb.from("cards").select(cardCols).eq("post_id", postId),
   ]);
   if (postErr || cardsErr) return no((postErr ?? cardsErr)!.message, "db");
   if (!post) return no("Post not found.", "invalid");
   const p = post as PostRow;
   if (!("fb_state" in p)) return no(NEEDS_021, "db");
   if (p.fb_state === "published" || p.fb_state === "scheduled") return no("This post is already on Facebook.", "invalid");
-  const picked = ((cardRows ?? []) as Pick<CardRow, "id" | "kind" | "selected" | "status" | "card_path" | "order_index" | "position">[])
+  const picked = ((cardRows ?? []) as unknown as Pick<CardRow, "id" | "kind" | "selected" | "status" | "card_path" | "order_index" | "position" | "check_state">[])
     .filter((c) => c.selected).sort(cardOrder);
   if (!picked.length) return no("Select at least one card to post.", "invalid");
   const notReady = picked.filter((c) => c.status !== "done" || !c.card_path).length;
   if (notReady) return no(`${notReady} selected card${notReady === 1 ? " is" : "s are"} not ready yet. Wait for ${notReady === 1 ? "it" : "them"} to finish (or unselect), then post.`, "invalid");
+  if (input.requireChecked && picked.some((c) => c.check_state !== "passed")) return no(CARD_CHANGED_AFTER_CHECK, "invalid");
 
   if (input.beforeSend) {
     const stop = await input.beforeSend(p);

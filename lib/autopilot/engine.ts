@@ -5,7 +5,7 @@ import type { ActionResult } from "@/lib/actions/result";
 import type { AutopilotEvent, AutopilotEventKind, AutopilotItemRow, AutopilotRunRow, AutopilotRunStatus, CardRow } from "@/lib/db/types";
 import type { CreatePostInput } from "@/lib/posts/create";
 import type { PublishResult } from "@/lib/facebook/publish";
-import { manilaLabel } from "@/lib/facebook/schedule";
+import { CARD_CHANGED_AFTER_CHECK, manilaLabel } from "@/lib/facebook/schedule";
 import type { JudgeResult, Usage } from "./claude-judge";
 import type { NamesOutcome } from "./names-step";
 import type { AutopilotRepo } from "./repo";
@@ -160,8 +160,9 @@ class Tick {
     const items = this.active();
     if (!items.length) return;
     this.cards = (await this.d.repo.cards(items.map((i) => i.post_id!))).filter((c) => c.selected);
-    // A card added after the post was made (check_state empty) is checked like the others.
-    for (const c of this.cards.filter((x) => !x.check_state)) await this.setCard(c, { check_state: "pending" });
+    // A card added after the post was made (check_state empty), or one the owner selected again after Autopilot removed
+    // it, is checked like the others: nothing is scheduled with a card that is not checked.
+    for (const c of this.cards.filter((x) => !x.check_state || x.check_state === "removed")) await this.setCard(c, { check_state: "pending" });
     for (const c of this.cards.filter((x) => x.check_state === "pending" && x.status === "failed")) {
       if (this.halted) return;
       await this.failCard(c, "the PC could not make it");
@@ -260,6 +261,9 @@ class Tick {
       if (r.ok) {
         await this.setItem(item, { state: "scheduled", note: null });
         this.event("post_scheduled", `${itemLabel(item)}: scheduled for ${manilaLabel(item.scheduled_for)}.`);
+      } else if (r.error === CARD_CHANGED_AFTER_CHECK) {
+        // The owner changed a card after this tick read it: the next tick sees it pending and checks it again.
+        continue;
       } else if (r.errorKind === "auth" || r.errorKind === "not_connected") {
         throw new Pause(`${r.error} Then press Resume.`);
       } else {
