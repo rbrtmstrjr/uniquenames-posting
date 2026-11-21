@@ -201,6 +201,15 @@ export function themeLeadProblem(line: string, i: ThemeInput): string | null {
   return null;
 }
 
+/** Why the caption is too long-winded or asks too much (null = 1 or 2 short sentences, at most one question). */
+export function shapeProblem(line: string): string | null {
+  const n = (line.match(/[.!?]+(?=\s|$)/g) ?? []).length || 1;
+  if (n > 2) return `has ${n} sentences: write 1 or 2 short sentences`;
+  const q = (line.match(/\?/g) ?? []).length;
+  if (q > 1) return `asks ${q} questions: ask at most one`;
+  return null;
+}
+
 /**
  * Why a caption is not right yet: it opens like a recent one, a name style names too few names, a series
  * part does not say its part, or a post by letter does not say its letter.
@@ -229,7 +238,7 @@ export function aiCaptionLine(input: CaptionInput, timeoutMs = CAPTION_TIMEOUT_M
   return askCaption({
     system: CAPTION_SYSTEM, prompt: captionPrompt(input), maxTags: 3, max: CAPTION_MAX, min: CAPTION_MIN, timeoutMs, label: "aiCaption",
     problem: (line) => captionProblem(line, input),
-    ...(themeFirst ? { required: (line: string) => themeLeadProblem(line, input) } : {}),
+    ...(themeFirst ? { required: (line: string) => themeLeadProblem(line, input) ?? shapeProblem(line) } : {}),
   });
 }
 

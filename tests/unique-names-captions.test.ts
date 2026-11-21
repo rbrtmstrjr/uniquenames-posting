@@ -3,7 +3,7 @@ import { UNIQUE_NAMES_CAPTIONS } from "@/packs/unique-names/captions";
 import { CAPTION_STYLES } from "@/lib/captions/styles";
 import { hasBait } from "@/lib/ai/caption-core";
 import { plainWordsProblem } from "@/lib/ai/plain-words";
-import { themeLeadProblem } from "@/lib/ai/caption";
+import { shapeProblem, themeLeadProblem } from "@/lib/ai/caption";
 
 const sys = UNIQUE_NAMES_CAPTIONS.postSystem(240);
 const guide = (s: (typeof CAPTION_STYLES)[number], g: "boy" | "girl" = "girl") => UNIQUE_NAMES_CAPTIONS.styleGuide[s](g);
@@ -22,6 +22,8 @@ describe("Unique Names captions: mom-to-mom, theme first", () => {
     expect(sys).toMatch(/at most 220 characters/);
     expect(sys).toMatch(/their names are only examples/);
     expect(sys).toMatch(/no I, me, my, we or us/);
+    expect(sys).toMatch(/never lean on a stock line/);
+    expect(sys).not.toMatch(/meaning worth keeping\./);
   });
   it("every tone example passes the engine's own checks for the post it stands for", () => {
     const lines = sys.split(/\r?\n/);
@@ -39,6 +41,7 @@ describe("Unique Names captions: mom-to-mom, theme first", () => {
     ];
     examples.forEach((e, i) => {
       expect(themeLeadProblem(e, inputs[i]), e).toBeNull();
+      expect(shapeProblem(e), e).toBeNull();
       expect(plainWordsProblem(e), e).toBeNull();
       expect(hasBait(e), e).toBe(false);
       expect((e.match(/\p{Extended_Pictographic}/gu) ?? []).length, e).toBeLessThanOrEqual(1);

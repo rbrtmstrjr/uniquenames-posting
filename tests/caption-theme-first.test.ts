@@ -9,7 +9,7 @@ vi.mock("@/packs", async (real) => {
 });
 const { generateJson } = vi.hoisted(() => ({ generateJson: vi.fn() }));
 vi.mock("@/lib/ai/gemini", () => ({ generateJson }));
-const { THEME_CHECK_CHARS, THEME_LEAD_CHARS, aiCaptionLine, captionPrompt, captionProblem, themeLeadProblem, themePhrase } = await import("@/lib/ai/caption");
+const { THEME_CHECK_CHARS, THEME_LEAD_CHARS, aiCaptionLine, captionPrompt, captionProblem, shapeProblem, themeLeadProblem, themePhrase } = await import("@/lib/ai/caption");
 
 const theme = { title: "Country Barn Boy", backdrop: "barn red wall", outfit: "denim overalls", props: "plush cow", lighting: "golden light", palette: "red, cream" };
 const ok = (caption: string) => ({ ok: true, data: { caption, tags: [] } });
@@ -150,5 +150,26 @@ describe("the hard check", () => {
   it("without themeFirst nothing changes", async () => {
     generateJson.mockResolvedValue(ok("Sweet names for your little one, picked with love, these baby girl names that start with R."));
     expect(await aiCaptionLine({ theme, gender: "girl", captionStyle: "question", letter: "R" })).not.toBeNull();
+  });
+});
+
+describe("shape: at most 2 sentences and one question", () => {
+  it("shapeProblem", () => {
+    expect(shapeProblem("These baby girl names feel just right 💕")).toBeNull();
+    expect(shapeProblem("Ethan, Leon or Andre? These strong and brave baby boy names each fit.")).toBeNull();
+    expect(shapeProblem("Looking for a name your daughter can be proud of? Baby girl names that start with M carry meanings worth keeping. Mira means wonderful, Margot means pearl, and Mila means gracious and dear. Which one feels like hers?")).toMatch(/4 sentences/);
+    expect(shapeProblem("Is it sweet? Is it strong?")).toMatch(/2 questions/);
+    expect(shapeProblem("Picture her name. ✨")).toBeNull();
+  });
+  it("a 4-sentence answer is retried with the reason and the 2-sentence retry is kept", async () => {
+    const { UNIQUE_NAMES_CAPTIONS } = await import("@/packs/unique-names/captions");
+    pack.captions = { titleOnly: UNIQUE_NAMES_CAPTIONS.titleOnly, themeFirst: true };
+    const good = "Want a name your son can grow into? These Biblical baby boy names carry stories of faith.";
+    generateJson.mockResolvedValueOnce(ok("Want a name for your son? These Biblical baby boy names are lovely. They are strong. Pick one."))
+      .mockResolvedValueOnce(ok(good));
+    const r = await aiCaptionLine({ theme, gender: "boy", captionStyle: "question", nameTheme: { title: "Biblical", hint: null } });
+    expect(r?.line).toBe(good);
+    expect(generateJson).toHaveBeenCalledTimes(2);
+    expect(generateJson.mock.calls[1][0].prompt).toMatch(/4 sentences/);
   });
 });
