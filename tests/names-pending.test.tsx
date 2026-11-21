@@ -39,3 +39,18 @@ describe("Names page: pending filter", () => {
     expect(screen.queryByRole("button", { name: "Skip Zephyr" })).toBeNull();
   });
 });
+
+describe("Names page: Autopilot's note", () => {
+  it("shows why Autopilot skipped a name, on its Skip row only", () => {
+    const note = "Skipped by Autopilot: hard to say";
+    render(<NamesTable initial={{ status: "all" }} names={[
+      { ...row("Saoirse", "skip"), autopilot_note: note },
+      { ...row("Selah", "available"), autopilot_note: "Skipped by Autopilot: too close to Sienna" },
+      row("Sage", "skip"),
+    ]} />);
+    expect(screen.getByText(note)).toBeTruthy();
+    // A name the owner brought back keeps the note in the database, but the row no longer shows it.
+    expect(screen.queryByText("Skipped by Autopilot: too close to Sienna")).toBeNull();
+    expect(screen.getAllByText(/Skipped by Autopilot/)).toHaveLength(1);
+  });
+});

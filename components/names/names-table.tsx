@@ -165,6 +165,8 @@ export function NamesTable({ names: serverNames, initial = {}, toolbar }: { name
                 <div className="break-words font-semibold text-ink">{n.name}</div>
                 <div className="break-words text-sm text-muted">{n.meaning}</div>
                 {nameDetail(n) && <div className="text-xs text-muted">{nameDetail(n)}</div>}
+                {/* Why Autopilot skipped it (migration 022), e.g. "Skipped by Autopilot: hard to say". */}
+                {n.status === "skip" && n.autopilot_note && <div className="break-words text-xs text-muted">{n.autopilot_note}</div>}
               </div>
               <Badge tone="muted">{n.gender === "boy" ? "Boy" : "Girl"} · {n.style}</Badge>
               <Badge tone={STATUS_TONE[n.status]}>{STATUS_TEXT[n.status]}</Badge>

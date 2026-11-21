@@ -53,13 +53,29 @@ describe("judgeNames", () => {
       { name: "Sqiggle", meaning: "?" }, { name: "Sabina", meaning: "from sabine" }, { name: "Selah", meaning: "pause" },
     ] });
     expect(r.ok && r.data).toEqual([
-      { name: "Sqiggle", good: false, fits: true, reason: "made up", meaning: "" },
-      { name: "Sabina", good: true, fits: true, reason: "", meaning: "woman from sabine" },
-      { name: "Selah", good: false, fits: false, reason: "not judged", meaning: "" },
+      { name: "Sqiggle", good: false, fits: true, reason: "made up", meaning: "", meaning_wrong: false },
+      { name: "Sabina", good: true, fits: true, reason: "", meaning: "woman from sabine", meaning_wrong: false },
+      { name: "Selah", good: false, fits: false, reason: "not judged", meaning: "", meaning_wrong: false },
     ]);
     const prompt = create.mock.calls[0][0].messages[0].content[0].text as string;
     expect(prompt).toContain("start with the letter S");
     expect(prompt).toContain("- Selah: pause");
+  });
+  it("asks whether the meaning is wrong (schema and prompt), passes meaning_wrong through, and keeps commas in meanings", async () => {
+    create.mockResolvedValueOnce(answer({ names: [
+      { name: "Hannah", good: true, fits: true, reason: "", meaning: "Grace, Favor!", meaning_wrong: true },
+      { name: "Ruth", good: true, fits: true, reason: "", meaning: "friend, companion", meaning_wrong: false },
+      { name: "Mara", good: false, fits: true, reason: "sad meaning", meaning: "bitter", meaning_wrong: true },
+    ] }));
+    const r = await judgeNames({ gender: "girl", target: { kind: "theme", title: "Biblical", hint: null }, names: [
+      { name: "Hannah", meaning: "brave" }, { name: "Ruth", meaning: "friend" }, { name: "Mara", meaning: "bitter" },
+    ] });
+    expect(r.ok && r.data.map((v) => [v.meaning, v.meaning_wrong])).toEqual([["grace, favor", true], ["friend, companion", false], ["", false]]);
+    const req = create.mock.calls[0][0];
+    expect(req.system).toContain("meaning_wrong: true only when the meaning we have is wrong, not just worded differently");
+    const item = req.output_config.format.schema.properties.names.items;
+    expect(item.properties.meaning_wrong).toMatchObject({ type: "boolean" });
+    expect(item.required).toContain("meaning_wrong");
   });
   it("a kept name without a meaning does not pass", async () => {
     create.mockResolvedValueOnce(answer({ names: [{ name: "Ruth", good: true, fits: true, reason: "", meaning: "" }] }));

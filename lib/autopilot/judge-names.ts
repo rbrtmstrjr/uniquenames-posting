@@ -9,7 +9,8 @@ import { judgeJson, type JudgeResult, type Usage } from "./claude-judge";
 // THIS post (the letter or the name theme, and not too close to another name in the list).
 
 export type NameTarget = { kind: "letter"; letter: string } | { kind: "theme"; title: string; hint: string | null };
-export interface NameVerdict { name: string; good: boolean; fits: boolean; reason: string; meaning: string }
+/** `meaning_wrong`: the meaning we have is wrong (not just worded differently); only then is a saved name's meaning replaced. */
+export interface NameVerdict { name: string; good: boolean; fits: boolean; reason: string; meaning: string; meaning_wrong: boolean }
 
 export const NAMES_JUDGE_SYSTEM = [
   "You are a Filipino mom choosing a name for your own baby, and an expert in baby names and their real meanings.",
@@ -21,6 +22,7 @@ export const NAMES_JUDGE_SYSTEM = [
   "- it is given mainly to the other gender",
   "fits = false when it does not truly fit this post (the letter or the name theme), or it is too close in sound or spelling to another name in the list (keep the better one).",
   "meaning: for a good name, its standard accepted meaning in 2 to 6 lowercase English words (fix the given meaning if it is wrong); empty otherwise.",
+  "meaning_wrong: true only when the meaning we have is wrong, not just worded differently; false otherwise.",
   "reason: why it is not good or does not fit, in a few plain words ('made up', 'hard to say', 'bad meaning', 'mostly a boy name', 'too close to Aria', 'not biblical'); empty when it passes.",
   "Judge every name in the list exactly once.",
 ].join("\n");
@@ -34,9 +36,9 @@ const SCHEMA: GeminiSchema = {
         type: "OBJECT",
         properties: {
           name: { type: "STRING" }, good: { type: "BOOLEAN" }, fits: { type: "BOOLEAN" },
-          reason: { type: "STRING" }, meaning: { type: "STRING" },
+          reason: { type: "STRING" }, meaning: { type: "STRING" }, meaning_wrong: { type: "BOOLEAN" },
         },
-        required: ["name", "good", "fits", "reason", "meaning"],
+        required: ["name", "good", "fits", "reason", "meaning", "meaning_wrong"],
       },
     },
   },
@@ -52,7 +54,8 @@ export function namesJudgePrompt(i: { gender: Gender; target: NameTarget; names:
   return [`Baby ${i.gender} names for one post. ${fit}`, "Names (name: the meaning we have):", ...i.names.map((n) => `- ${n.name}: ${n.meaning}`)].join("\n");
 }
 
-const cleanMeaning = (m: string) => m.toLowerCase().replace(/[^\p{L}\s'-]/gu, " ").replace(/\s+/g, " ").trim().slice(0, 80);
+/** Lowercase letters, spaces, apostrophes, hyphens and commas ("gift of god, gracious"); anything else is dropped. */
+const cleanMeaning = (m: string) => m.toLowerCase().replace(/[^\p{L}\s',-]/gu, " ").replace(/\s+,/g, ",").replace(/\s+/g, " ").replace(/^[\s,]+|[\s,]+$/g, "").slice(0, 80);
 
 function parseVerdicts(raw: unknown): NameVerdict[] | null {
   const list = raw && typeof raw === "object" ? (raw as { names?: unknown }).names : null;
@@ -78,11 +81,11 @@ export async function judgeNames(i: { gender: Gender; target: NameTarget; names:
     const byName = new Map(r.data.map((v) => [v.name.trim().toLowerCase(), v]));
     for (const n of batch) {
       const v = byName.get(n.name.trim().toLowerCase());
-      if (!v) { out.push({ name: n.name, good: false, fits: false, reason: "not judged", meaning: "" }); continue; }
+      if (!v) { out.push({ name: n.name, good: false, fits: false, reason: "not judged", meaning: "", meaning_wrong: false }); continue; }
       const meaning = cleanMeaning(v.meaning);
       out.push(v.good && v.fits && !meaning
-        ? { name: n.name, good: false, fits: v.fits, reason: "no meaning", meaning: "" }
-        : { name: n.name, good: v.good, fits: v.fits, reason: v.reason.trim().slice(0, 80), meaning: v.good ? meaning : "" });
+        ? { name: n.name, good: false, fits: v.fits, reason: "no meaning", meaning: "", meaning_wrong: false }
+        : { name: n.name, good: v.good, fits: v.fits, reason: v.reason.trim().slice(0, 80), meaning: v.good ? meaning : "", meaning_wrong: v.good && !!meaning && v.meaning_wrong === true });
     }
   }
   return { ok: true, data: out, usage };

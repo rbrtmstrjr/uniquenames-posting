@@ -5,7 +5,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { AutopilotItemRow, AutopilotRunRow, AutopilotRunStatus, CardRow, Gender, NameRow, SettingsRow, WorkerStatusRow } from "@/lib/db/types";
 import { workerHealth, type WorkerHealth } from "@/lib/status/worker-health";
 
-export type RepoName = Pick<NameRow, "id" | "name" | "meaning" | "gender" | "style" | "status">;
+/** `autopilot_note`: why Autopilot once skipped it; on an available name it means the owner brought it back. */
+export type RepoName = Pick<NameRow, "id" | "name" | "meaning" | "gender" | "style" | "status" | "autopilot_note">;
 export type RunProgress = Pick<AutopilotRunRow, "events" | "input_tokens" | "output_tokens">;
 export type TickPatch = Pick<AutopilotRunRow, "status" | "message" | "events" | "input_tokens" | "output_tokens"> & { finished_at?: string };
 
@@ -99,7 +100,7 @@ export function supabaseRepo(sb: SupabaseClient): AutopilotRepo {
     async allNames() {
       const out: RepoName[] = [];
       for (let from = 0; ; from += PAGE) {
-        const rows = (must(await sb.from("names").select("id, name, meaning, gender, style, status").order("id").range(from, from + PAGE - 1), "read the names") ?? []) as RepoName[];
+        const rows = (must(await sb.from("names").select("id, name, meaning, gender, style, status, autopilot_note").order("id").range(from, from + PAGE - 1), "read the names") ?? []) as RepoName[];
         out.push(...rows);
         if (rows.length < PAGE) return out;
       }

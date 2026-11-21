@@ -9,7 +9,7 @@ const usage = { input: 10, output: 5 };
 /** A judge that passes every name except the ones listed. */
 const judgeWith = (bad: Record<string, Partial<NameVerdict>> = {}) => vi.fn(async (i: { names: { name: string; meaning: string }[] }) => ({
   ok: true as const, usage,
-  data: i.names.map((n) => ({ name: n.name, good: true, fits: true, reason: "", meaning: n.meaning.toLowerCase(), ...bad[n.name] })),
+  data: i.names.map((n) => ({ name: n.name, good: true, fits: true, reason: "", meaning: n.meaning.toLowerCase(), meaning_wrong: false, ...bad[n.name] })),
 }));
 const item = { gender: "girl" as const, letter: "S", name_theme: null, name_count: 10 };
 const S = ["Sabina", "Selah", "Sienna", "Sloane", "Stella", "Sage", "Sora", "Saoirse", "Sylvie", "Seraphina", "Solene", "Sunny"];
@@ -29,16 +29,56 @@ describe("pickNames", () => {
     expect(r.usage).toEqual(usage);
   });
 
-  it("skips saved names a parent would not choose (with the reason), fixes meanings, and leaves names that only don't fit", async () => {
+  it("skips saved names a parent would not choose (with the reason), fixes wrong meanings, and leaves names that only don't fit", async () => {
     const { d, m } = deps(S.map((n) => nm(n)), judgeWith({
-      Saoirse: { good: false, reason: "hard to say" }, Sylvie: { fits: false, reason: "too close to Sienna" }, Selah: { meaning: "a pause to reflect" },
+      Saoirse: { good: false, reason: "hard to say" }, Sylvie: { fits: false, reason: "too close to Sienna" },
+      Selah: { meaning: "a pause to reflect", meaning_wrong: true }, Sienna: { meaning: "a meaning, worded differently" },
       Sora: { good: false, fits: false, reason: "not judged" },
     }));
     const r = await pickNames(d, item, null);
     expect(m.db.skipped).toEqual([{ id: "n-Saoirse", note: "Skipped by Autopilot: hard to say" }]);
+    // Only a wrong meaning is rewritten (and logged); a meaning Claude only words differently stays the owner's.
     expect(m.db.meanings).toEqual([{ id: "n-Selah", meaning: "a pause to reflect" }]);
+    expect(r.notes).toEqual(["Meaning fixed for Selah: a meaning → a pause to reflect"]);
     expect(r.skipped).toEqual([{ name: "Saoirse", why: "hard to say" }]);
     expect(r.kind === "ok" && r.nameIds).not.toContain("n-Sylvie");
+  });
+
+  it("never skips again a name the owner brought back (it keeps Autopilot's note); it is just not used", async () => {
+    const restored = nm("Saoirse", { autopilot_note: "Skipped by Autopilot: hard to say" });
+    const { d, m } = deps([...S.filter((n) => n !== "Saoirse").map((n) => nm(n)), restored], judgeWith({ Saoirse: { good: false, reason: "hard to say" } }));
+    const r = await pickNames(d, item, null);
+    expect(m.db.skipped).toEqual([]);
+    expect(m.db.names.find((n) => n.id === "n-Saoirse")!.status).toBe("available");
+    expect(r.skipped).toEqual([]);
+    expect(r.kind === "ok" && r.nameIds).not.toContain("n-Saoirse");
+  });
+
+  it("skips none when more than 40% of the judged saved names would be skipped, and says so", async () => {
+    const bad = Object.fromEntries(S.slice(0, 5).map((n) => [n, { good: false, reason: "hard to say" }]));
+    const { d, m } = deps(S.map((n) => nm(n)), judgeWith(bad));
+    const r = await pickNames(d, item, null);
+    expect(m.db.skipped).toEqual([]);
+    expect(r.skipped).toEqual([]);
+    expect(r.notes).toEqual([`Autopilot left 5 names alone that it would have skipped: please look at them (${S.slice(0, 5).join(", ")}).`]);
+    // ...and not used: 7 good names are left (8 needed).
+    expect(r).toMatchObject({ kind: "hold", why: expect.stringMatching(/^Only 7 good girl names/) });
+    // 4 of 12 (33%) is below the cap: they are skipped as usual.
+    const four = deps(S.map((n) => nm(n)), judgeWith(Object.fromEntries(S.slice(0, 4).map((n) => [n, { good: false, reason: "hard to say" }]))));
+    await pickNames(four.d, item, null);
+    expect(four.m.db.skipped).toHaveLength(4);
+  });
+
+  it("a letter post judges at most 60 saved names, a random sample of the stock", async () => {
+    const stock = Array.from({ length: 150 }, (_, i) => nm(`S${String(i).padStart(3, "0")}`));
+    const judge = judgeWith();
+    const { d } = deps(stock, judge);
+    await pickNames(d, item, null);
+    expect(judge).toHaveBeenCalledTimes(1);
+    const sent: string[] = judge.mock.calls[0][0].names.map((n: { name: string }) => n.name);
+    expect(sent).toHaveLength(60);
+    expect(new Set(sent).size).toBe(60);
+    expect(sent.every((n) => stock.some((s) => s.name === n))).toBe(true);
   });
 
   it("asks the AI for more when short, checks them, saves the good ones and uses them", async () => {

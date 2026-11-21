@@ -10,12 +10,16 @@ import type { AutopilotRepo } from "./repo";
 import { MIN_GOOD_NAMES } from "./plan";
 
 export const EXTRA_ROUNDS = 2;
-/** An extra AI round starts only with this much time left before the deadline. */
-export const ROUND_NEEDS_MS = 100_000;
+/** An extra AI round starts only with this much time left before the deadline: suggestions (up to 50 s) + the check (up to 120 s). */
+export const ROUND_NEEDS_MS = 180_000;
 /** Asked for on top of the names still missing (the checks drop some). */
 export const ASK_EXTRA = 4;
-/** Most saved names judged for a name-theme post (one Claude batch). */
-export const THEME_STOCK_MAX = 60;
+/** Most saved names judged for one post, letter or name theme (one Claude batch, a random sample): stays inside the tick's time. */
+export const STOCK_JUDGE_MAX = 60;
+/** More than this share of the judged saved names failing = something is off: none is skipped that round. */
+export const MAX_SKIP_SHARE = 0.4;
+/** Names listed in the "left alone" event. */
+const LEFT_ALONE_LISTED = 20;
 
 type Simple = { name: string; meaning: string };
 export interface NamesDeps {
@@ -26,7 +30,8 @@ export interface NamesDeps {
   /** The clock (ms); tests set it. Defaults to Date.now. */
   now?: () => number;
 }
-type Base = { usage: Usage; added: string[]; skipped: { name: string; why: string }[] };
+/** `notes`: plain run events (meanings fixed, skips held back) the engine logs. */
+type Base = { usage: Usage; added: string[]; skipped: { name: string; why: string }[]; notes?: string[] };
 export type NamesOutcome = Base & (
   | { kind: "ok"; nameIds: string[] }
   | { kind: "hold"; why: string }
@@ -35,7 +40,8 @@ export type NamesOutcome = Base & (
 );
 
 export async function pickNames(d: NamesDeps, item: Pick<AutopilotItemRow, "gender" | "letter" | "name_theme" | "name_count">, hint: string | null, deadline?: number): Promise<NamesOutcome> {
-  const base: Base = { usage: { input: 0, output: 0 }, added: [], skipped: [] };
+  const notes: string[] = [];
+  const base: Base = { usage: { input: 0, output: 0 }, added: [], skipped: [], notes };
   const target: NameTarget = item.letter ? { kind: "letter", letter: item.letter } : { kind: "theme", title: item.name_theme ?? "", hint };
   const label = item.letter ? `letter ${item.letter}` : `"${item.name_theme}"`;
   const all = await d.repo.allNames();
@@ -49,24 +55,38 @@ export async function pickNames(d: NamesDeps, item: Pick<AutopilotItemRow, "gend
   };
   const failed = (r: { error: string; stop: boolean }): NamesOutcome => (r.stop ? { ...base, kind: "stop", error: r.error } : { ...base, kind: "retry", error: r.error });
 
-  // 1. The saved names.
+  // 1. The saved names: one batch (a random sample when there are more), to stay inside the tick's time.
   let stock = sameKind.filter((n) => n.status === "available");
-  // A name-theme post has the whole list to pick from: judge one batch (a random sample) to stay inside the tick's time.
-  if (!item.letter && stock.length > THEME_STOCK_MAX) stock = shuffle(stock, d.rng).slice(0, THEME_STOCK_MAX);
+  if (stock.length > STOCK_JUDGE_MAX) stock = shuffle(stock, d.rng).slice(0, STOCK_JUDGE_MAX);
   if (stock.length) {
     const r = await judge(stock.map((n) => ({ name: n.name, meaning: n.meaning })));
     if (!r.ok) return failed(r);
+    const toSkip: { id: string; name: string; why: string }[] = [];
     for (const [k, v] of r.data.entries()) {
       const n = stock[k];
-      if (!v.good && v.reason !== "not judged") {
-        const why = v.reason || "not a good pick";
-        await d.repo.skipName(n.id, `Skipped by Autopilot: ${why}`);
-        base.skipped.push({ name: n.name, why });
+      if (!v.good) {
+        // A name the owner brought back after Autopilot skipped it (it keeps its note) is never skipped again; like a
+        // name that does not fit, it is simply not used.
+        if (v.reason !== "not judged" && !n.autopilot_note) toSkip.push({ id: n.id, name: n.name, why: v.reason || "not a good pick" });
         continue;
       }
-      if (!v.good || !v.fits) continue;
-      if (v.meaning && v.meaning !== n.meaning) await d.repo.setMeaning(n.id, v.meaning);
+      if (!v.fits) continue;
+      if (v.meaning_wrong && v.meaning && v.meaning !== n.meaning) {
+        await d.repo.setMeaning(n.id, v.meaning);
+        notes.push(`Meaning fixed for ${n.name}: ${n.meaning} → ${v.meaning}`);
+      }
       good.push({ id: n.id, name: n.name });
+    }
+    // Too many at once looks like a bad check, not a bad list: the names are only left unused, for the owner to look at.
+    if (toSkip.length > stock.length * MAX_SKIP_SHARE) {
+      const listed = toSkip.slice(0, LEFT_ALONE_LISTED).map((s) => s.name).join(", ");
+      const more = toSkip.length > LEFT_ALONE_LISTED ? ` and ${toSkip.length - LEFT_ALONE_LISTED} more` : "";
+      notes.push(`Autopilot left ${toSkip.length} names alone that it would have skipped: please look at them (${listed}${more}).`);
+    } else {
+      for (const s of toSkip) {
+        await d.repo.skipName(s.id, `Skipped by Autopilot: ${s.why}`);
+        base.skipped.push({ name: s.name, why: s.why });
+      }
     }
   }
 

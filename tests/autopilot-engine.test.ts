@@ -53,6 +53,13 @@ describe("tick", () => {
     expect(m.db.runs[0].tick_until).toBeNull();
   });
 
+  it("the names step's notes (meanings fixed, skips held back) are logged as run events", async () => {
+    const notes = ["Meaning fixed for Selah: pause → a pause to reflect", "Autopilot left 5 names alone that it would have skipped: please look at them (A, B, C, D, E)."];
+    const { m, d } = setup({ items: [item("i1")] }, { pickNames: vi.fn(async () => ({ kind: "ok" as const, nameIds: ["n0"], usage, added: [], skipped: [], notes })) });
+    await tick(d);
+    expect(m.db.runs[0].events.filter((e) => e.kind === "run").map((e) => e.text)).toEqual(notes);
+  });
+
   it("a name-theme post gets its title and the hint from the settings", async () => {
     const { d } = setup({ items: [item("i1", { letter: null, name_theme: "Biblical" })] });
     await tick(d);
@@ -153,6 +160,16 @@ describe("tick", () => {
     await tick(noTheme.d);
     expect(noTheme.m.db.items[0]).toMatchObject({ state: "held", note: expect.stringMatching(/No girl photoshoot theme/) });
     expect(noTheme.d.pickNames).not.toHaveBeenCalled();
+  });
+
+  it("an item already at 3 naming tries (a tick died while picking names) is held without picking names again", async () => {
+    for (const state of ["naming", "planned"] as const) {
+      const { m, d } = setup({ items: [item("i1", { state, attempts: 3 })] });
+      await tick(d);
+      expect(d.pickNames).not.toHaveBeenCalled();
+      expect(d.createPost).not.toHaveBeenCalled();
+      expect(m.db.items[0]).toMatchObject({ state: "held", attempts: 3, note: "Couldn't pick names after 3 tries. Make this post on Today." });
+    }
   });
 
   it("at most two posts are being made at once", async () => {

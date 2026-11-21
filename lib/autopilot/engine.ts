@@ -315,6 +315,12 @@ class Tick {
       await this.hold(next, `No ${next.gender} photoshoot theme is left. Add ${next.gender} themes on the Themes page, then make this post on Today.`);
       return;
     }
+    // A tick killed while picking names (the route's time limit) leaves the item "naming" with the try counted: never
+    // start a fourth round, or a post that always runs out of time would loop.
+    if (next.attempts >= MAX_NAMING_ATTEMPTS) {
+      await this.hold(next, `Couldn't pick names after ${MAX_NAMING_ATTEMPTS} tries. Make this post on Today.`);
+      return;
+    }
     await this.setItem(next, { state: "naming", attempts: next.attempts + 1 });
     const settings = await this.d.repo.settings();
     const hint = next.name_theme
@@ -324,6 +330,7 @@ class Tick {
     this.addUsage(names.usage);
     for (const n of names.added) this.event("name_added", `${n} added (${itemLabel(next)}).`);
     for (const s of names.skipped) this.event("name_skipped", `${s.name} skipped: ${s.why}.`);
+    for (const text of names.notes ?? []) this.event("run", text);
     if (names.kind === "stop") throw new Pause(`${names.error} Fix it, then press Resume.`);
     if (names.kind === "hold") { await this.hold(next, names.why); return; }
     if (names.kind === "retry") {

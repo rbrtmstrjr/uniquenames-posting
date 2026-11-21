@@ -40,11 +40,11 @@ export function memoryRepo(o: {
     async themesLeft(g) { return db.themesLeft[g]; },
     async settings() { return db.settings; },
     async allNames() { return db.names.map((n) => ({ ...n })); },
-    async skipName(id, note) { db.skipped.push({ id, note }); const n = db.names.find((x) => x.id === id); if (n) n.status = "skip"; },
-    async setMeaning(id, meaning) { db.meanings.push({ id, meaning }); },
+    async skipName(id, note) { db.skipped.push({ id, note }); const n = db.names.find((x) => x.id === id); if (n) Object.assign(n, { status: "skip", autopilot_note: note }); },
+    async setMeaning(id, meaning) { db.meanings.push({ id, meaning }); const n = db.names.find((x) => x.id === id); if (n) n.meaning = meaning; },
     async addNames(rows) {
       return rows.map((r) => {
-        const row: RepoName = { id: `new-${db.nextId++}`, name: r.name, meaning: r.meaning, gender: r.gender, style: "single", status: "available" };
+        const row: RepoName = { id: `new-${db.nextId++}`, name: r.name, meaning: r.meaning, gender: r.gender, style: "single", status: "available", autopilot_note: null };
         db.names.push(row);
         return { id: row.id, name: row.name };
       });
