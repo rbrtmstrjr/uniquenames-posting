@@ -4,6 +4,7 @@
 # ONE request (claim_next_job, migration 020; the old one-function-at-a-time calls stay as the fallback), the stuck-claim
 # requeue rides on one poll a minute, an idle worker polls every 15 s instead of every 3 s, and worker_status is written
 # once a minute plus at once when something the website shows changes (ComfyUI open/closed, busy/idle).
+# 2.9.0: Autopilot (022): claim_next_job's answer says when a run is active; autopilot.py knocks on the website.
 import contextlib
 import datetime
 import io
@@ -21,7 +22,7 @@ import photo_look
 from render import JobError, card_layout, detail_line, slugify, text_style
 from supa import SupaError
 
-VERSION = "2.8.0"
+VERSION = "2.9.0"
 BUCKET = "cards"
 COMFY_CLOSED = "ComfyUI is closed. Open ComfyUI Desktop on your PC, then press Retry."
 NO_NET_SAVE = "Couldn't reach the internet to save this card. Press Retry."
@@ -159,7 +160,7 @@ def with_post_fonts(settings, fonts):
 
 class Runner:
     def __init__(self, supa, renderer, output_root, cache_dir, poll_seconds=3.0, heartbeat_seconds=HEARTBEAT_SECONDS,
-                 log=print, reels=None, look=None):
+                 log=print, reels=None, look=None, autopilot=None):
         self.supa = supa
         self.renderer = renderer
         self.output_root = output_root
@@ -172,6 +173,7 @@ class Runner:
         self.stop_event = threading.Event()
         self.reels = reels             # reels.ReelRunner, or None (cards only)
         self.look = look               # (vibrance, texture) for new card photos (photo_look, 2.7.2); None/0,0 = off
+        self.autopilot = autopilot        # autopilot.AutopilotPinger, or None (Autopilot off for this page)
         self.reels_off_until = 0.0     # the reel functions are missing (migration 005 not run): re-check later
         self.reels_missing_logged = False
         self.music_off_until = 0.0     # the 006 functions are missing: claim without music, no voice samples
@@ -277,6 +279,8 @@ class Runner:
                     raise
                 self._one_claim_off(e)
             else:
+                if self.autopilot:
+                    self.autopilot.note(bool(got and got.get("autopilot")))
                 self._one_claim_on()
                 if requeue:
                     self.next_requeue = time.time() + REQUEUE_SECONDS
@@ -297,6 +301,8 @@ class Runner:
         if not got:
             return False
         kind, job = got.get("kind"), got.get("job")
+        if kind == "none":   # 022: nothing to do, but an Autopilot run is active (the flag was read in _tick)
+            return False
         if kind == "card":
             return self._card(job)
         if kind == "reel_step":
@@ -307,6 +313,11 @@ class Runner:
             return self._preview(job)
         self.log("unknown job kind from claim_next_job: %r (skipped; update the worker)" % (kind,))
         return False
+
+    def start_autopilot(self):
+        """The Autopilot knock thread (once per page)."""
+        if self.autopilot:
+            self.autopilot.start()
 
     def _one_claim_off(self, e):
         self.one_claim_off_until = time.time() + ONE_CLAIM_RECHECK_SECONDS
@@ -714,6 +725,7 @@ class Runner:
     # ------------------------------------------------------------ forever
     def run_forever(self):
         threading.Thread(target=self._heartbeat_loop, daemon=True).start()
+        self.start_autopilot()
         backoff = self.poll_seconds
         while not self.stop_event.is_set():
             self.sweep_old_previews()

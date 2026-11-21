@@ -4,14 +4,13 @@ import type { CardRow } from "@/lib/db/types";
 import { validateName } from "./validate";
 import { nextSeed, normalizeName, restampMode, styleOf } from "./helpers";
 import { generateLockReason } from "./generate-guard";
+import { REQUEUE, recheck } from "@/lib/cards/remake";
 import { fail, requireOwner, type ActionResult } from "./result";
 import { textChanged } from "@/lib/status/card-dialog";
 import { resolveCta, validateCtaMessage } from "@/lib/cta/messages";
 import type { Gender } from "@/lib/db/types";
 
 type SB = Awaited<ReturnType<typeof createClient>>;
-
-const REQUEUE = { status: "queued", claimed_at: null, started_at: null, finished_at: null, error: null, attempts: 0 };
 
 /** The card plus the Generate lock (worker health), read in parallel. */
 async function getCard(id: string) {
@@ -80,7 +79,7 @@ export async function regenerateCardAction(cardId: string, text?: { name: string
   if (clean && (await spellingTaken(sb, card, clean.name))) return fail(DUP);
 
   const version = card.version + 1;
-  const patch = { ...clean, ...REQUEUE, version, seed: nextSeed(card.id, version, card.seed), queued_at: new Date().toISOString() };
+  const patch = { ...clean, ...REQUEUE, ...recheck(card), version, seed: nextSeed(card.id, version, card.seed), queued_at: new Date().toISOString() };
   const bad = await updateCardWithName(sb, card, clean, patch);
   return bad ? fail(bad) : { ok: true };
 }
@@ -103,8 +102,8 @@ export async function restampCardAction(cardId: string, name: string, meaning: s
   const version = card.version + 1;
   const now = new Date().toISOString();
   const patch = mode === "restamp"
-    ? { ...clean, status: "restamp", claimed_at: null, error: null, version, queued_at: now }
-    : { ...clean, ...REQUEUE, version, seed: nextSeed(card.id, version, card.seed), queued_at: now };
+    ? { ...clean, ...recheck(card), status: "restamp", claimed_at: null, error: null, version, queued_at: now }
+    : { ...clean, ...REQUEUE, ...recheck(card), version, seed: nextSeed(card.id, version, card.seed), queued_at: now };
   const err = await updateCardWithName(sb, card, clean, patch);
   return err ? fail(err) : { ok: true, mode };
 }
@@ -133,8 +132,8 @@ export async function ctaTextAction(cardId: string, message: string, newPicture 
   const version = card.version + 1;
   const now = new Date().toISOString();
   const patch = mode === "restamp"
-    ? { ...text, status: "restamp", claimed_at: null, error: null, version, queued_at: now }
-    : { ...text, ...REQUEUE, version, seed: nextSeed(card.id, version, card.seed), queued_at: now };
+    ? { ...text, ...recheck(card), status: "restamp", claimed_at: null, error: null, version, queued_at: now }
+    : { ...text, ...REQUEUE, ...recheck(card), version, seed: nextSeed(card.id, version, card.seed), queued_at: now };
   const err = await updateCardWithName(sb, card, null, patch);
   return err ? fail(err) : { ok: true, mode };
 }

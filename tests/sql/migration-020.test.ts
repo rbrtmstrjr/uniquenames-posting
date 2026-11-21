@@ -28,7 +28,7 @@ async function liveDb(upTo = ALL.length) {
 }
 
 type Json = Record<string, unknown>;
-type Job = { kind: "card" | "reel_step" | "voice_sample" | "theme_preview"; job: Json } | null;
+type Job = { kind: "card" | "reel_step" | "voice_sample" | "theme_preview"; job: Json; autopilot?: boolean } | null;
 const claim = async (db: PGlite, comfy = true, o: { music?: boolean; requeue?: boolean } = {}) =>
   (await one<{ r: Job }>(db, `select claim_next_job($1, $2, $3) r`, [comfy, o.music ?? true, o.requeue ?? true])).r;
 const kinds = async (db: PGlite, n: number, comfy = true) => {
@@ -139,6 +139,7 @@ describe("020_one_claim.sql on the live schema (v1 + 002..019)", () => {
     const def = async (db: PGlite) => (await one<{ d: string }>(db, `select pg_get_functiondef('${SIG}'::regprocedure) d`)).d.replace(/\r\n/g, "\n");
     const migrated = await liveDb();
     await migrated.exec(m020);
+    await migrated.exec(stripSupabase(read("supabase", "migrations", "022_autopilot.sql"))); // 022 adds the autopilot flag to the answers
     expect(await def(await freshDb())).toBe(await def(migrated));
   });
 
@@ -181,7 +182,8 @@ describe("claim_next_job: the same order as the old one-by-one calls", () => {
     const c = await card(db);
     const got = await claim(db);
     expect(got).toMatchObject({ kind: "card", job: { job: "generate", card: { id: c, status: "generating", attempts: 1 }, fonts: null } });
-    expect(Object.keys(got!).sort()).toEqual(["job", "kind"]);
+    expect(Object.keys(got!).sort()).toEqual(["autopilot", "job", "kind"]); // 022: every answer says whether a run is active
+    expect(got!.autopilot).toBe(false);
   });
 
   it("cards first (restamps before new photos), then reel steps, voice samples, theme previews", async () => {
@@ -347,7 +349,11 @@ describe("claim_next_job parity with the old sequence (random worlds)", () => {
       };
       const before = await run((p) => oldPoll(db, p.comfy, p.music, p.requeue));
       await db.exec("rollback to savepoint world");
-      const after = await run((p) => claim(db, p.comfy, { music: p.music, requeue: p.requeue }));
+      const after = await run(async (p) => { // 022 adds {autopilot: false} to every answer; the old calls know nothing of it
+        const j = await claim(db, p.comfy, { music: p.music, requeue: p.requeue });
+        if (j) delete j.autopilot;
+        return j;
+      });
       await db.exec("rollback");
       expect(after.out, `seed ${seed}`).toEqual(before.out);
       expect(after.rows, `seed ${seed}`).toEqual(before.rows);

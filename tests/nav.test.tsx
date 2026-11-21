@@ -33,7 +33,7 @@ describe("nav instant feedback", () => {
 
   it("sidebar lists every page incl. Reels; the phone bar keeps 5 tabs with Reels, Themes under More", () => {
     render(<SideNav />);
-    expect(screen.getAllByRole("link").map((a) => a.textContent?.trim())).toEqual(["Today", "Posts", "Reels", "Names", "Themes", "Orders", "Settings"]);
+    expect(screen.getAllByRole("link").map((a) => a.textContent?.trim())).toEqual(["Today", "Posts", "Reels", "Names", "Autopilot", "Themes", "Orders", "Settings"]);
     cleanup();
     pathname = "/themes";
     render(<BottomTabs />);

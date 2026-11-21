@@ -27,6 +27,8 @@ export interface NameRow {
   origin?: string | null; us_rank?: number | null; us_year?: number | null;
   /** The names PDF (migration 018; absent before it runs): the meaning group the name is listed under; null = not sorted yet. */
   meaning_category?: MeaningCategory | null;
+  /** Autopilot (migration 022): why Autopilot skipped this name (status 'skip'). */
+  autopilot_note?: string | null;
 }
 export interface ThemeRow {
   id: string; title: string; gender: Gender; backdrop: string; outfit: string; props: string; lighting: string; palette: string;
@@ -47,6 +49,8 @@ export interface PostRow {
   letter?: string | null;
   /** Migration 017 (absent before it runs): a post by initials' two capitals ('AR' = first name A, middle name R); null otherwise. */
   initials?: string | null;
+  /** Autopilot (migration 022): a name-theme post's title ("Biblical"); null otherwise. */
+  name_theme?: string | null;
   /** Migration 021 (absent before it runs): Post now / Schedule to Facebook. fb_state guards against posting twice. */
   fb_post_id?: string | null; fb_permalink?: string | null; fb_state?: FacebookState | null;
   fb_scheduled_for?: string | null; fb_attempt_at?: string | null; fb_error?: string | null;
@@ -59,6 +63,8 @@ export interface CardRow {
   photo_path: string | null; card_path: string | null; version: number; selected: boolean; order_index: number;
   queued_at: string; claimed_at: string | null; started_at: string | null; finished_at: string | null; attempts: number;
   created_at: string; updated_at: string;
+  /** Autopilot (migration 022): the photo check; null on cards of posts made by hand. */
+  check_state?: CardCheckState | null; check_note?: string | null; remakes?: number;
 }
 /** How the PC stamps a card (migration 015): 'classic' = Unique Names, 'name-nest' = brand colours + the US rank / origin line. */
 export type CardLayout = "classic" | "name-nest";
@@ -91,6 +97,8 @@ export interface SettingsRow {
   /** Name Nest (migration 015; absent before it runs): how the PC stamps a card ('classic' = Unique Names). */
   card_layout?: CardLayout;
   updated_at: string;
+  /** Autopilot (migration 022): the name themes, one per line ("Title" or "Title (hint)"). */
+  autopilot_name_themes?: string;
 }
 export type VoiceSampleStatus = "missing" | "queued" | "making" | "ready" | "failed";
 /** A narrator voice (migration 006): 30 Gemini voices cloned by Chatterbox from a reference clip + 'builtin'. */
@@ -243,4 +251,21 @@ export interface WorkerStatusRow {
 /** A names PDF made for a buyer (migration 018, Names > Past exports). The password is read only on demand. */
 export interface ExportLogRow {
   id: string; created_at: string; buyer: string; gender: "girl" | "boy" | "both"; name_count: number; file_name: string; pack: string;
+}
+
+/** Autopilot (migration 022). */
+export type AutopilotRunStatus = "running" | "waiting" | "paused" | "done" | "stopped";
+export type AutopilotSlot = "morning" | "afternoon";
+export type AutopilotItemState = "planned" | "naming" | "making" | "checking" | "scheduled" | "held";
+export type CardCheckState = "pending" | "passed" | "failed" | "removed";
+export type AutopilotEventKind = "run" | "name_added" | "name_skipped" | "card_remade" | "card_removed" | "post_scheduled" | "post_held";
+export interface AutopilotEvent { at: string; kind: AutopilotEventKind; text: string }
+export interface AutopilotRunRow {
+  id: string; status: AutopilotRunStatus; days: number; first_day: string; message: string | null; events: AutopilotEvent[];
+  input_tokens: number; output_tokens: number; tick_until: string | null; created_at: string; finished_at: string | null; updated_at: string;
+}
+export interface AutopilotItemRow {
+  id: string; run_id: string; day: string; slot: AutopilotSlot; gender: Gender; scheduled_for: string;
+  letter: string | null; name_theme: string | null; name_count: number; post_id: string | null; state: AutopilotItemState;
+  lookalike_done: boolean; attempts: number; note: string | null; created_at: string; updated_at: string;
 }

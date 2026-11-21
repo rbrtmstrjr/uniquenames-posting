@@ -298,6 +298,9 @@ class FakeRunner:
     def heartbeat_once(self):
         self.beats += 1
 
+    def start_autopilot(self):
+        pass
+
     def _heartbeat_loop(self):
         while not self.stop_event.is_set():
             self.heartbeat_once()
@@ -590,7 +593,7 @@ class BusyElsewhereTest(unittest.TestCase):
         self.assertIsNone(ru.busy_elsewhere)
 
     def test_version(self):
-        self.assertEqual(jobs.VERSION, "2.8.0")
+        self.assertEqual(jobs.VERSION, "2.9.0")
 
 
 class ReelsFolderTest(unittest.TestCase):

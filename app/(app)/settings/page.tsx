@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ChevronRight, Palette, ShoppingBag } from "lucide-react";
+import { Bot, ChevronRight, Palette, ShoppingBag } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import type { SettingsRow } from "@/lib/db/types";
 import { SettingsForm } from "@/components/settings/settings-form";
@@ -39,7 +39,7 @@ export default async function SettingsPage() {
       <PageHeader title="Settings" />
       {/* Phones: Themes and Orders aren't on the bottom bar, so "More" (this page) leads to them. */}
       <nav aria-label="More pages" className="mb-4 space-y-2 md:hidden">
-        {[{ href: "/themes", label: "Themes", Icon: Palette }, { href: "/orders", label: "Orders", Icon: ShoppingBag }].map(({ href, label, Icon }) => (
+        {[{ href: "/autopilot", label: "Autopilot", Icon: Bot }, { href: "/themes", label: "Themes", Icon: Palette }, { href: "/orders", label: "Orders", Icon: ShoppingBag }].map(({ href, label, Icon }) => (
           <Link key={href} href={href} className="flex min-h-12 items-center gap-3 rounded-2xl border border-line bg-surface px-4 font-semibold text-ink shadow-soft transition active:scale-[.99]">
             <span className="grid size-8 place-items-center rounded-lg bg-accent-soft text-accent"><Icon className="size-4" aria-hidden /></span>
             {label}

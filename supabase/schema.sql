@@ -142,6 +142,10 @@ create table if not exists public.settings (
   card_layout text not null default 'classic' constraint settings_card_layout_check check (card_layout in ('classic', 'name-nest')),
   -- the names PDF shop (019): the owner's on/off switch for /shop (Orders page); off until go-live
   shop_enabled boolean not null default false,
+  -- Autopilot (022): the owner's name themes, one per line ("Title" or "Title (hint for the AI)"); after Z the flow goes through them, then back to A
+  autopilot_name_themes text not null default
+    E'Unique and modern\nBiblical\nSoft and cool\nShort and sweet\nClassic and timeless\nNature-inspired\nRoyal and elegant\nStrong and brave\nHeavenly (stars, sky, light)',
+  constraint settings_autopilot_name_themes_len check (char_length(autopilot_name_themes) <= 2000),
   updated_at timestamptz not null default now(),
   check (min_images <= max_images)
 );
@@ -214,8 +218,11 @@ create table if not exists public.posts (
   fb_scheduled_for timestamptz,
   fb_attempt_at timestamptz,
   fb_error text,
+  -- Autopilot (022): a name-theme post's title ("Biblical"); null on any other post
+  name_theme text,
   constraint posts_fb_state_check check (fb_state is null or fb_state in ('publishing', 'published', 'scheduled', 'failed', 'unsure')),
-  constraint posts_fb_error_len check (fb_error is null or char_length(fb_error) <= 500)
+  constraint posts_fb_error_len check (fb_error is null or char_length(fb_error) <= 500),
+  constraint posts_name_theme_len check (name_theme is null or char_length(name_theme) between 1 and 60)
 );
 create index if not exists posts_series on public.posts (series_id) where series_id is not null;
 
@@ -235,6 +242,7 @@ create table if not exists public.names (
   -- the names PDF (018): the meaning group the name is listed under ('nature' = Nature & Flowers, …); null = not sorted yet
   meaning_category text constraint names_meaning_category_check check (meaning_category is null or meaning_category in
     ('nature', 'light', 'water', 'strength', 'faith', 'love', 'wisdom', 'royal', 'peace', 'gems', 'earth', 'more')),
+  autopilot_note text constraint names_autopilot_note_len check (autopilot_note is null or char_length(autopilot_note) <= 200),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -314,6 +322,10 @@ create table if not exists public.cards (
   queued_at timestamptz not null default now(),
   claimed_at timestamptz, started_at timestamptz, finished_at timestamptz,
   attempts int not null default 0,
+  -- Autopilot (022): the photo check of a card of an Autopilot post (null on every other card)
+  check_state text constraint cards_check_state_check check (check_state is null or check_state in ('pending', 'passed', 'failed', 'removed')),
+  check_note text constraint cards_check_note_len check (check_note is null or char_length(check_note) <= 300),
+  remakes int not null default 0,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   check (kind = 'preview' or post_id is not null)
@@ -322,6 +334,49 @@ create index if not exists cards_queue on public.cards (status, queued_at) where
 create index if not exists cards_post on public.cards (post_id, position);
 -- 010: at most one closing card per post
 create unique index if not exists cards_one_cta on public.cards (post_id) where kind = 'cta';
+
+-- Autopilot (022)
+-- One run = one press of "Make N days". At most one run is active (running / waiting / paused) at a time.
+create table if not exists public.autopilot_runs (
+  id uuid primary key default gen_random_uuid(),
+  status text not null default 'running' constraint autopilot_runs_status_check
+    check (status in ('running', 'waiting', 'paused', 'done', 'stopped')),
+  days int not null constraint autopilot_runs_days_check check (days between 1 and 7),
+  first_day date not null,
+  message text constraint autopilot_runs_message_len check (message is null or char_length(message) <= 500),
+  events jsonb not null default '[]'::jsonb,
+  input_tokens bigint not null default 0,
+  output_tokens bigint not null default 0,
+  tick_until timestamptz,
+  created_at timestamptz not null default now(),
+  finished_at timestamptz,
+  updated_at timestamptz not null default now()
+);
+create unique index if not exists autopilot_runs_one_active on public.autopilot_runs ((true)) where status in ('running', 'waiting', 'paused');
+
+-- One row per planned post of a run.
+create table if not exists public.autopilot_items (
+  id uuid primary key default gen_random_uuid(),
+  run_id uuid not null references public.autopilot_runs (id) on delete cascade,
+  day date not null,
+  slot text not null constraint autopilot_items_slot_check check (slot in ('morning', 'afternoon')),
+  gender text not null constraint autopilot_items_gender_check check (gender in ('boy', 'girl')),
+  scheduled_for timestamptz not null,
+  letter text constraint autopilot_items_letter_check check (letter is null or letter ~ '^[A-Z]$'),
+  name_theme text constraint autopilot_items_name_theme_len check (name_theme is null or char_length(name_theme) between 1 and 60),
+  name_count int not null constraint autopilot_items_name_count_check check (name_count between 1 and 30),
+  post_id uuid references public.posts (id) on delete set null,
+  state text not null default 'planned' constraint autopilot_items_state_check
+    check (state in ('planned', 'naming', 'making', 'checking', 'scheduled', 'held')),
+  lookalike_done boolean not null default false,
+  attempts int not null default 0,
+  note text constraint autopilot_items_note_len check (note is null or char_length(note) <= 500),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint autopilot_items_label check ((letter is null) <> (name_theme is null)),
+  constraint autopilot_items_one_slot unique (run_id, day, slot)
+);
+create index if not exists autopilot_items_run on public.autopilot_items (run_id, scheduled_for);
 -- reels (005): a script the PC turns into a video: voice -> timing -> one image per scene -> render
 create table if not exists public.reels (
   id uuid primary key default gen_random_uuid(),
@@ -403,7 +458,7 @@ create or replace function public.touch_updated_at() returns trigger language pl
 begin new.updated_at := now(); return new; end $$;
 
 do $$ declare t text; begin
-  foreach t in array array['settings', 'worker_status', 'themes', 'posts', 'names', 'cards', 'reels', 'reel_scenes', 'reel_voices', 'reel_themes', 'shop_orders'] loop
+  foreach t in array array['settings', 'worker_status', 'themes', 'posts', 'names', 'cards', 'reels', 'reel_scenes', 'reel_voices', 'reel_themes', 'shop_orders', 'autopilot_runs', 'autopilot_items'] loop
     execute format('drop trigger if exists touch on public.%I', t);
     execute format('create trigger touch before update on public.%I for each row execute function public.touch_updated_at()', t);
   end loop;
@@ -1184,20 +1239,23 @@ end $$;
 create or replace function public.claim_next_job(p_comfy_ok boolean, p_music boolean, p_requeue boolean)
 returns jsonb language plpgsql as $$
 declare v_job jsonb; v_comfy boolean := coalesce(p_comfy_ok, false);
+  v_ap boolean := exists (select 1 from public.autopilot_runs where status in ('running', 'waiting'));
 begin
   if coalesce(p_requeue, false) then perform public.requeue_stuck_cards(); end if;
   v_job := public.claim_next_card(not v_comfy);
-  if v_job is not null then return jsonb_build_object('kind', 'card', 'job', v_job); end if;
+  if v_job is not null then return jsonb_build_object('kind', 'card', 'job', v_job, 'autopilot', v_ap); end if;
 
   if coalesce(p_requeue, false) then perform public.requeue_stuck_reels(); end if;
   v_job := public.claim_next_reel_step(not v_comfy, coalesce(p_music, false));
-  if v_job is not null then return jsonb_build_object('kind', 'reel_step', 'job', v_job); end if;
+  if v_job is not null then return jsonb_build_object('kind', 'reel_step', 'job', v_job, 'autopilot', v_ap); end if;
 
-  if not v_comfy then return null; end if;
-  v_job := public.claim_next_voice_sample();
-  if v_job is not null then return jsonb_build_object('kind', 'voice_sample', 'job', v_job); end if;
-  v_job := public.claim_next_theme_preview();
-  if v_job is not null then return jsonb_build_object('kind', 'theme_preview', 'job', v_job); end if;
+  if v_comfy then
+    v_job := public.claim_next_voice_sample();
+    if v_job is not null then return jsonb_build_object('kind', 'voice_sample', 'job', v_job, 'autopilot', v_ap); end if;
+    v_job := public.claim_next_theme_preview();
+    if v_job is not null then return jsonb_build_object('kind', 'theme_preview', 'job', v_job, 'autopilot', v_ap); end if;
+  end if;
+  if v_ap then return jsonb_build_object('kind', 'none', 'autopilot', true); end if;
   return null;
 end $$;
 
@@ -1421,11 +1479,13 @@ alter table public.reel_voices enable row level security;
 alter table public.reel_themes enable row level security;
 alter table public.exports enable row level security;
 alter table public.shop_orders enable row level security;
+alter table public.autopilot_runs enable row level security;
+alter table public.autopilot_items enable row level security;
 -- shop_secrets: RLS on and no policy at all (only the shop functions read it)
 alter table public.shop_secrets enable row level security;
 
 do $$ declare t text; begin
-  foreach t in array array['settings', 'themes', 'posts', 'names', 'cards', 'reels', 'reel_scenes', 'reel_voices', 'reel_themes', 'exports', 'shop_orders'] loop
+  foreach t in array array['settings', 'themes', 'posts', 'names', 'cards', 'reels', 'reel_scenes', 'reel_voices', 'reel_themes', 'exports', 'shop_orders', 'autopilot_runs', 'autopilot_items'] loop
     execute format('drop policy if exists owner_all on public.%I', t);
     execute format('create policy owner_all on public.%I for all to authenticated using (true) with check (true)', t);
   end loop;

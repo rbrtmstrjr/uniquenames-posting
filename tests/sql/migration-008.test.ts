@@ -117,6 +117,7 @@ describe("fresh schema.sql matches v1 + 002..008 (+ 009)", () => {
     await migrated.exec(m017);
     await migrated.exec(stripSupabase(read("supabase", "migrations", "019_shop.sql"))); // 019: settings.shop_enabled
     await migrated.exec(stripSupabase(read("supabase", "migrations", "021_facebook_posting.sql"))); // 021: posts.fb_* (Post now / Schedule)
+    await migrated.exec(stripSupabase(read("supabase", "migrations", "022_autopilot.sql"))); // 022: Autopilot (settings, posts, names, cards)
     const want = await shape(migrated);
     const names = (want.constraints as { conname: string }[]).map((c) => c.conname);
     expect(names).toEqual(expect.arrayContaining(["reel_scenes_shot_size_check", "reel_scenes_subject_check", "reel_scenes_motion_check"]));

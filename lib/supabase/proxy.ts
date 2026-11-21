@@ -47,7 +47,8 @@ export function safeNext(next?: string): string {
 // The public names PDF shop (docs/SHOP.md): pages and endpoints anyone may open without signing in. They never use
 // the owner's session: they call migration 019's narrow functions with the anon key. Exact paths only; anything odd
 // (dot segments, doubled slashes, encoded characters) stays behind the owner gate.
-const PUBLIC_EXACT = new Set(["/shop", "/shop/thanks", "/api/shop/checkout", "/api/shop/status", "/api/paymongo/webhook"]);
+// Also public: the Autopilot tick (the PC worker; the route checks AUTOPILOT_SECRET).
+const PUBLIC_EXACT = new Set(["/shop", "/shop/thanks", "/api/shop/checkout", "/api/shop/status", "/api/paymongo/webhook", "/api/autopilot/tick"]);
 export function isPublicPath(path: string): boolean {
   if (/[%\\]|\/\/|(^|\/)\.{1,2}(\/|$)/.test(path)) return false;
   if (PUBLIC_EXACT.has(path)) return true;

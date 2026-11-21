@@ -8,6 +8,7 @@ import { formatElapsed } from "@/lib/status/eta";
 import { useNow } from "@/lib/realtime/hooks";
 import { cn } from "@/lib/utils/cn";
 import { FadeImage } from "@/components/ui/fade-image";
+import { checkChip } from "@/lib/status/card-check";
 
 export function CardTile({ card, url, health, queuePos, onOpen, onRetry, selection, className }: {
   card: CardRow; url?: string; health: WorkerHealth; queuePos: number; onOpen?: () => void; onRetry?: () => void | Promise<void>;
@@ -23,6 +24,7 @@ export function CardTile({ card, url, health, queuePos, onOpen, onRetry, selecti
   const isCta = card.kind === "cta";
   const title = isCta ? "Closing card" : card.name;
   const label = `${title}: ${({ queued: "in line", generating: "being made", regenerating: "being remade", restamp: "updating text", done: "ready", failed: "failed", waiting: "waiting for your PC" } as const)[v]}`;
+  const chip = v === "done" ? checkChip(card) : null;
 
   const retry = async () => {
     if (retrying || !onRetry) return;
@@ -69,6 +71,13 @@ export function CardTile({ card, url, health, queuePos, onOpen, onRetry, selecti
       {v === "restamp" && (
         <span className="absolute left-2 top-2 z-[2] inline-flex items-center gap-1 rounded-full bg-surface/95 px-2 py-1 text-[11px] font-bold text-ink shadow-soft">
           <PenLine className="size-3 text-accent" /> Updating text…
+        </span>
+      )}
+      {chip && (
+        <span title={card.check_note ?? undefined}
+          className={cn("pointer-events-none absolute bottom-2 left-2 z-[2] max-w-[80%] truncate rounded-full bg-surface/95 px-2 py-0.5 text-[11px] font-bold shadow-soft",
+            chip.tone === "ok" ? "text-ok" : "text-bad")}>
+          {chip.text}
         </span>
       )}
       {v === "failed" && (

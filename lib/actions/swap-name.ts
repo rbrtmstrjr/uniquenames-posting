@@ -11,6 +11,7 @@ import { validateName } from "./validate";
 import { nameKey, nextSeed, restampMode, UUID_RE } from "./helpers";
 import { generateLockReason } from "./generate-guard";
 import { fail, requireOwner, type ActionResult } from "./result";
+import { recheck } from "@/lib/cards/remake";
 
 // The card dialog's "My names" tab: put a name from the Names page on a card (instead of typing one or taking an AI
 // idea). The list offers the available names that fit the card's post; saving swaps them in one transaction
@@ -117,6 +118,17 @@ const missingFunction = (e: { message: string; code?: string }) =>
 type Mode = "restamp" | "regenerate";
 
 /**
+ * An Autopilot card that got a new name (swap_card_name / swap_initials_card_name do not know the check, 022) is checked
+ * again. Best effort right after the swap; the engine also sends a passed card that is being re-made back to its check.
+ */
+async function recheckSwapped(sb: SB, card: CardRow) {
+  const patch = recheck(card);
+  if (!("check_state" in patch)) return;
+  const { error } = await sb.from("cards").update(patch).eq("id", card.id);
+  if (error) console.error("swapCardNameAction: could not send the card back to its check", error.message);
+}
+
+/**
  * Before migration 016: the same swap as guarded steps. The new name is claimed first (only while still available),
  * then the card is updated version-guarded (the new name is given back if that fails), then the old name is freed
  * when no other card uses it.
@@ -131,8 +143,8 @@ async function swapInSteps(sb: SB, card: CardRow, post: PostRow, name: NameRow, 
   const version = card.version + 1;
   const text = { name: name.name, meaning, name_id: name.id };
   const patch = mode === "restamp"
-    ? { ...text, status: "restamp", claimed_at: null, error: null, version, queued_at: now }
-    : { ...text, status: "queued", claimed_at: null, started_at: null, finished_at: null, error: null, attempts: 0, version, seed, queued_at: now };
+    ? { ...text, ...recheck(card), status: "restamp", claimed_at: null, error: null, version, queued_at: now }
+    : { ...text, ...recheck(card), status: "queued", claimed_at: null, started_at: null, finished_at: null, error: null, attempts: 0, version, seed, queued_at: now };
   const { data, error } = await sb.from("cards").update(patch).eq("id", card.id).eq("version", card.version).neq("status", "generating").select("id");
   if (error || !data?.length) {
     await sb.from("names").update({ status: "available", post_id: null, position: null, meaning: name.meaning }).eq("id", name.id);
@@ -174,6 +186,7 @@ async function swapInitialsName(sb: SB, o: { card: CardRow; post: PostRow; initi
   if (r.status === "taken") return fail(TAKEN);
   if (r.status === "stale") return fail(STALE);
   if (r.status !== "ok") return fail(r.reason ?? "Could not change the name. Try again.");
+  await recheckSwapped(sb, card);
   revalidatePath("/names");
   return { ok: true, mode };
 }
@@ -223,6 +236,7 @@ export async function swapCardNameAction(cardId: string, nameId: string, meaning
     if (r.status === "taken") return fail(TAKEN);
     if (r.status === "stale") return fail(STALE);
     if (r.status !== "ok") return fail(r.reason ?? "Could not change the name. Try again.");
+    await recheckSwapped(sb, card);
   }
   revalidatePath("/names");
   return { ok: true, mode };

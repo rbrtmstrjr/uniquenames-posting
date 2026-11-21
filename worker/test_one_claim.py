@@ -352,7 +352,7 @@ class HeartbeatTest(Base):
 
 class VersionTest(unittest.TestCase):
     def test_version(self):
-        self.assertEqual(jobs.VERSION, "2.8.0")
+        self.assertEqual(jobs.VERSION, "2.9.0")
 
 
 if __name__ == "__main__":
