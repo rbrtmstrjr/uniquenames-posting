@@ -56,13 +56,16 @@ Owner decisions (2026-11-20):
   2. **Parent check** (Claude Opus 5.5) on every candidate, judged as a Filipino parent choosing a name for their baby.
      A name fails if it is made up or very rare, awkward or hard to say, has a bad, silly or joke meaning, is the wrong
      gender, is too close to another name in the post (sound or spelling), or does not truly fit the letter / theme.
-     A meaning that is not the standard accepted one is corrected (or the name fails if it has none).
+     A meaning that is wrong (not just worded differently) is corrected, with a line in the run's activity (or the
+     name fails if it has none). At most 60 saved names are judged per post (a random pick when there are more).
   3. Short of the target: ask the AI for more (the existing By letter suggestions; for a name theme, the existing name
      suggestions with the theme as the wish), then parent-check those. At most 2 extra rounds.
   4. New names that pass are saved to Names (available, then used by the post as usual). Saved names that fail the
      parent check are set to `skip` with the reason ("Skipped by Autopilot: hard to say"); nothing is deleted and the
-     owner can restore them. A saved name that is fine but does not fit this post (another theme, too close to another
-     name in the post) is simply not used.
+     owner can restore them. A name the owner restored is never skipped again (it is only left unused when it does not
+     pass). If more than 40% of the saved names judged for one post would be skipped, none is skipped that round and
+     the run's activity lists them for the owner to look at. A saved name that is fine but does not fit this post
+     (another theme, too close to another name in the post) is simply not used.
 - A post needs at least **8** good names. Fewer after the extra rounds: the post is **held** ("needs names for S").
 
 ### Photos: checked one by one
@@ -83,12 +86,16 @@ Owner decisions (2026-11-20):
 - A check that cannot run (AI error, refusal, timeout) counts as not passed: the card is remade once; if it still cannot
   be checked, the post is **held**. **Nothing is scheduled with an unchecked card.**
 - The post page shows each card's result as a small mark: "Checked", "Remade: extra finger", "Removed: hands".
+- An owner edit to an Autopilot card (New picture, Retry, re-stamp, closing-card text) sets its check back to pending,
+  and a card the owner selects again after it was removed is checked again: it is checked before the post is
+  scheduled. The schedule itself refuses a selected card that has not passed.
 
 ### Scheduling
 - When a post's cards all passed and the look-alike check is done, the post is scheduled on Facebook at its time, with
   its caption, through the same code (and the same double-post guard) as the Schedule button.
 - If the post is ready less than 20 minutes before its time, it is **held** ("too late for Sat 9:12 AM"), never moved
   or squeezed in. The owner can schedule or post it by hand.
+- Facebook schedules up to 29 days ahead: the plan preview warns when a run reaches past that.
 
 ### Held posts
 A held post is a normal post on Posts (status ready, not on Facebook), listed under "Needs you" on the Autopilot page
