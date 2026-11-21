@@ -92,6 +92,11 @@ export interface PackCaptions {
   reelSystem: (maxChars: number) => string;
   /** An extra check on a post caption line (null = fine); a problem makes the AI try again. None = no extra check. */
   postProblem?: (line: string) => string | null;
+  /** Send only the photoshoot's title (for its hashtags), never the set details, and tell the AI not to describe the photos. */
+  titleOnly?: boolean;
+  /** The caption must name the post's theme (letter, name theme, initials, series part, or "boy/girl names") within the
+   * first THEME_LEAD_CHARS characters; a caption that still misses it after the retry is never kept. */
+  themeFirst?: boolean;
 }
 
 export interface PackSuggest {

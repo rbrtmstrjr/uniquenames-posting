@@ -69,15 +69,14 @@ function nameFacts(n: CaptionName): string {
 
 export function captionPrompt(input: CaptionInput): string {
   const { theme, gender, style, captionStyle } = input;
+  const pack = activePack().captions;
   const lines = [
     `Today's post: baby ${gender} names${style === "two-word" ? " (first + middle name pairs)" : ""}.`,
     `Caption style: ${STYLE_GUIDE[captionStyle](gender)}`,
-    `Photoshoot theme: ${t(theme.title)}`,
-    `Backdrop: ${t(theme.backdrop)}`,
-    `Outfit: ${t(theme.outfit)}`,
-    `Props: ${t(theme.props)}`,
-    `Lighting: ${t(theme.lighting)}`,
-    `Colors: ${t(theme.palette)}`,
+    ...(pack.titleOnly
+      ? [`Photoshoot title (only for the hashtags; do not describe the photos): ${t(theme.title)}`]
+      : [`Photoshoot theme: ${t(theme.title)}`, `Backdrop: ${t(theme.backdrop)}`, `Outfit: ${t(theme.outfit)}`,
+        `Props: ${t(theme.props)}`, `Lighting: ${t(theme.lighting)}`, `Colors: ${t(theme.palette)}`]),
   ];
   const names = (input.names ?? []).filter((n) => n.name.trim() && n.meaning.trim()).slice(0, NAMES_SHOWN);
   if (NAME_STYLES.includes(captionStyle) && names.length) {
@@ -103,6 +102,9 @@ export function captionPrompt(input: CaptionInput): string {
     lines.push("", `Every name in this post is one of our ${label}${input.nameTheme.hint ? ` (${input.nameTheme.hint})` : ""}.`,
       `Say naturally that these are ${label} for a baby ${gender}, for example "${label} for your baby ${gender}".`);
   }
+  if (pack.themeFirst) {
+    lines.push("", `This post's theme: ${themePhrase(input)}. Name it in the first sentence, or right after one short opening line (within the first ${THEME_LEAD_CHARS} characters).`);
+  }
   const recent = (input.recent ?? []).filter(Boolean);
   if (recent.length) {
     lines.push("", "Recent captions on the page, newest first. Yours must read clearly different (opening word, sentence shape, question):",
@@ -127,7 +129,7 @@ const partRe = (part: AzPart) => PART_RE[part];
 const letterRe = (l: string) => new RegExp([
   String.raw`[Ll]etter\s+["'“‘]?${l}(?!\p{L})`,
   String.raw`\b(?:[Ss]tart|[Bb]egin)\w*\s+with\s+(?:an?\s+|the\s+letter\s+)?["'“‘]?${l}(?!\p{L})`,
-  String.raw`(?<!\p{L})${l}[-\s]names\b`,
+  String.raw`(?<!\p{L})${l}[-\s](?:baby\s+)?(?:boy\s+|girl\s+)?names\b`,
 ].join("|"), "u");
 
 /** The initials named as such: "initials A & R", "A and R", "A.R.", "A·R" (the capitals themselves). */
@@ -140,8 +142,73 @@ const initialsRe = (ab: string) => {
   ].join("|"), "u");
 };
 
-/** The word that shows the theme was named: its first word of 3+ letters ("Unique and modern" -> "Unique"). */
-const themeWord = (title: string) => title.split(/[^\p{L}]+/u).find((w) => w.length >= 3) ?? title;
+const NAME_THEME_FILLER = new Set(["the", "and", "for", "with", "from", "name", "names", "baby", "boy", "girl"]);
+/** A word of the caption (letters, apostrophes), as a regex. */
+const WORD = String.raw`[\p{L}'’]+`;
+
+/**
+ * A name-theme post names its theme when a content word of the title sits next to "names" ("Biblical baby boy names",
+ * "names that feel soft and gentle"). Content words = the title's words of 3+ letters, minus filler; none left = the
+ * title's first word of 3+ letters, anywhere.
+ */
+function nameThemeRe(title: string): RegExp {
+  const words = title.split(/[^\p{L}]+/u).filter((w) => w.length >= 3);
+  const content = words.filter((w) => !NAME_THEME_FILLER.has(w.toLowerCase()));
+  if (!content.length) return new RegExp(String.raw`(?<!\p{L})${escapeRe(words[0] ?? title)}`, "iu");
+  const cw = `(?:${content.map(escapeRe).join("|")})`;
+  return new RegExp(
+    String.raw`(?<!\p{L})${cw}(?!\p{L})(?:[\s-]+${WORD}){0,4}[\s-]+names(?!\p{L})|(?<!\p{L})names(?!\p{L})(?:[\s-]+${WORD}){0,3}[\s-]+${cw}(?!\p{L})`, "iu");
+}
+
+/** The prompt asks for the theme within this many characters: what a reader sees at a glance. */
+export const THEME_LEAD_CHARS = 100;
+/** The check finds the theme by its key words (e.g. "start with R" comes a little after "baby girl names"), so it allows a bit more. */
+export const THEME_CHECK_CHARS = 120;
+
+type ThemeInput = Pick<CaptionInput, "gender" | "series" | "letter" | "initials" | "nameTheme">;
+
+/** The phrase that names this post's theme (what the prompt asks for). */
+export function themePhrase(i: ThemeInput): string {
+  const g = i.gender;
+  if (i.series) return `Part ${i.series.part} of our A to Z baby ${g} names`;
+  if (isLetter(i.letter)) return `baby ${g} names that start with ${i.letter}`;
+  if (isInitials(i.initials)) return `baby ${g} names with the initials ${i.initials[0]} & ${i.initials[1]}`;
+  if (i.nameTheme) return `${i.nameTheme.title.replace(/\s+names$/i, "")} baby ${g} names`;
+  return `baby ${g} names`;
+}
+
+/** "boy names", "girl's names", "names for your (baby) son": a plain post names its gender's names. */
+const plainRe = (g: Gender) => {
+  const who = g === "boy" ? "(?:boy|son)" : "(?:girl|daughter)";
+  return new RegExp(String.raw`\b${who}s?(?:['’]s?)?\s+names\b|\bnames\s+for\s+(?:your\s+|a\s+)?(?:baby\s+|little\s+)?${who}s?\b`, "i");
+};
+
+/** Where this post's theme is first named in `line`, or -1. */
+function themeIndex(line: string, i: ThemeInput): number {
+  const re = i.series ? partRe(i.series.part)
+    : isLetter(i.letter) ? letterRe(i.letter)
+      : isInitials(i.initials) ? initialsRe(i.initials)
+        : i.nameTheme ? nameThemeRe(i.nameTheme.title)
+          : plainRe(i.gender);
+  return re.exec(line)?.index ?? -1;
+}
+
+/** Why the caption does not lead with the theme (null = it does). */
+export function themeLeadProblem(line: string, i: ThemeInput): string | null {
+  const at = themeIndex(line, i);
+  if (at === -1) return `does not name the post's theme ("${themePhrase(i)}")`;
+  if (at > THEME_CHECK_CHARS) return `names the theme too late: say "${themePhrase(i)}" in the first sentence or right after one short opening line`;
+  return null;
+}
+
+/** Why the caption is too long-winded or asks too much (null = 1 or 2 short sentences, at most one question). */
+export function shapeProblem(line: string): string | null {
+  const n = (line.match(/[.!?]+(?=\s|$)/g) ?? []).length || 1;
+  if (n > 2) return `has ${n} sentences: write 1 or 2 short sentences`;
+  const q = (line.match(/\?/g) ?? []).length;
+  if (q > 1) return `asks ${q} questions: ask at most one`;
+  return null;
+}
 
 /**
  * Why a caption is not right yet: it opens like a recent one, a name style names too few names, a series
@@ -155,7 +222,7 @@ export function captionProblem(line: string, input: Pick<CaptionInput, "captionS
   if (input.series && !partRe(input.series.part).test(line)) return `does not say it is Part ${input.series.part} of the A to Z series`;
   if (isLetter(input.letter) && !letterRe(input.letter).test(line)) return `does not say the names start with the letter ${input.letter}`;
   if (isInitials(input.initials) && !initialsRe(input.initials).test(line)) return `does not say the names have the initials ${input.initials[0]} & ${input.initials[1]}`;
-  if (input.nameTheme && !new RegExp(`(?<!\\p{L})${escapeRe(themeWord(input.nameTheme.title))}`, "iu").test(line)) {
+  if (input.nameTheme && !nameThemeRe(input.nameTheme.title).test(line)) {
     return `does not say these are ${input.nameTheme.title} names`;
   }
   const need = input.captionStyle === "choice" ? 2 : NAME_STYLES.includes(input.captionStyle) ? 1 : 0;
@@ -167,9 +234,11 @@ export function captionProblem(line: string, input: Pick<CaptionInput, "captionS
 
 /** One AI caption line (no hashtags) + Gemini's theme hashtags, or null on any failure. Never throws. */
 export function aiCaptionLine(input: CaptionInput, timeoutMs = CAPTION_TIMEOUT_MS): Promise<AiCaption | null> {
+  const themeFirst = !!activePack().captions.themeFirst;
   return askCaption({
     system: CAPTION_SYSTEM, prompt: captionPrompt(input), maxTags: 3, max: CAPTION_MAX, min: CAPTION_MIN, timeoutMs, label: "aiCaption",
     problem: (line) => captionProblem(line, input),
+    ...(themeFirst ? { required: (line: string) => themeLeadProblem(line, input) ?? shapeProblem(line) } : {}),
   });
 }
 

@@ -32,7 +32,7 @@ const POST = { id: POST_ID, gender: "boy", style: "two-word", theme_id: THEME_ID
   caption_style: "story", hashtag_set: "#uniquenames #babynames" };
 const CARDS = [{ name: "Marina", meaning: "of the sea", position: 1 }, { name: "Kai", meaning: "sea, Hawaiian", position: 2 }];
 
-function world(settings: Record<string, unknown> = legacySettings, o: { history?: Record<string, unknown>[]; pre009?: boolean } = {}) {
+function world(settings: Record<string, unknown> = legacySettings, o: { history?: Record<string, unknown>[]; pre009?: boolean; post?: Record<string, unknown> } = {}) {
   fake = fakeSupabase((q) => respond(q));
   respond = (q: Query) => {
     if (q.table === "settings" && isUpdate(q)) return undefined;
@@ -52,7 +52,7 @@ function world(settings: Record<string, unknown> = legacySettings, o: { history?
       return { data: o.history ?? [] };
     }
     if (q.table === "posts") {
-      if (!o.pre009) return { data: POST };
+      if (!o.pre009) return { data: { ...POST, ...o.post } };
       const { caption_style: _s, hashtag_set: _h, ...old } = POST;
       void _s; void _h;
       return { data: old };
@@ -69,12 +69,13 @@ beforeEach(() => { generateJson.mockReset(); world(); vi.spyOn(Math, "random").m
 afterEach(() => { vi.restoreAllMocks(); });
 
 describe("createPostAction captions", () => {
-  it("uses the Gemini caption + hashtags, with the theme in the prompt (caption_ai undefined = on); style + set saved", async () => {
+  it("uses the Gemini caption + hashtags, with the photoshoot title (only) in the prompt (caption_ai undefined = on); style + set saved", async () => {
     generateJson.mockResolvedValueOnce({ ok: true, data: { caption: "Sea breezes and tiny sailboats set the scene for these baby boy names ⛵" } });
     expect(await createPostAction(createInput)).toEqual({ ok: true, postId: POST_ID });
     // Before 009 settings: the always-tag #uniquenames + the least recently used pool tag.
     expect(createdCaption()).toBe("Sea breezes and tiny sailboats set the scene for these baby boy names ⛵\n\n#uniquenames #babynames");
-    expect(generateJson.mock.calls[0][0].prompt).toContain("tiny sailboat and seashells");
+    expect(generateJson.mock.calls[0][0].prompt).toContain("Ocean Breeze");
+    expect(generateJson.mock.calls[0][0].prompt).not.toContain("tiny sailboat and seashells");
     expect(postUpdates()).toEqual([{ caption_style: "story", hashtag_set: "#uniquenames #babynames" }]);
   });
 
@@ -202,6 +203,15 @@ describe("updateCaptionAction (hand edits and Undo)", () => {
 });
 
 describe("rewriteCaptionAction", () => {
+  it("an Autopilot name-theme post keeps naming its theme, with its theme tag", async () => {
+    world({ ...s009, autopilot_name_themes: "Biblical (stories from the Bible)" }, { post: { name_theme: "Biblical" } });
+    generateJson.mockResolvedValueOnce({ ok: true, data: { caption: "Looking for faith in a name? These Biblical baby boy names carry strength." } });
+    expect((await rewriteCaptionAction(POST_ID)).ok).toBe(true);
+    const prompt = generateJson.mock.calls[0][0].prompt as string;
+    expect(prompt).toContain("biblical names");
+    expect(prompt).toContain("stories from the Bible");
+    expect(postUpdates()[0].caption).toMatch(/#biblicalnames/);
+  });
   it("writes, saves and returns a new caption: a new style and a new hashtag set (never the post's own)", async () => {
     world(s009);
     generateJson.mockResolvedValueOnce({ ok: true, data: { caption: "Little sailors, big dreams: baby boy names for the beach lovers. Which is your favorite?" } });
