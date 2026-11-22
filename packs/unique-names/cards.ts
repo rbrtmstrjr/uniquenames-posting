@@ -207,11 +207,11 @@ const COVER_POSES: CoverPose[] = [
     toddler: "the toddler sitting in the middle of the whole scene beside the main prop, smiling at the viewer, every prop in view",
     kid: "the child sitting cross-legged in the middle of the whole scene beside the main prop, smiling at the viewer, every prop in view",
   } },
-  { id: "face", optics: "eye level, 85mm portrait lens, f/1.8, shallow depth of field, creamy bokeh", moment: {
-    newborn: "a soft close-up of the sleeping newborn's face turned toward the viewer, resting on the folded hands",
-    sitter: "a close-up of the baby's face looking straight at the viewer with big curious eyes and a little smile",
-    toddler: "a close-up of the toddler's face looking straight at the viewer with a cheeky grin",
-    kid: "a close-up of the child's face looking straight at the viewer with a warm smile",
+  { id: "face", places: ["top"], optics: "eye level, 85mm portrait lens, f/1.8, shallow depth of field, creamy bokeh", moment: {
+    newborn: "a head-and-shoulders portrait of the newborn asleep, snug in a soft wrap, the tiny face turned toward the viewer in the lower half of the frame, calm open space above",
+    sitter: "a head-and-shoulders portrait of the baby looking straight at the viewer with big curious eyes and a little smile, the face in the lower half of the frame, calm open space above",
+    toddler: "a head-and-shoulders portrait of the toddler looking straight at the viewer with a cheeky grin, the face in the lower half of the frame, calm open space above",
+    kid: "a head-and-shoulders portrait of the child looking straight at the viewer with a warm smile, the face in the lower half of the frame, calm open space above",
   } },
   { id: "top-down", optics: "top-down viewpoint, 50mm lens, f/2.8, soft focus falloff at the edges", moment: {
     newborn: "the newborn sleeping curled up on the soft blanket, seen straight from above, the props arranged around",
@@ -237,14 +237,14 @@ const COVER_POSES: CoverPose[] = [
     toddler: "the toddler sitting among the props, seen from a three-quarter angle, looking at the viewer",
     kid: "the child sitting among the props, seen from a three-quarter angle, looking at the viewer with a soft smile",
   } },
-  { id: "hug", optics: "eye level, 85mm portrait lens, f/2.0, shallow depth of field", moment: {
-    newborn: "the sleeping newborn snuggled against the softest prop, one tiny hand resting on it",
-    sitter: "the baby hugging the softest prop close with both arms, smiling",
-    toddler: "the toddler hugging the softest prop close with both arms, the eyes closed in a happy squeeze",
-    kid: "the child hugging the softest prop close with both arms, smiling at the viewer",
+  { id: "hug", optics: "eye level, wide shot, 35mm lens, f/2.0, soft background falloff", moment: {
+    newborn: "a wide view of the whole scene with the sleeping newborn snuggled against the softest prop, one tiny hand resting on it, the other props around",
+    sitter: "a wide view of the whole scene with the baby cuddling the softest prop close, smiling, the other props around",
+    toddler: "a wide view of the whole scene with the toddler cuddling the softest prop close, the eyes closed in a happy squeeze, the other props around",
+    kid: "a wide view of the whole scene with the child cuddling the softest prop close with both arms, smiling, the other props around",
   } },
-  { id: "tummy", optics: "floor-level viewpoint, 85mm portrait lens, f/2.0, shallow depth of field", moment: {
-    newborn: "the newborn asleep on the tummy, the chin resting on the stacked hands, the legs tucked under the body",
+  { id: "tummy", places: ["top"], optics: "floor-level viewpoint, 85mm portrait lens, f/2.0, shallow depth of field", moment: {
+    newborn: "the newborn sleeping on the back, tucked in a soft wrap, the chin tilted toward the viewer, low in the frame",
     sitter: "the baby lying on the tummy with the chin resting on both hands, smiling at the viewer, the legs out of view behind",
     toddler: "the toddler lying on the tummy with the chin propped on both hands, smiling at the viewer, the legs out of view behind",
     kid: "the child lying on the tummy with the chin propped on both hands, smiling at the viewer, the legs out of view behind",
@@ -255,7 +255,7 @@ const COVER_POSES: CoverPose[] = [
     toddler: "a view from just behind the toddler's shoulder as the toddler looks out at the props, the face in soft three-quarter profile",
     kid: "a view from just behind the child's shoulder as the child looks out at the props, the face in soft three-quarter profile",
   } },
-  { id: "low-angle", optics: "low angle from floor level, 35mm lens, f/2.2, soft background falloff", moment: {
+  { id: "low-angle", places: ["top"], optics: "low angle from floor level, 35mm lens, f/2.2, soft background falloff", moment: {
     newborn: "the newborn sleeping on the blanket, seen from blanket level, the backdrop rising tall behind",
     sitter: "the baby sitting on the blanket, seen from floor level, the backdrop rising tall behind",
     toddler: "the toddler standing proudly on the blanket, seen from a low angle, the backdrop rising tall behind",
@@ -263,13 +263,22 @@ const COVER_POSES: CoverPose[] = [
   } },
 ];
 
+const SMALL_WORDS = new Set(["a", "an", "and", "the", "of", "for", "in", "on", "with"]);
+/** "Unique and modern" -> "Unique and Modern": each word and hyphen part capitalised, small words lowercase unless first, the rest kept (a script font has no caps). */
+function titleCase(s: string): string {
+  return s.split(" ").map((w, i) => w.split("-").map((part, j) => {
+    if (SMALL_WORDS.has(part.toLowerCase())) return i === 0 && j === 0 ? part.charAt(0).toUpperCase() + part.slice(1).toLowerCase() : part.toLowerCase();
+    return part.charAt(0).toUpperCase() + part.slice(1);
+  }).join("-")).join(" ");
+}
+
 /** The front card's title (spec 2026-11-21): "'S' Names", "Biblical Names", "A & R Names", "A to Z Names", "Baby Boy Names". */
 function coverTitle(p: CoverTitleInput): CoverTitle {
   const forWho = `for baby ${p.gender}`;
   const letter = p.letter?.trim().toUpperCase();
   if (letter) return { main: `'${letter}' Names`, second: forWho };
   const theme = p.nameTheme?.replace(/\s+/g, " ").trim();
-  if (theme) return { main: /names$/i.test(theme) ? theme : `${theme} Names`, second: forWho };
+  if (theme) return { main: /names$/i.test(theme) ? theme : `${titleCase(theme)} Names`, second: forWho };
   if (p.initials && /^[A-Z]{2}$/.test(p.initials)) return { main: `${p.initials[0]} & ${p.initials[1]} Names`, second: forWho };
   if (p.seriesPart === 1 || p.seriesPart === 2) return { main: "A to Z Names", second: `part ${p.seriesPart} · ${forWho}` };
   return { main: `Baby ${p.gender === "girl" ? "Girl" : "Boy"} Names`, second: "" };

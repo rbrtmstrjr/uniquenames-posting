@@ -46,6 +46,36 @@ describe("front card pack data", () => {
     expect(cover.title({ gender: "girl", letter: null, nameTheme: null, initials: null, seriesPart: null })).toEqual({ main: "Baby Girl Names", second: "" });
   });
 
+  it("name-theme titles are title-cased: each word and hyphen part, small words lowercase unless first, the rest of a word kept", () => {
+    const main = (nameTheme: string) => cover.title({ gender: "girl", nameTheme }).main;
+    expect(main("Unique and modern")).toBe("Unique and Modern Names");
+    expect(main("Nature-inspired")).toBe("Nature-Inspired Names");
+    expect(main("Biblical")).toBe("Biblical Names");
+    expect(main("names of the sea")).toBe("Names of the Sea Names");
+    expect(main("the old ways")).toBe("The Old Ways Names");
+    expect(main("  Gems   for  girls ")).toBe("Gems for Girls Names");
+    expect(main("McDonald and ABC")).toBe("McDonald and ABC Names");
+    expect(main("Royal names")).toBe("Royal names");
+    expect(main("old-world names")).toBe("old-world names");
+    expect(cover.title({ gender: "boy", letter: "s" }).main).toBe("'S' Names");
+  });
+
+  it("face, tummy and low-angle allow a top title only; the others allow both places", () => {
+    for (const p of poses) {
+      if (["face", "tummy", "low-angle"].includes(p.id)) expect(p.places, p.id).toEqual(["top"]);
+      else expect(p.places, p.id).toBeUndefined();
+    }
+  });
+
+  it("the newborn tummy pose sleeps on the back, wrapped; the face pose is a portrait low in the frame", () => {
+    const by = (id: string) => poses.find((p) => p.id === id)!;
+    expect(by("tummy").moment.newborn).toMatch(/on the back/);
+    expect(by("tummy").moment.newborn).not.toMatch(/tummy/);
+    for (const s of SESSIONS) expect(by("face").moment[s]).toMatch(/lower half of the frame/);
+    expect(by("hug").moment.toddler).not.toMatch(/hugging the softest prop close with both arms, the eyes/);
+    for (const s of SESSIONS) expect(by("hug").moment[s]).toMatch(/wide/);
+  });
+
   it("Name Nest has no front card", () => {
     expect(packById("name-nest").cards.cover).toBeUndefined();
   });
@@ -73,6 +103,34 @@ describe("the pose and the title place change from post to post", () => {
       recent.unshift(p.id);
     }
     expect(new Set(recent.slice(0, 10)).size).toBe(10);
+  });
+
+  it("with a place, only poses that allow it are picked; never the previous post's; all poses when none allow it", () => {
+    const top = poses.filter((p) => p.places);
+    expect(top.length).toBeGreaterThan(0);
+    expect(pickCoverPose(poses, [], "bottom").id).toBe("wide");
+    expect(pickCoverPose(poses, ["wide"], "bottom").id).toBe("top-down");
+    expect(pickCoverPose(poses, [], "top").id).toBe("wide");
+    const onlyTop = poses.filter((p) => p.places?.[0] === "top");
+    expect(pickCoverPose(onlyTop, [], "bottom").id).toBe(onlyTop[0].id);
+    expect(pickCoverPose(poses, ["wide"]).id).toBe("face");
+  });
+
+  it("a 40-post run (each pose and place fed back) never gives a pose a place it does not allow; every pose, top-only ones too, comes round", () => {
+    const recent: string[] = [];
+    let prevPlace: string | undefined;
+    const seen = new Set<string>();
+    for (let k = 0; k < 40; k++) {
+      const place = nextTitlePlace(prevPlace);
+      const p = pickCoverPose(poses, recent, place);
+      expect(p.places ?? ["top", "bottom"], `${k}: ${p.id} at ${place}`).toContain(place);
+      expect(p.id).not.toBe(recent[0]);
+      seen.add(p.id);
+      recent.unshift(p.id);
+      prevPlace = place;
+    }
+    expect(seen.size).toBe(10);
+    for (const id of ["face", "tummy", "low-angle"]) expect(seen.has(id), id).toBe(true);
   });
 
   it("the title place alternates (top when there is no previous front card)", () => {
@@ -120,6 +178,13 @@ describe("planCoverCard", () => {
     const a = planCoverCard({ ...base, age: "random" });
     expect(planCoverCard({ ...base, age: "random" })).toEqual(a);
     expect(a.prompt).toMatch(/^Professional studio/);
+  });
+
+  it("the prompt never says 'album cover' (the model may draw lettering for it)", () => {
+    for (const s of SESSIONS) {
+      expect(buildCoverPrompt(theme, "girl", { session: s, look: "soft dark hair" }, poses[0], "top")).not.toMatch(/album cover|cover/i);
+    }
+    expect(planCoverCard(base).prompt).toMatch(/Shot: the opening frame of the session: /);
   });
 
   it("every pose builds a prompt for every session", () => {

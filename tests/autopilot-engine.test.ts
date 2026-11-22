@@ -412,14 +412,34 @@ describe("tick", () => {
     expect(m.db.items[0].state).toBe("scheduled");
   });
 
+  it("a passed front card does not count toward the 7 passed name cards: front + 6 names holds the post", async () => {
+    const cards = [front({ check_state: "passed" }), ...tenCards({ check_state: "passed" }).slice(0, 6)];
+    const { m, d } = setup({ items: [item("i1", { state: "checking", post_id: "p1", lookalike_done: true })], cards });
+    await tick(d);
+    expect(m.db.items[0]).toMatchObject({ state: "held", note: "Only 6 name cards passed the checks (7 needed). Remake or add cards, then schedule it yourself." });
+    expect(d.schedule).not.toHaveBeenCalled();
+  });
+
+  it("a front card that could not be checked after the remakes ran out is left out and the post goes out", async () => {
+    const judgeCard = vi.fn(async (c: CardRow) => (c.kind === "cover" ? { ok: false as const, error: "Claude timed out.", usage, stop: false } : pass));
+    const { m, d } = setup({ items: [item("i1", { state: "checking", post_id: "p1" })],
+      cards: [front({ remakes: MAX_REMAKES }), ...tenCards({ check_state: "passed" })] }, { judgeCard });
+    expect(await tick(d)).toEqual({ ran: true, status: "done" });
+    expect(m.db.cards[0]).toMatchObject({ id: "f", check_state: "removed", selected: false });
+    expect(m.db.runs[0].events.map((e) => e.text)).toContain("Sat, Nov 21 · Letter S · girl: Front card left out: could not check it (Claude timed out).");
+    expect(d.schedule).toHaveBeenCalledWith("p1", "2026-11-21T01:12:00Z");
+    expect(m.db.items[0].state).toBe("scheduled");
+  });
+
   it("the look-alike check sees the front card last, so a front card that looks like another card is the one remade", async () => {
     const judgeLookAlike = vi.fn(async () => ({ ok: true as const, data: [11], usage }));
     const cards = [...tenCards({ check_state: "passed" }).map((c, i) => ({ ...c, order_index: i + 1 })), front({ check_state: "passed" })];
-    const { d } = setup({ items: [item("i1", { state: "checking", post_id: "p1" })], cards }, { judgeLookAlike });
+    const { m, d } = setup({ items: [item("i1", { state: "checking", post_id: "p1" })], cards }, { judgeLookAlike });
     await tick(d);
     const sent = (judgeLookAlike.mock.calls[0] as unknown as [{ card: CardRow; url: string }[]])[0];
     expect(sent.map((x) => x.card.id)).toEqual(["c0", "c1", "c2", "c3", "c4", "c5", "c6", "c7", "c8", "c9", "f"]);
     expect(d.remake).toHaveBeenCalledWith(expect.objectContaining({ id: "f" }), { check_state: "pending", check_note: "Remade: looked like another card", remakes: 1 });
+    expect(m.db.runs[0].events.map((e) => e.text)).toContain("Sat, Nov 21 · Letter S · girl: the front card remade (looked like another card).");
     expect(d.schedule).not.toHaveBeenCalled();
   });
 

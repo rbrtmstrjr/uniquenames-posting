@@ -68,13 +68,21 @@ describe("the front card on a new post", () => {
     expect(covers()).toHaveLength(1);
     const [c] = covers();
     expect(c).toMatchObject({ post_id: POST_ID, theme_id: THEME_ID, kind: "cover", position: 0, order_index: 0, name: "Baby Boy Names", meaning: "", title_pos: "bottom" });
-    expect(String(c.shot)).toMatch(new RegExp(`^front card: ${poses[1].id}: `));
+    // bottom title: the least recently used pose that allows a bottom title (not the top-only "face"), never the previous one
+    expect(String(c.shot)).toMatch(new RegExp(`^front card: ${poses[2].id}: `));
+    expect(poses[2].places).toBeUndefined();
     expect(String(c.prompt)).toContain(theme.backdrop);
     expect(String(c.prompt)).toMatch(/1-year-old baby boy/);
     expect(String(c.prompt)).toMatch(/lower third of the frame is calm/);
     // it is never planned as a name card
     const planned = (fake.rpcs.find((r) => r.fn === "create_post")!.args as { p: { cards: { name: string }[] } }).p.cards;
     expect(planned).toHaveLength(9);
+  });
+
+  it("reads the recent front cards newest first (the rotation and the place alternation depend on it)", async () => {
+    expect((await createPostAction(input)).ok).toBe(true);
+    const q = fake.queries.find((x) => x.table === "cards" && x.ops.some((o) => o[0] === "eq" && o[1] === "kind" && o[2] === "cover"))!;
+    expect(op(q, "order")).toEqual(["order", "created_at", { ascending: false }]);
   });
 
   it("a post by letter says 'K' Names, for baby boy; the first front card ever has its title at the top", async () => {

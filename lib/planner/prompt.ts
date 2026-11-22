@@ -286,7 +286,7 @@ export function buildCoverPrompt(theme: ThemePromptFields, gender: Gender, subje
   return [
     header(subject),
     subject ? subjectLine(gender, subject) : `Subject: a ${babyWord}.`,
-    `Shot: the opening frame of the session, the album cover: ${pose.moment[subject?.session ?? "sitter"]}.`,
+    `Shot: the opening frame of the session: ${pose.moment[subject?.session ?? "sitter"]}.`,
     ...SET(theme, "Outfit", false, subject?.age),
     `Photography: ${pose.optics}, high detail, natural skin.`,
     `Composition: square frame, the backdrop fills the whole frame; ${COVER_SPACE[place](who)}.`,

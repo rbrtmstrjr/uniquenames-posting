@@ -41,8 +41,8 @@ Owner decisions (2026-11-20):
     Royal and elegant, Strong and brave, Heavenly (stars, sky, light).
   - After the last name theme, back to A. Names never repeat (used names stay used).
   - If the last label is a name theme no longer in the list, the flow continues at the first name theme.
-- **Each post:** single names only, a random **9 to 15 names** (kept inside the Settings min/max) plus the closing
-  card, so 10 to 16 cards (owner, 2026-11-21; it was 10 to 15 names). Photoshoot theme: the planner's usual pick among the available themes of that gender (as Today does when none
+- **Each post:** single names only, a random **8 to 14 names** (kept inside the Settings min/max) plus the front card and
+  the closing card, so 10 to 16 cards (changed 2026-11-21: front card added; see `docs/superpowers/specs/2026-11-21-front-card-design.md`). Photoshoot theme: the planner's usual pick among the available themes of that gender (as Today does when none
   is chosen). Child's age: Random. Fonts and text: Settings. Caption: the usual AI caption.
 - **Name-theme posts** carry a label like letter posts do ("Biblical names" on Posts, Today and the post page), a
   caption line that mentions the theme, and a theme hashtag in a theme-tag slot: `#` + the title in lowercase letters
@@ -82,9 +82,11 @@ Owner decisions (2026-11-20):
   normal check, not a second look-alike round. If the look-alike check itself cannot run, it is skipped (each card was
   already checked on its own).
 - A card that still fails after its remakes is unselected (kept, not uploaded). The post goes out with fewer cards if it
-  still has at least 8 name cards; otherwise it is **held**.
+  still has at least 7 passed name cards; otherwise it is **held**. (The front card does not count toward the 7.)
 - A check that cannot run (AI error, refusal, timeout) counts as not passed: the card is remade once; if it still cannot
-  be checked, the post is **held**. **Nothing is scheduled with an unchecked card.**
+  be checked, the post is **held**. **Nothing is scheduled with an unchecked card.** The exception is the front card: one
+  that cannot be checked or keeps failing is left out (unselected) and the post goes out
+  (see `docs/superpowers/specs/2026-11-21-front-card-design.md`).
 - The post page shows each card's result as a small mark: "Checked", "Remade: extra finger", "Removed: hands".
 - An owner edit to an Autopilot card (New picture, Retry, re-stamp, closing-card text) sets its check back to pending,
   and a card the owner selects again after it was removed is checked again: it is checked before the post is

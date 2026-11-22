@@ -256,11 +256,13 @@ check scores every name. Autopilot posts now get 8 to 14 names (10 to 16 cards w
 out with 7 or more passed name cards. A front card that still fails its check after 2 remakes is left out (the
 Autopilot activity says "Front card left out"); it never holds a post.
 Spec: `docs/superpowers/specs/2026-11-21-front-card-design.md`.
-1. Wait until the PC has no card in line, then restart the worker (Task Scheduler: **End** then **Run** "Unique Names
-   card worker"). `worker/worker.log` says "worker 2.10.0". An older worker would stamp the title like a name.
-2. Supabase **SQL Editor**: paste and run `supabase/migrations/023_front_card.sql` (safe to run again). Until it runs,
-   posts are made exactly as before: no front card and the names in their usual order.
-3. Push to GitHub so Vercel redeploys the website.
+Do these in this order:
+1. Update: merge and push to GitHub so Vercel redeploys the website.
+2. Restart the worker once its queue is empty (the PC has no card in line; Task Scheduler: **End** then **Run** "Unique
+   Names card worker"). Check `worker/worker.log` says "worker 2.10.0". An older worker would stamp the title like a
+   name. If a front card was made before the restart, press **Re-stamp** on that post.
+3. Run migration 023 in Supabase: **SQL Editor**, paste and run `supabase/migrations/023_front_card.sql` (safe to run
+   again). Until it runs, posts are made exactly as before: no front card and the names in their usual order.
 4. **Settings > Front card**: on by default; switch it off to stop adding it to new posts. Posts already made or
    scheduled do not change.
 5. On a post the front card has a **Front card** badge and always stays first (the closing card stays last) when you

@@ -260,11 +260,13 @@ export function planCoverCard(i: CoverCardInput): PlannedCoverCard {
 /**
  * The next front card pose: the least recently used of `poses` against `recent` (the pose ids of the latest front
  * cards, newest first; null = a shot that is not a front card's), never-used poses first in list order, and never the
- * previous post's while another pose exists.
+ * previous post's while another pose exists. With a `place`, only the poses that allow a title there are considered
+ * (all of them if none does), so a close-up face never has the title stamped over it.
  */
-export function pickCoverPose(poses: readonly CoverPose[], recent: readonly (string | null)[]): CoverPose {
+export function pickCoverPose(poses: readonly CoverPose[], recent: readonly (string | null)[], place?: TitlePlace): CoverPose {
+  const fitting = place ? poses.filter((p) => !p.places || p.places.includes(place)) : poses;
   const lastUse = (p: CoverPose) => { const i = recent.indexOf(p.id); return i < 0 ? Infinity : i; };
-  const ranked = poses.map((p) => ({ p, last: lastUse(p) }));
+  const ranked = (fitting.length ? fitting : poses).map((p) => ({ p, last: lastUse(p) }));
   const pool = ranked.length > 1 ? ranked.filter((r) => r.last !== 0) : ranked;
   return (pool.length ? pool : ranked).reduce((a, b) => (b.last > a.last ? b : a)).p;
 }

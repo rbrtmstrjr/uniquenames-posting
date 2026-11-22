@@ -48,11 +48,13 @@ export async function addCoverCard(sb: SB, o: {
     if (recentErr) console.error("addCoverCard: could not read the recent front cards", recentErr.message);
     if (((own ?? []) as { kind: string }[]).some((c) => c.kind === "cover")) return { status: "exists" };
     const rows = (recent ?? []) as { shot: string | null; title_pos: string | null }[];
+    // The place first (it alternates), then the pose that allows it.
+    const place = nextTitlePlace(rows[0]?.title_pos);
     const plan = planCoverCard({
       theme: o.theme, gender: o.post.gender, subjectKey: subjectKey(o.post.post_date, o.post.gender, o.post.style),
       age: storedAge(o.post.subject_age), salt: o.post.id,
-      pose: pickCoverPose(cover.poses, rows.map((r) => coverPoseId(r.shot))),
-      place: nextTitlePlace(rows[0]?.title_pos),
+      pose: pickCoverPose(cover.poses, rows.map((r) => coverPoseId(r.shot)), place),
+      place,
       title: cover.title({ ...o.title, gender: o.post.gender }),
     });
     const { data, error } = await sb.from("cards").insert({

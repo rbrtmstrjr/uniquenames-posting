@@ -34,6 +34,14 @@ describe("checking the AI's answer", () => {
     expect(parseRanking(null, names)).toBeNull();
   });
 
+  it("only the first 3 entries are checked: a valid top 3 followed by anything is accepted, a bad one within the top 3 is not", () => {
+    expect(parseRanking({ best: ["Eden", "Ruth", "Naomi", "Zara"] }, names)).toEqual([3, 0, 1]);
+    expect(parseRanking({ best: ["Eden", "Ruth", "Naomi", 7, "Eden"] }, names)).toEqual([3, 0, 1]);
+    expect(parseRanking({ best: ["Eden", "Zara", "Naomi", "Leah"] }, names)).toBeNull();
+    expect(parseRanking({ best: ["Eden", "Ruth", "Eden", "Leah"] }, names)).toBeNull();
+    expect(parseRanking({ best: ["Eden", "Ruth", 5, "Leah"] }, names)).toBeNull();
+  });
+
   it("the full order: the top names first, then the others in today's order", () => {
     expect(bestFirstOrder([3, 0, 1], 4)).toEqual([3, 0, 1, 2]);
     expect(bestFirstOrder([2, 5], 6)).toEqual([2, 5, 0, 1, 3, 4]);
@@ -75,6 +83,12 @@ describe("rankNames", () => {
     expect(await rankNames({ gender: "girl", names })).toBeNull();
     generateJson.mockImplementationOnce(() => new Promise((res) => setTimeout(() => res({ ok: true, data: { best: ["Ruth", "Naomi", "Eden"] } }), 300)));
     expect(await rankNames({ gender: "girl", names }, 50)).toBeNull();
+  });
+
+  it("something throwing synchronously inside is null too (never throws)", async () => {
+    generateJson.mockImplementationOnce(() => { throw new Error("sync boom"); });
+    expect(await rankNames({ gender: "girl", names })).toBeNull();
+    expect(await rankNames({ gender: "girl", names: null as never })).toBeNull();
   });
 
   it("one name: nothing to rank, no call", async () => {

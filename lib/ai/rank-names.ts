@@ -23,7 +23,7 @@ export const RANK_SYSTEM = [
 
 const SCHEMA: GeminiSchema = {
   type: "OBJECT",
-  properties: { best: { type: "ARRAY", items: { type: "STRING" }, description: "The best names from the list, best first" } },
+  properties: { best: { type: "ARRAY", items: { type: "STRING" }, maxItems: RANK_TOP, description: "The best names from the list, best first" } },
   required: ["best"],
 };
 
@@ -37,15 +37,16 @@ export function rankPrompt(i: { gender: Gender; names: readonly Named[] }): stri
 }
 
 /**
- * The AI's answer as indexes into `names`, best first, at most RANK_TOP. Null for anything else: not a list of
- * strings, a name that is not the post's, a name twice, or fewer than RANK_TOP (all of them on a shorter post).
+ * The AI's answer as indexes into `names`, best first, at most RANK_TOP. Only the first RANK_TOP entries are checked
+ * (later ones are ignored). Null for anything else: not a list of strings, a name that is not the post's, a name twice,
+ * or fewer than RANK_TOP (all of them on a shorter post).
  */
 export function parseRanking(raw: unknown, names: readonly { name: string }[]): number[] | null {
   const list = raw && typeof raw === "object" ? (raw as { best?: unknown }).best : null;
   if (!Array.isArray(list)) return null;
   const index = new Map(names.map((n, i) => [key(n.name), i]));
   const out: number[] = [];
-  for (const v of list) {
+  for (const v of list.slice(0, RANK_TOP)) {
     if (typeof v !== "string") return null;
     const i = index.get(key(v));
     if (i === undefined || out.includes(i)) return null;
@@ -65,14 +66,16 @@ export const bestFirstOn = (s: Partial<SettingsRow> | null | undefined) => has02
 
 /** One ranking call: the post's best names as indexes, best first; null = keep today's order. */
 export async function rankNames(i: { gender: Gender; names: readonly Named[] }, timeoutMs = RANK_TIMEOUT_MS): Promise<number[] | null> {
-  if (i.names.length < 2) return null;
   let timer: ReturnType<typeof setTimeout> | undefined;
   const late = new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), timeoutMs); });
   try {
+    if (i.names.length < 2) return null;
     const call = aiJson<unknown>({ task: "small", system: RANK_SYSTEM, prompt: rankPrompt(i), schema: SCHEMA, temperature: 0.3, timeoutMs })
       .then((r) => (r.ok ? parseRanking(r.data, i.names) : null))
       .catch(() => null);
     return await Promise.race([call, late]);
+  } catch {
+    return null;
   } finally {
     clearTimeout(timer);
   }

@@ -51,7 +51,7 @@ export function judgeCard(card: Stamped, url: string): Promise<JudgeResult<Photo
 }
 
 export const LOOKALIKE_SYSTEM = [
-  "You see all the cards of one Facebook album of baby name cards, numbered in posting order.",
+  "You see all the cards of one Facebook album of baby name cards, numbered in posting order (the front card, if there is one, comes last).",
   "Albums where photos repeat do badly. Name the cards that look too alike: nearly the same pose, angle, framing and props as an EARLIER card.",
   "A different name, color or a small change does not make two cards different. Still lifes count too.",
   "Return the number of the later card of each look-alike pair (never card 1), at most 3. Return an empty list when every card looks different enough.",
