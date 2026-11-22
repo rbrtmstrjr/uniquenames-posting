@@ -17,8 +17,14 @@ export const TEXT_SETTINGS_DEFAULTS = {
 } as const satisfies Pick<SettingsRow, "title_font" | "meaning_font" | "mark_font" | "title_size" | "meaning_size" | "mark_size" | "text_position" | "caption_ai">;
 export type PostStatus = "generating" | "ready" | "posted";
 export type CardStatus = "queued" | "generating" | "restamp" | "done" | "failed";
-/** "cta" (migration 010) = the closing "follow" card of a post: name = the message ("/" = a line break), meaning = "". */
-export type CardKind = "post" | "preview" | "cta";
+/**
+ * "cta" (migration 010) = the closing "follow" card of a post: name = the message ("/" = a line break), meaning = "".
+ * "cover" (migration 023) = the front card, the post's first picture: name = the title's main line ("'S' Names"),
+ * meaning = its second line ("for baby boy", or ""), title_pos = where the title is stamped.
+ */
+export type CardKind = "post" | "preview" | "cta" | "cover";
+/** Where the front card's title is stamped (cards.title_pos, migration 023). */
+export type TitlePlace = "top" | "bottom";
 
 export interface NameRow {
   id: string; name: string; meaning: string; gender: Gender; style: NameStyle; status: NameStatus;
@@ -65,6 +71,8 @@ export interface CardRow {
   created_at: string; updated_at: string;
   /** Autopilot (migration 022): the photo check; null on cards of posts made by hand. */
   check_state?: CardCheckState | null; check_note?: string | null; remakes?: number;
+  /** The front card (migration 023; absent before it runs): where its title is stamped; null on every other card. */
+  title_pos?: TitlePlace | null;
 }
 /** How the PC stamps a card (migration 015): 'classic' = Unique Names, 'name-nest' = brand colours + the US rank / origin line. */
 export type CardLayout = "classic" | "name-nest";
@@ -99,6 +107,8 @@ export interface SettingsRow {
   updated_at: string;
   /** Autopilot (migration 022): the name themes, one per line ("Title" or "Title (hint)"). */
   autopilot_name_themes?: string;
+  /** Front card (migration 023; absent before it runs): a front card on every new post (default on). */
+  cover_enabled?: boolean;
 }
 export type VoiceSampleStatus = "missing" | "queued" | "making" | "ready" | "failed";
 /** A narrator voice (migration 006): 30 Gemini voices cloned by Chatterbox from a reference clip + 'builtin'. */

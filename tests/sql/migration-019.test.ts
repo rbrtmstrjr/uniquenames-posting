@@ -32,6 +32,7 @@ async function migratedDb(o: { secret?: boolean; roles?: boolean } = {}) {
   await db.exec(o.roles ? m019raw : m019);
   await db.exec(stripSupabase(read("supabase", "migrations", "021_facebook_posting.sql")));
   await db.exec(stripSupabase(read("supabase", "migrations", "022_autopilot.sql"))); // 022: Autopilot (settings, posts, names, cards)
+  await db.exec(stripSupabase(read("supabase", "migrations", "023_front_card.sql"))); // 023: the front card (settings, cards)
   // linked and opened (the switch is off until the owner opens the shop at go-live)
   if (o.secret !== false) {
     await db.query(`select set_shop_secret($1)`, [SECRET]);
