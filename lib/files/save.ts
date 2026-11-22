@@ -7,6 +7,9 @@ export const kindRank = (c: Partial<Pick<CardRow, "kind">>) => (c.kind === "cove
 /** The post's upload order: the front card first, then the owner's order, and the closing card always last. */
 export const cardOrder = (a: Ordered, b: Ordered) => kindRank(a) - kindRank(b) || a.order_index - b.order_index || a.position - b.position;
 
+/** The front card stays first and the closing card last: neither is dragged; the name cards are ordered among themselves. */
+export const isPinned = (c: Partial<Pick<CardRow, "kind">>) => c.kind === "cover" || c.kind === "cta";
+
 export function orderedSelection<T extends Pick<CardRow, "id" | "selected"> & Ordered>(cards: T[]): T[] {
   return cards.filter((c) => c.selected).sort(cardOrder);
 }

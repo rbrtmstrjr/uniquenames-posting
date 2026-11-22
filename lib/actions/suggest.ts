@@ -75,7 +75,8 @@ export async function cardNameIdeasAction(cardId: string): Promise<CardNameIdeas
   const sb = await createClient();
   const { data: card } = await sb.from("cards").select("id, post_id, theme_id, kind").eq("id", cardId).single();
   if (!card) return fail("Card not found.");
-  if (!card.post_id || card.kind === "cta") return fail("Name ideas are for the name cards in a post.");
+  // Not the closing card (010) or the front card (023): neither has a name.
+  if (!card.post_id || card.kind !== "post") return fail("Name ideas are for the name cards in a post.");
   const [{ data: post }, { data: theme }, all] = await Promise.all([
     // select * (letter is 013's column): works before and after the migration.
     sb.from("posts").select("*").eq("id", card.post_id).single(),

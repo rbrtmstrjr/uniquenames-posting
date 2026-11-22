@@ -23,7 +23,7 @@ import { useWorkerContext } from "@/components/shell/app-shell";
 import { createClient } from "@/lib/supabase/client";
 import { queuePosition } from "@/lib/status/card-state";
 import { canGenerate } from "@/lib/status/worker-health";
-import { cardOrder, uploadNumbers } from "@/lib/files/save";
+import { cardOrder, isPinned, uploadNumbers } from "@/lib/files/save";
 import { addCardAction, addClosingCardAction, deletePostAction, restampPostAction, setPostedAction } from "@/lib/actions/posts";
 import { restampSelection } from "@/lib/actions/helpers";
 import { regenerateCardAction, reorderCardsAction, selectAllAction, setSelectedAction } from "@/lib/actions/cards";
@@ -35,13 +35,13 @@ import type { PostFonts } from "@/lib/fonts/post-fonts";
 import { RestampDialog } from "./restamp-dialog";
 import { FacebookPanel } from "./facebook-panel";
 
-// The owner's order, with the closing card (010) always last.
+// The owner's order, with the front card (023) always first and the closing card (010) always last.
 const byOrder = cardOrder;
 
 // The tile wrapper takes pointer/touch drags (press and hold on a phone). Keyboard reordering
 // lives on a dedicated 44 px handle, so the tile never becomes a focusable role=button that
 // nests the open/select buttons, and Space/Enter on those buttons cannot start a drag.
-// `locked`: the closing card stays last, so it has no drag and no reorder handle.
+// `locked`: the front card stays first and the closing card last, so neither has a drag or a reorder handle.
 function Sortable({ id, name, locked, children }: { id: string; name: string; locked?: boolean; children: React.ReactNode }) {
   const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({ id, disabled: locked });
   const { onKeyDown, ...pointerListeners } = (listeners ?? {}) as Record<string, React.KeyboardEventHandler & React.EventHandler<never>>;
@@ -125,8 +125,8 @@ export function PostDetail({ post: initialPost, theme, initialCards, settingsFon
 
   const onDragEnd = async (e: DragEndEvent) => {
     if (!e.over || e.active.id === e.over.id) return;
-    // The closing card never moves: name cards are ordered among themselves, the closing card stays last.
-    const ids = visible.filter((c) => c.kind !== "cta").map((c) => c.id);
+    // The front and closing cards never move: name cards are ordered among themselves, between them.
+    const ids = visible.filter((c) => !isPinned(c)).map((c) => c.id);
     if (!ids.includes(String(e.over.id))) return;
     const next = arrayMove(ids, ids.indexOf(String(e.active.id)), ids.indexOf(String(e.over.id)));
     const before = new Map(cards.map((c) => [c.id, c.order_index]));
@@ -184,7 +184,8 @@ export function PostDetail({ post: initialPost, theme, initialCards, settingsFon
   const kind = postLabel(post);
   const failed = visible.filter((c) => c.status === "failed");
   const hasCta = cards.some((c) => c.kind === "cta");
-  const nameCards = visible.filter((c) => c.kind !== "cta").length;
+  const nameCards = visible.filter((c) => !isPinned(c)).length;
+  const extras = `${visible.some((c) => c.kind === "cover") ? " + front card" : ""}${visible.some((c) => c.kind === "cta") ? " + closing card" : ""}`;
 
   return (
     <div className="space-y-4">
@@ -196,7 +197,7 @@ export function PostDetail({ post: initialPost, theme, initialCards, settingsFon
           </h1>
           <p className="mt-1 text-sm text-muted">
             {kind && <><span className="font-semibold text-accent">{kind}</span> · </>}
-            {theme.title} · {post.style} · {nameCards} cards{visible.length > nameCards ? " + closing card" : ""}
+            {theme.title} · {post.style} · {nameCards} cards{extras}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -225,7 +226,7 @@ export function PostDetail({ post: initialPost, theme, initialCards, settingsFon
             <SortableContext items={visible.map((c) => c.id)} strategy={rectSortingStrategy}>
               <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 xl:grid-cols-4">
                 {visible.map((c) => (
-                  <Sortable key={c.id} id={c.id} name={c.kind === "cta" ? "Closing card" : c.name} locked={c.kind === "cta"}>
+                  <Sortable key={c.id} id={c.id} name={c.kind === "cta" ? "Closing card" : c.kind === "cover" ? "Front card" : c.name} locked={isPinned(c)}>
                     <CardTile card={c} url={urlFor(c.card_path)} health={health} queuePos={queuePosition(c, visible)}
                       onOpen={() => setOpenId(c.id)} onRetry={() => retry(c)}
                       selection={{ selected: c.selected, order: numbers.get(c.id) ?? null, onToggle: () => void toggle(c) }} />
