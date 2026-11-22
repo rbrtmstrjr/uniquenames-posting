@@ -17,9 +17,10 @@ const ok = (caption: string, tags: string[] = []) => ({ ok: true, data: { captio
 beforeEach(() => generateJson.mockReset());
 
 describe("captionPrompt", () => {
-  it("carries every theme field, the gender and the style", () => {
+  it("carries only the photoshoot title (no set description), the gender and the style", () => {
     const p = captionPrompt({ theme, gender: "girl", style: "two-word", captionStyle: "story" });
-    for (const v of Object.values(theme)) expect(p).toContain(v);
+    expect(p).toContain(theme.title);
+    for (const v of [theme.backdrop, theme.outfit, theme.props, theme.lighting, theme.palette]) expect(p).not.toContain(v);
     expect(p).toContain("baby girl names");
     expect(p).toContain(STYLE_GUIDE.story("girl"));
   });
@@ -133,7 +134,8 @@ describe("aiCaption", () => {
       caption: "Pumpkin-patch cuteness for today's baby girl names 🎃 Which one is your favorite?\n\n#uniquenames #autumnbaby #babynames",
     });
     const arg = generateJson.mock.calls[0][0];
-    expect(arg.prompt).toContain("tiny pumpkins and a wicker basket");
+    expect(arg.prompt).toContain("Autumn Pumpkin Patch");
+    expect(arg.prompt).not.toContain("tiny pumpkins and a wicker basket");
     expect(arg.system).toBe(CAPTION_SYSTEM);
     expect(arg.timeoutMs).toBeLessThanOrEqual(10000);
   });
@@ -223,7 +225,7 @@ describe("captionProblem for a post by letter", () => {
 describe("global audience: simple English, no Tagalog (2026-10-10)", () => {
   const input = { theme, gender: "girl" as const, captionStyle: "story" as const, recent: [] };
   it("the system prompt asks for simple English anyone understands and no Filipino / Tagalog words", () => {
-    expect(CAPTION_SYSTEM).toMatch(/simple, warm English anyone understands/);
+    expect(CAPTION_SYSTEM).toMatch(/simple English anyone understands/);
     expect(CAPTION_SYSTEM).not.toMatch(/American English|US spelling/);
     expect(CAPTION_SYSTEM).toMatch(/never a Filipino or Tagalog word/);
     expect(CAPTION_SYSTEM).not.toMatch(/Filipino moms/);

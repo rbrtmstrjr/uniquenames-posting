@@ -80,7 +80,7 @@ describe("createPostAction by letter", () => {
       .mockResolvedValueOnce({ ok: true, data: { caption: "Sea breezes and sailboats for these baby boy names.", tags: [] } })
       .mockResolvedValueOnce({ ok: true, data: { caption: "Baby boy names starting with K, by the sea.", tags: [] } });
     expect((await createPostAction({ ...input, letter: "K" })).ok).toBe(true);
-    expect(generateJson.mock.calls[1][0].prompt).toMatch(/does not say the names start with the letter K/);
+    expect(generateJson.mock.calls[1][0].prompt).toMatch(/does not name the post's theme \("baby boy names that start with K"\)/);
     expect(created().caption).toMatch(/^Baby boy names starting with K, by the sea\./);
   });
 
