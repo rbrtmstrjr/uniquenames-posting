@@ -87,7 +87,9 @@ export function planPost(input: PlanInput): PlanResult {
   if (r.count !== null && (r.count < s.min_images || r.count > s.max_images)) {
     return { ok: false, reason: `Number of cards must be ${s.min_images} to ${s.max_images}.` };
   }
-  const chosen = shuffle(pool, rng).slice(0, Math.min(want, pool.length));
+  // Chosen names (Autopilot) keep their order, the best first; any other post's names are a seeded random pick.
+  const byId = new Map(pool.map((n) => [n.id, n]));
+  const chosen = r.nameIds ? r.nameIds.flatMap((id) => byId.get(id) ?? []) : shuffle(pool, rng).slice(0, Math.min(want, pool.length));
   const cards = galleryCards(chosen, theme, r.gender, r.postDate, subjectKey(r.postDate, r.gender, r.style), r.age);
   return { ok: true, theme_id: theme.id, caption: buildCaption(r.gender, s), cards };
 }

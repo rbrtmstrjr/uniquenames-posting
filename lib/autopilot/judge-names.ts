@@ -10,7 +10,8 @@ import { judgeJson, type JudgeResult, type Usage } from "./claude-judge";
 
 export type NameTarget = { kind: "letter"; letter: string } | { kind: "theme"; title: string; hint: string | null };
 /** `meaning_wrong`: the meaning we have is wrong (not just worded differently); only then is a saved name's meaning replaced. */
-export interface NameVerdict { name: string; good: boolean; fits: boolean; reason: string; meaning: string; meaning_wrong: boolean }
+/** `appeal`: how much a parent would love to choose it, 1 to 10 from the judge (0 = not judged, or no meaning). */
+export interface NameVerdict { name: string; good: boolean; fits: boolean; reason: string; meaning: string; meaning_wrong: boolean; appeal: number }
 
 export const NAMES_JUDGE_SYSTEM = [
   "You are a Filipino mom choosing a name for your own baby, and an expert in baby names and their real meanings.",
@@ -24,6 +25,7 @@ export const NAMES_JUDGE_SYSTEM = [
   "meaning: for a good name, its standard accepted meaning in 2 to 6 lowercase English words (fix the given meaning if it is wrong); empty otherwise.",
   "meaning_wrong: true only when the meaning we have is wrong, not just worded differently; false otherwise.",
   "reason: why it is not good or does not fit, in a few plain words ('made up', 'hard to say', 'bad meaning', 'mostly a boy name', 'too close to Aria', 'not biblical'); empty when it passes.",
+  "appeal: how much a parent would love to choose this name, from 1 to 10 (pretty, meaningful, easy to say, special); 1 for a name that is not good.",
   "Judge every name in the list exactly once.",
 ].join("\n");
 
@@ -37,8 +39,9 @@ const SCHEMA: GeminiSchema = {
         properties: {
           name: { type: "STRING" }, good: { type: "BOOLEAN" }, fits: { type: "BOOLEAN" },
           reason: { type: "STRING" }, meaning: { type: "STRING" }, meaning_wrong: { type: "BOOLEAN" },
+          appeal: { type: "INTEGER", description: "1 to 10: how much a parent would love to choose it" },
         },
-        required: ["name", "good", "fits", "reason", "meaning", "meaning_wrong"],
+        required: ["name", "good", "fits", "reason", "meaning", "meaning_wrong", "appeal"],
       },
     },
   },
@@ -62,7 +65,8 @@ function parseVerdicts(raw: unknown): NameVerdict[] | null {
   if (!Array.isArray(list)) return null;
   const valid = list.filter((v): v is NameVerdict => !!v && typeof v === "object"
     && typeof (v as NameVerdict).name === "string" && typeof (v as NameVerdict).good === "boolean" && typeof (v as NameVerdict).fits === "boolean"
-    && typeof (v as NameVerdict).reason === "string" && typeof (v as NameVerdict).meaning === "string");
+    && typeof (v as NameVerdict).reason === "string" && typeof (v as NameVerdict).meaning === "string"
+    && Number.isInteger((v as NameVerdict).appeal) && (v as NameVerdict).appeal >= 1 && (v as NameVerdict).appeal <= 10);
   return valid.length ? valid : null;
 }
 
@@ -81,11 +85,11 @@ export async function judgeNames(i: { gender: Gender; target: NameTarget; names:
     const byName = new Map(r.data.map((v) => [v.name.trim().toLowerCase(), v]));
     for (const n of batch) {
       const v = byName.get(n.name.trim().toLowerCase());
-      if (!v) { out.push({ name: n.name, good: false, fits: false, reason: "not judged", meaning: "", meaning_wrong: false }); continue; }
+      if (!v) { out.push({ name: n.name, good: false, fits: false, reason: "not judged", meaning: "", meaning_wrong: false, appeal: 0 }); continue; }
       const meaning = cleanMeaning(v.meaning);
       out.push(v.good && v.fits && !meaning
-        ? { name: n.name, good: false, fits: v.fits, reason: "no meaning", meaning: "", meaning_wrong: false }
-        : { name: n.name, good: v.good, fits: v.fits, reason: v.reason.trim().slice(0, 80), meaning: v.good ? meaning : "", meaning_wrong: v.good && !!meaning && v.meaning_wrong === true });
+        ? { name: n.name, good: false, fits: v.fits, reason: "no meaning", meaning: "", meaning_wrong: false, appeal: 0 }
+        : { name: n.name, good: v.good, fits: v.fits, reason: v.reason.trim().slice(0, 80), meaning: v.good ? meaning : "", meaning_wrong: v.good && !!meaning && v.meaning_wrong === true, appeal: v.appeal });
     }
   }
   return { ok: true, data: out, usage };

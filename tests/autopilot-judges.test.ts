@@ -46,16 +46,16 @@ describe("judgeJson", () => {
 describe("judgeNames", () => {
   it("sends the post's target and every name; verdicts come back in the input order, a skipped name fails", async () => {
     create.mockResolvedValueOnce(answer({ names: [
-      { name: "Sabina", good: true, fits: true, reason: "", meaning: "Woman From Sabine " },
-      { name: "Sqiggle", good: false, fits: true, reason: "made up", meaning: "" },
+      { name: "Sabina", good: true, fits: true, reason: "", meaning: "Woman From Sabine ", appeal: 8 },
+      { name: "Sqiggle", good: false, fits: true, reason: "made up", meaning: "", appeal: 1 },
     ] }));
     const r = await judgeNames({ gender: "girl", target: { kind: "letter", letter: "S" }, names: [
       { name: "Sqiggle", meaning: "?" }, { name: "Sabina", meaning: "from sabine" }, { name: "Selah", meaning: "pause" },
     ] });
     expect(r.ok && r.data).toEqual([
-      { name: "Sqiggle", good: false, fits: true, reason: "made up", meaning: "", meaning_wrong: false },
-      { name: "Sabina", good: true, fits: true, reason: "", meaning: "woman from sabine", meaning_wrong: false },
-      { name: "Selah", good: false, fits: false, reason: "not judged", meaning: "", meaning_wrong: false },
+      { name: "Sqiggle", good: false, fits: true, reason: "made up", meaning: "", meaning_wrong: false, appeal: 1 },
+      { name: "Sabina", good: true, fits: true, reason: "", meaning: "woman from sabine", meaning_wrong: false, appeal: 8 },
+      { name: "Selah", good: false, fits: false, reason: "not judged", meaning: "", meaning_wrong: false, appeal: 0 },
     ]);
     const prompt = create.mock.calls[0][0].messages[0].content[0].text as string;
     expect(prompt).toContain("start with the letter S");
@@ -63,9 +63,9 @@ describe("judgeNames", () => {
   });
   it("asks whether the meaning is wrong (schema and prompt), passes meaning_wrong through, and keeps commas in meanings", async () => {
     create.mockResolvedValueOnce(answer({ names: [
-      { name: "Hannah", good: true, fits: true, reason: "", meaning: "Grace, Favor!", meaning_wrong: true },
-      { name: "Ruth", good: true, fits: true, reason: "", meaning: "friend, companion", meaning_wrong: false },
-      { name: "Mara", good: false, fits: true, reason: "sad meaning", meaning: "bitter", meaning_wrong: true },
+      { name: "Hannah", good: true, fits: true, reason: "", meaning: "Grace, Favor!", meaning_wrong: true, appeal: 9 },
+      { name: "Ruth", good: true, fits: true, reason: "", meaning: "friend, companion", meaning_wrong: false, appeal: 7 },
+      { name: "Mara", good: false, fits: true, reason: "sad meaning", meaning: "bitter", meaning_wrong: true, appeal: 1 },
     ] }));
     const r = await judgeNames({ gender: "girl", target: { kind: "theme", title: "Biblical", hint: null }, names: [
       { name: "Hannah", meaning: "brave" }, { name: "Ruth", meaning: "friend" }, { name: "Mara", meaning: "bitter" },
@@ -78,9 +78,28 @@ describe("judgeNames", () => {
     expect(item.required).toContain("meaning_wrong");
   });
   it("a kept name without a meaning does not pass", async () => {
-    create.mockResolvedValueOnce(answer({ names: [{ name: "Ruth", good: true, fits: true, reason: "", meaning: "" }] }));
+    create.mockResolvedValueOnce(answer({ names: [{ name: "Ruth", good: true, fits: true, reason: "", meaning: "", appeal: 6 }] }));
     const r = await judgeNames({ gender: "girl", target: { kind: "theme", title: "Biblical", hint: null }, names: [{ name: "Ruth", meaning: "friend" }] });
     expect(r.ok && r.data[0]).toMatchObject({ good: false, reason: "no meaning" });
+  });
+  it("appeal is required and checked: 1 to 10, a whole number; any other verdict is not taken (the name fails as not judged)", async () => {
+    create.mockResolvedValueOnce(answer({ names: [
+      { name: "Ruth", good: true, fits: true, reason: "", meaning: "friend", meaning_wrong: false, appeal: 9 },
+      { name: "Naomi", good: true, fits: true, reason: "", meaning: "pleasant", meaning_wrong: false },
+      { name: "Leah", good: true, fits: true, reason: "", meaning: "weary", meaning_wrong: false, appeal: 11 },
+      { name: "Eden", good: true, fits: true, reason: "", meaning: "delight", meaning_wrong: false, appeal: 7.5 },
+    ] }));
+    const r = await judgeNames({ gender: "girl", target: { kind: "theme", title: "Biblical", hint: null }, names: [
+      { name: "Ruth", meaning: "friend" }, { name: "Naomi", meaning: "pleasant" }, { name: "Leah", meaning: "weary" }, { name: "Eden", meaning: "delight" },
+    ] });
+    expect(r.ok && r.data.map((v) => [v.name, v.good, v.appeal, v.reason])).toEqual([
+      ["Ruth", true, 9, ""], ["Naomi", false, 0, "not judged"], ["Leah", false, 0, "not judged"], ["Eden", false, 0, "not judged"],
+    ]);
+    const req = create.mock.calls[0][0];
+    expect(req.system).toMatch(/appeal: how much a parent would love to choose this name, from 1 to 10/);
+    const item = req.output_config.format.schema.properties.names.items;
+    expect(item.properties.appeal).toMatchObject({ type: "integer" });
+    expect(item.required).toContain("appeal");
   });
 });
 
@@ -157,7 +176,7 @@ describe("judgeNames robustness and batching", () => {
   });
   it("61 names make two calls and the usage adds up", async () => {
     const names = Array.from({ length: 61 }, (_, k) => ({ name: `S${k}`, meaning: "m" }));
-    const verdicts = (ns: { name: string }[]) => ({ names: ns.map((n) => ({ name: n.name, good: true, fits: true, reason: "", meaning: "fine" })) });
+    const verdicts = (ns: { name: string }[]) => ({ names: ns.map((n) => ({ name: n.name, good: true, fits: true, reason: "", meaning: "fine", appeal: 5 })) });
     create.mockResolvedValueOnce(answer(verdicts(names.slice(0, 60)), { input: 1000, output: 100 }));
     create.mockResolvedValueOnce(answer(verdicts(names.slice(60)), { input: 500, output: 50 }));
     const r = await judgeNames({ gender: "girl", target: { kind: "letter", letter: "S" }, names });

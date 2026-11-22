@@ -20,6 +20,14 @@ export const STOCK_JUDGE_MAX = 60;
 export const MAX_SKIP_SHARE = 0.4;
 /** Names listed in the "left alone" event. */
 const LEFT_ALONE_LISTED = 20;
+/** The post's best names by the check's appeal lead it: the 3 a phone shows after the front card (spec 2026-11-21). */
+export const TOP_BY_APPEAL = 3;
+
+/** The top TOP_BY_APPEAL by appeal first (a tie keeps the given order), then the rest in the given (random) order. */
+export function bestFirst<T extends { appeal: number }>(list: readonly T[]): T[] {
+  const top = [...list].sort((a, b) => b.appeal - a.appeal).slice(0, TOP_BY_APPEAL);
+  return [...top, ...list.filter((x) => !top.includes(x))];
+}
 
 type Simple = { name: string; meaning: string };
 export interface NamesDeps {
@@ -46,7 +54,7 @@ export async function pickNames(d: NamesDeps, item: Pick<AutopilotItemRow, "gend
   const label = item.letter ? `letter ${item.letter}` : `"${item.name_theme}"`;
   const all = await d.repo.allNames();
   const sameKind = all.filter((n) => n.gender === item.gender && n.style === "single" && (!item.letter || startsWith(n.name, item.letter)));
-  const good: { id: string; name: string }[] = [];
+  const good: { id: string; name: string; appeal: number }[] = [];
   const judge = async (names: Simple[]) => {
     const r = await d.judge({ gender: item.gender, target, names });
     base.usage.input += r.usage.input;
@@ -75,7 +83,7 @@ export async function pickNames(d: NamesDeps, item: Pick<AutopilotItemRow, "gend
         await d.repo.setMeaning(n.id, v.meaning);
         notes.push(`Meaning fixed for ${n.name}: ${n.meaning} → ${v.meaning}`);
       }
-      good.push({ id: n.id, name: n.name });
+      good.push({ id: n.id, name: n.name, appeal: v.appeal });
     }
     // Too many at once looks like a bad check, not a bad list: the names are only left unused, for the owner to look at.
     if (toSkip.length > stock.length * MAX_SKIP_SHARE) {
@@ -105,10 +113,11 @@ export async function pickNames(d: NamesDeps, item: Pick<AutopilotItemRow, "gend
     if (!fresh.length) continue;
     const r = await judge(fresh);
     if (!r.ok) return failed(r);
-    const keep = fresh.flatMap((n, k) => (r.data[k].good && r.data[k].fits ? [{ name: n.name, meaning: r.data[k].meaning || n.meaning, gender: item.gender }] : []));
+    const keep = fresh.flatMap((n, k) => (r.data[k].good && r.data[k].fits ? [{ name: n.name, meaning: r.data[k].meaning || n.meaning, gender: item.gender, appeal: r.data[k].appeal }] : []));
     for (const n of fresh) known.add(n.name.toLowerCase());
+    const appealOf = new Map(keep.map((k) => [k.name.toLowerCase(), k.appeal]));
     for (const saved of await d.repo.addNames(keep)) {
-      good.push(saved);
+      good.push({ ...saved, appeal: appealOf.get(saved.name.toLowerCase()) ?? 0 });
       base.added.push(saved.name);
     }
   }
@@ -119,6 +128,6 @@ export async function pickNames(d: NamesDeps, item: Pick<AutopilotItemRow, "gend
     if (lastError) return { ...base, kind: "retry", error: lastError };
     return { ...base, kind: "hold", why: `Only ${good.length} good ${item.gender} names for ${label} (${MIN_GOOD_NAMES} needed). Add names, then make this post on Today.` };
   }
-  // shuffle() already returns a new array, so `good` is not mutated.
-  return { ...base, kind: "ok", nameIds: shuffle(good, d.rng).slice(0, item.name_count).map((g) => g.id) };
+  // A random sample of the good names (shuffle() returns a new array, `good` is not mutated), its best 3 by appeal first.
+  return { ...base, kind: "ok", nameIds: bestFirst(shuffle(good, d.rng).slice(0, item.name_count)).map((g) => g.id) };
 }
