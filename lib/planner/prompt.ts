@@ -1,9 +1,9 @@
-import type { Gender, ThemeRow } from "@/lib/db/types";
+import type { Gender, ThemeRow, TitlePlace } from "@/lib/db/types";
 import { hashSeed, seededRandom } from "./random";
 import { frameOf, isPropsOnly, sessionFor, shotSpec, type Session, type ShotSpec, type TextSpace } from "./shots";
 import { splitProps, theProp } from "./props";
 import type { SubjectAge } from "./age";
-import { activePack } from "@/packs";
+import { activePack, type CoverPose } from "@/packs";
 import { NO_TEXT } from "./no-text";
 
 export type ThemePromptFields = Pick<ThemeRow, "backdrop" | "outfit" | "props" | "lighting" | "palette">;
@@ -256,6 +256,40 @@ export function buildCtaPrompt(theme: ThemePromptFields, gender: Gender, subject
     ...SET(theme, "Outfit", false, subject?.age),
     `Photography: ${CTA_OPTICS}, high detail, natural skin.`,
     `Composition: square frame, the backdrop fills the whole frame; the ${who} and the props sit in the lower half of the frame, and the upper half of the frame is calm, open backdrop: smooth, softly lit and empty, with generous space above the ${who}'s head.`,
+    NO_TEXT,
+  ].join("\n");
+}
+
+// ---------------------------------------------------------------- front card (migration 023)
+/** Every front card's stored shot starts with this, then its pose id ("front card: wide: ..."); shotSpec() is undefined for it. */
+export const COVER_SHOT_PREFIX = "front card";
+export const isCoverShot = (shot: string) => shot.startsWith(`${COVER_SHOT_PREFIX}:`);
+/** The stored shot of a front card: the pose id (read back by the rotation) and the pose for this child's session. */
+export const coverShot = (pose: CoverPose, session: Session = "sitter") => `${COVER_SHOT_PREFIX}: ${pose.id}: ${pose.moment[session]}`;
+/** The pose id in a stored front card shot, or null (another card's shot, or nothing). */
+export const coverPoseId = (shot: string | null | undefined): string | null => /^front card: ([a-z0-9-]+):/.exec(shot ?? "")?.[1] ?? null;
+
+// The child and the props stay out of the title's third of the frame, which is calm open backdrop (top) or blanket (bottom).
+const COVER_SPACE: Record<TitlePlace, (who: string) => string> = {
+  top: (who) => `the ${who} and the props sit in the lower two thirds of the frame, and the upper third of the frame is calm, open backdrop: smooth, softly lit and empty, with generous space above the ${who}'s head`,
+  bottom: (who) => `the ${who} and the props sit in the upper two thirds of the frame, and the lower third of the frame is calm, open space: smooth, softly blurred blanket with nothing on it`,
+};
+
+/**
+ * The front card's photo: the post's set and child in the chosen pose, the title's third of the frame calm and empty.
+ * Positive-only like every card (cfg 1); NO_TEXT is the one exception, so the photo is text-free and the title is
+ * stamped by code.
+ */
+export function buildCoverPrompt(theme: ThemePromptFields, gender: Gender, subject: Subject | undefined, pose: CoverPose, place: TitlePlace): string {
+  const babyWord = gender === "girl" ? "baby girl" : "baby boy";
+  const who = subject ? noun(subject) : "baby";
+  return [
+    header(subject),
+    subject ? subjectLine(gender, subject) : `Subject: a ${babyWord}.`,
+    `Shot: the opening frame of the session, the album cover: ${pose.moment[subject?.session ?? "sitter"]}.`,
+    ...SET(theme, "Outfit", false, subject?.age),
+    `Photography: ${pose.optics}, high detail, natural skin.`,
+    `Composition: square frame, the backdrop fills the whole frame; ${COVER_SPACE[place](who)}.`,
     NO_TEXT,
   ].join("\n");
 }

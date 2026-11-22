@@ -1,6 +1,7 @@
-import type { Gender, NameRow, NameStyle, SettingsRow, ThemeRow } from "@/lib/db/types";
+import type { Gender, NameRow, NameStyle, SettingsRow, ThemeRow, TitlePlace } from "@/lib/db/types";
+import type { CoverPose, CoverTitle } from "@/packs";
 import { buildCaption } from "./caption";
-import { buildCtaPrompt, buildPrompt, ctaShot, pickSubject, randomSubject, type Subject } from "./prompt";
+import { buildCoverPrompt, buildCtaPrompt, buildPrompt, coverShot, ctaShot, pickSubject, randomSubject, type Subject } from "./prompt";
 import { hashSeed, seededRandom, shuffle } from "./random";
 import { buildMixedShotSpecs, buildShotSpecs, dealAges, needsProp, sessionShots, shotSpec, type ShotSpec } from "./shots";
 import { dealProps, splitProps } from "./props";
@@ -226,4 +227,54 @@ export function planCtaCard(i: CtaCardInput): PlannedCtaCard {
     kind: "cta", position: i.position, name: i.text, meaning: "", shot: ctaShot(subject.session),
     prompt: buildCtaPrompt(i.theme, i.gender, subject), seed: cardSeed(i.salt, "cta", 0) + 1,
   };
+}
+
+export interface CoverCardInput {
+  theme: ThemeRow; gender: Gender;
+  /** subjectKey(post_date, gender, style) of the post, so a fixed-age post shows its own child. */
+  subjectKey: string;
+  /** The post's subject_age: random = a child of a random age; a fixed age = the post's child; null = the original baby. */
+  age?: AgeChoice | null;
+  /** The post id: one stable seed per post. */
+  salt: string;
+  pose: CoverPose;
+  place: TitlePlace;
+  title: CoverTitle;
+}
+export interface PlannedCoverCard { kind: "cover"; position: 0; name: string; meaning: string; shot: string; prompt: string; seed: number; title_pos: TitlePlace }
+
+/** The front card (migration 023): the post's set and child in the pose, the title as its text (name + meaning), first. */
+export function planCoverCard(i: CoverCardInput): PlannedCoverCard {
+  const rng = seededRandom(hashSeed(`${i.salt}|cover`));
+  const subject = i.age === "random"
+    ? randomSubject(SUBJECT_AGES[Math.floor(rng() * SUBJECT_AGES.length)], rng)
+    : pickSubject(i.subjectKey, i.age ?? undefined);
+  return {
+    kind: "cover", position: 0, name: i.title.main, meaning: i.title.second, shot: coverShot(i.pose, subject.session),
+    prompt: buildCoverPrompt(i.theme, i.gender, subject, i.pose, i.place), seed: cardSeed(i.salt, "cover", 0) + 2, title_pos: i.place,
+  };
+}
+
+/**
+ * The next front card pose: the least recently used of `poses` against `recent` (the pose ids of the latest front
+ * cards, newest first; null = a shot that is not a front card's), never-used poses first in list order, and never the
+ * previous post's while another pose exists.
+ */
+export function pickCoverPose(poses: readonly CoverPose[], recent: readonly (string | null)[]): CoverPose {
+  const lastUse = (p: CoverPose) => { const i = recent.indexOf(p.id); return i < 0 ? Infinity : i; };
+  const ranked = poses.map((p) => ({ p, last: lastUse(p) }));
+  const pool = ranked.length > 1 ? ranked.filter((r) => r.last !== 0) : ranked;
+  return (pool.length ? pool : ranked).reduce((a, b) => (b.last > a.last ? b : a)).p;
+}
+
+/** The title's place alternates from post to post: at the bottom after a top title, else at the top. */
+export const nextTitlePlace = (previous: unknown): TitlePlace => (previous === "top" ? "bottom" : "top");
+
+/**
+ * The post's cards with their names in `order` (indexes into `cards`, every index once): each position keeps its shot,
+ * prompt and seed (the photo plan: the session's cover shot first, still lifes spread out), and the name moves with
+ * everything that belongs to it (name_id, meaning, source).
+ */
+export function withNameOrder<T extends { position: number; shot: string; prompt: string; seed: number }>(cards: T[], order: number[]): T[] {
+  return order.map((from, k) => ({ ...cards[from], position: cards[k].position, shot: cards[k].shot, prompt: cards[k].prompt, seed: cards[k].seed }));
 }
