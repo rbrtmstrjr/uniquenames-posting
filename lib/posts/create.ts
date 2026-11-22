@@ -12,6 +12,7 @@ import { NAME_STYLES, pickStyle, type CaptionName, type CaptionStyle } from "@/l
 import { fail, type ActionResult } from "@/lib/actions/result";
 import { fontsOf, sameFonts, validateFonts, type PostFonts } from "@/lib/fonts/post-fonts";
 import { addClosingCard } from "@/lib/cta/card";
+import { addCoverCard } from "@/lib/cover/card";
 import { isLetter } from "@/lib/series/letter";
 import type { NameTheme } from "@/lib/autopilot/name-themes";
 
@@ -29,7 +30,7 @@ export interface CreatePostInput {
   nameTheme?: NameTheme | null;
 }
 
-/** The post itself (the owner's Generate and Autopilot): plan, caption, create_post, closing card, labels. */
+/** The post itself (the owner's Generate and Autopilot): plan, caption, create_post, front and closing cards, labels. */
 export async function createPostCore(sb: SupabaseClient, input: CreatePostInput): Promise<ActionResult<{ postId: string }>> {
   const badInput = validateCreatePost(input) ?? (input.fonts !== undefined ? validateFonts(input.fonts) : null)
     ?? (input.letter !== undefined && !isLetter(input.letter) ? "Pick a letter A to Z." : null)
@@ -116,10 +117,13 @@ export async function createPostCore(sb: SupabaseClient, input: CreatePostInput)
       // The closing "follow" card (010) is queued after the name cards, also best effort: before 010, or on
       // an error, the post simply has none (the owner can add it on the post page). A post by letter stores its
       // letter (013) the same way: before 013 it is simply made without its "Letter A" label.
-      const [{ error: metaErr }, closing, letterSaved, themeSaved] = await Promise.all([
+      // The front card (023) is queued the same way, best effort: before 023, switched off, or on an error, the post
+      // simply has none (a post is never failed for it).
+      const newPost = { id: r.post_id, post_date: input.postDate, gender: input.gender, style: input.style, theme_id: plan.theme_id, subject_age: age };
+      const [{ error: metaErr }, closing, front, letterSaved, themeSaved] = await Promise.all([
         sb.from("posts").update({ caption_style, hashtag_set }).eq("id", r.post_id),
-        theme ? addClosingCard(sb, { post: { id: r.post_id, post_date: input.postDate, gender: input.gender, style: input.style, theme_id: plan.theme_id, subject_age: age }, theme, settings: s })
-          : Promise.resolve(null),
+        theme ? addClosingCard(sb, { post: newPost, theme, settings: s }) : Promise.resolve(null),
+        theme ? addCoverCard(sb, { post: newPost, theme, settings: s, title: { letter, nameTheme: nameTheme?.title ?? null } }) : Promise.resolve(null),
         letter ? sb.from("posts").update({ letter }).eq("id", r.post_id) : Promise.resolve(null),
         nameTheme ? sb.from("posts").update({ name_theme: nameTheme.title }).eq("id", r.post_id) : Promise.resolve(null),
       ]);
@@ -127,6 +131,7 @@ export async function createPostCore(sb: SupabaseClient, input: CreatePostInput)
       if (letterSaved?.error && !missing009(letterSaved.error)) console.error("createPostAction: could not save the letter", letterSaved.error.message);
       if (themeSaved?.error) console.error("createPostCore: could not save the name theme", themeSaved.error.message);
       if (closing?.status === "error") console.error("createPostAction: could not add the closing card", closing.message);
+      if (front?.status === "error") console.error("createPostCore: could not add the front card", front.message);
       revalidatePath("/", "layout");
       return { ok: true, postId: r.post_id };
     }

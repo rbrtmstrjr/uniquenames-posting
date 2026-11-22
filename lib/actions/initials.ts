@@ -9,6 +9,7 @@ import { recentTags } from "@/lib/captions/history";
 import { pickStyle, type CaptionName } from "@/lib/captions/styles";
 import { fontsOf, sameFonts, validateFonts, type PostFonts } from "@/lib/fonts/post-fonts";
 import { addClosingCard } from "@/lib/cta/card";
+import { addCoverCard } from "@/lib/cover/card";
 import { has017, missingFunction, planInitialsNames } from "@/lib/data/initials";
 import {
   INITIAL_LETTERS, initialsText, initialsWanted, sourceSummary,
@@ -216,10 +217,16 @@ export async function createInitialsPostAction(input: InitialsRequest & {
       if (metaErr && !missing009(metaErr)) console.error("createInitialsPostAction: could not save the caption style", metaErr.message);
     }
 
-    const closing = theme
-      ? await addClosingCard(sb, { post: { id: postId, post_date: input.postDate, gender: input.gender, style: "two-word", theme_id: gallery.theme_id, subject_age: age }, theme, settings: s })
-      : null;
+    // The closing card (010) and the front card (023, titled with the initials), side by side, best effort.
+    const newPost = { id: postId, post_date: input.postDate, gender: input.gender, style: "two-word" as const, theme_id: gallery.theme_id, subject_age: age };
+    const [closing, front] = theme
+      ? await Promise.all([
+        addClosingCard(sb, { post: newPost, theme, settings: s }),
+        addCoverCard(sb, { post: newPost, theme, settings: s, title: { initials } }),
+      ])
+      : [null, null];
     if (closing?.status === "error") console.error("createInitialsPostAction: could not add the closing card", closing.message);
+    if (front?.status === "error") console.error("createInitialsPostAction: could not add the front card", front.message);
     revalidatePath("/", "layout");
     const made = reuse ? gallery.cards.length : gallery.cards.filter((c) => c.source !== "used").length;
     return { ok: true, postId, cards: made, short: Math.max(0, want - made) };

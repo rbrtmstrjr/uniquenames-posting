@@ -45,6 +45,7 @@ const MISSING_FN = { message: "Could not find the function public.create_initial
 type World = {
   names?: NameRow[]; pre017?: boolean; post?: Record<string, unknown> | null; postCards?: Record<string, unknown>[]; card?: Record<string, unknown> | null;
   rpc?: Record<string, { data?: unknown; error?: { message: string; code?: string } }[]>; reusedCards?: { name: string; created_at: string }[];
+  settings?: Record<string, unknown>;
 };
 function world(w: World = {}) {
   fake = fakeSupabase((q) => respond(q));
@@ -61,7 +62,7 @@ function world(w: World = {}) {
       return undefined;
     }
     if (q.table === "settings" && isUpdate(q)) return undefined;
-    if (q.table === "settings") return { data: settings };
+    if (q.table === "settings") return { data: w.settings ?? settings };
     if (q.table === "names" && op(q, "insert")) return { data: (op(q, "insert")![1] as { name: string }[]).map((r) => ({ id: `ins-${r.name}`, name: r.name })) };
     if (q.table === "names" && op(q, "maybeSingle")) return { data: w.names?.find((n) => n.id === op(q, "eq")![2]) ?? null };
     if (q.table === "names") return { data: w.names ?? NAMES() };
@@ -260,6 +261,15 @@ describe("createInitialsPostAction (Generate)", () => {
     const r = await createInitialsPostAction({ ...input, first: "Q", second: "X", fresh: [] });
     expect(r).toEqual({ ok: false, error: "No boy names with the initials Q·X are left. Preview again to ask the AI for new ones." });
     expect(fake.rpcs).toHaveLength(0);
+  });
+
+  it("with migration 023: a front card titled with the initials is queued first", async () => {
+    world({ settings: { ...settings, cover_enabled: true } });
+    generateJson.mockResolvedValue({ ok: false, error: "down" });
+    expect((await createInitialsPostAction(input)).ok).toBe(true);
+    const cover = fake.queries.filter((q) => q.table === "cards" && op(q, "insert"))
+      .map((q) => op(q, "insert")![1] as Record<string, unknown>).find((c) => c.kind === "cover");
+    expect(cover).toMatchObject({ post_id: POST_ID, kind: "cover", position: 0, order_index: 0, name: "A & R Names", meaning: "for baby boy", title_pos: "top" });
   });
 
   it("validates before any database call", async () => {

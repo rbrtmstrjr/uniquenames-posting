@@ -206,3 +206,27 @@ describe("SettingsForm: closing card", () => {
     expect(screen.getByRole("alert").textContent).toMatch(/3 lines/);
   });
 });
+
+describe("SettingsForm: front card", () => {
+  it("only on a pack that makes front cards", () => {
+    render(<SettingsForm initial={{ ...initial, cover_enabled: true }} />);
+    expect(screen.queryByRole("switch", { name: /Add a front card to every post/ })).toBeNull();
+  });
+
+  it("before 023: shown on, disabled, with the migration to run; never sent", async () => {
+    render(<SettingsForm initial={initial} frontCard />);
+    const sw = screen.getByRole("switch", { name: /Add a front card to every post/ });
+    expect(sw.getAttribute("aria-checked")).toBe("true");
+    expect(sw.hasAttribute("disabled")).toBe(true);
+    expect(screen.getByText(/023_front_card\.sql/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+    expect(await captured()).not.toHaveProperty("cover_enabled");
+  });
+
+  it("after 023: the switch is sent", async () => {
+    render(<SettingsForm initial={{ ...initial, cover_enabled: true }} frontCard />);
+    fireEvent.click(screen.getByRole("switch", { name: /Add a front card to every post/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+    expect(await captured()).toMatchObject({ cover_enabled: false });
+  });
+});
