@@ -104,6 +104,19 @@ describe("judgeNames", () => {
 });
 
 describe("photo checks", () => {
+  it("the front card: the judge is told its stamped text is the post's title; the look-alike list marks it", async () => {
+    create.mockResolvedValueOnce(answer({ pass: true, problems: [], note: "" }));
+    await judgeCard({ kind: "cover", name: "'S' Names", meaning: "for baby girl" }, "https://signed/f.jpg");
+    const req = create.mock.calls[0][0];
+    expect(req.messages[0].content[0].text).toBe(`This is the album's front card: its stamped text is the post's title ("'S' Names / for baby girl"). Check this card.`);
+    expect(req.system).toMatch(/the front card \(the album's first picture\) has the post's title/);
+    create.mockResolvedValueOnce(answer({ remake: [] }));
+    await judgeLookAlike([{ card: { kind: "post", name: "A" }, url: "u1" }, { card: { kind: "cover", name: "'S' Names" }, url: "u2" }]);
+    const content = create.mock.calls[1][0].messages[0].content;
+    expect(content.map((c: { type: string; text?: string }) => c.text ?? c.type)).toEqual(["Card 1:", "image", "Card 2 (the front card):", "image"]);
+    expect(create.mock.calls[1][0].system).toMatch(/front card/);
+  });
+
   it("sends the card image by URL with what is stamped on it", async () => {
     create.mockResolvedValueOnce(answer({ pass: false, problems: ["hands"], note: "six fingers" }));
     const r = await judgeCard({ kind: "post", name: "Sabina" }, "https://signed/c1.jpg");

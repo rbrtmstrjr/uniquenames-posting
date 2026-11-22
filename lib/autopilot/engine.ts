@@ -11,7 +11,7 @@ import type { JudgeResult, Usage } from "./claude-judge";
 import type { NamesOutcome } from "./names-step";
 import type { AutopilotRepo } from "./repo";
 import { PROBLEM_LABEL, type PhotoVerdict } from "./photo-problems";
-import { MIN_GOOD_NAMES, dayLabel, labelText } from "./plan";
+import { MIN_PASSED_NAME_CARDS, dayLabel, labelText } from "./plan";
 import { parseNameThemes } from "./name-themes";
 
 export interface EngineDeps {
@@ -57,7 +57,16 @@ export type TickOutcome = { ran: false; why: "no-run" | "busy" | "paused" } | { 
 class Pause extends Error {}
 
 const itemLabel = (i: AutopilotItemRow) => `${dayLabel(i.day)} · ${labelText(i)} · ${i.gender}`;
-const cardName = (c: CardRow) => (c.kind === "cta" ? "the closing card" : c.name);
+const cardName = (c: CardRow) => (c.kind === "cta" ? "the closing card" : c.kind === "cover" ? "the front card" : c.name);
+
+/**
+ * The look-alike check's cards: posting order, with the front card moved to the end. The judge names the LATER card of
+ * a look-alike pair (never card 1), so a front card that looks like another card is the one remade.
+ */
+export function lookAlikeOrder(cards: CardRow[]): CardRow[] {
+  const sorted = [...cards].sort(cardOrder);
+  return [...sorted.filter((c) => c.kind !== "cover"), ...sorted.filter((c) => c.kind === "cover")];
+}
 
 export async function tick(d: EngineDeps): Promise<TickOutcome> {
   const start = d.now();
@@ -215,13 +224,21 @@ class Tick {
       }
       return;
     }
+    if (c.kind === "cover") return this.leaveOutFront(c, why);
     await this.setCard(c, { check_state: "removed", check_note: `Removed: ${why}`.slice(0, 300), selected: false });
     this.event("card_removed", `${itemLabel(item)}: ${cardName(c)} removed after ${MAX_REMAKES} remakes (${why}).`);
+  }
+
+  /** The front card never holds a post: one that keeps failing (or can't be checked) is unselected and the post goes on. */
+  private async leaveOutFront(c: CardRow, why: string) {
+    await this.setCard(c, { check_state: "removed", check_note: `Removed: ${why}`.slice(0, 300), selected: false });
+    this.event("card_removed", `${itemLabel(this.itemOf(c))}: Front card left out: ${why}.`);
   }
 
   private async couldNotCheck(c: CardRow, error: string) {
     const remakes = c.remakes ?? 0;
     if (c.check_note?.startsWith(COULD_NOT_CHECK) || remakes >= MAX_REMAKES) {
+      if (c.kind === "cover") return this.leaveOutFront(c, `could not check it (${error.replace(/\.$/, "")})`);
       await this.setCard(c, { check_state: "failed", check_note: `${COULD_NOT_CHECK} twice: ${error}`.slice(0, 300) });
       return;
     }
@@ -255,8 +272,8 @@ class Tick {
       }
       const passed = cs.filter((c) => c.check_state === "passed");
       const names = passed.filter((c) => c.kind === "post").length;
-      if (names < MIN_GOOD_NAMES) {
-        await this.hold(item, `Only ${names} name cards passed the checks (${MIN_GOOD_NAMES} needed). Remake or add cards, then schedule it yourself.`);
+      if (names < MIN_PASSED_NAME_CARDS) {
+        await this.hold(item, `Only ${names} name cards passed the checks (${MIN_PASSED_NAME_CARDS} needed). Remake or add cards, then schedule it yourself.`);
         continue;
       }
       // Nothing is scheduled with a card that is not checked (removed cards are not posted).
@@ -297,8 +314,9 @@ class Tick {
   }
 
   private async lookAlike(item: AutopilotItemRow, cards: CardRow[]): Promise<boolean> {
-    // In posting order, so "card 1" is the album's first card (the judge keeps the earlier of two look-alikes).
-    const passed = [...cards].sort(cardOrder);
+    // In posting order, so "card 1" is the album's first name card (the judge keeps the earlier of two look-alikes), with
+    // the front card last so it can be the one remade.
+    const passed = lookAlikeOrder(cards);
     const urls = await this.d.repo.signedUrls(passed.map((c) => c.card_path!));
     const r = await this.d.judgeLookAlike(passed.map((card, k) => ({ card, url: urls[k] })));
     this.addUsage(r.usage);
