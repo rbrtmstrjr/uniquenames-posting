@@ -14,6 +14,7 @@ const { planInitialsAction, createInitialsPostAction } = await import("@/lib/act
 const { addCardAction, rewriteCaptionAction } = await import("@/lib/actions/posts");
 const { listSwapNamesAction, swapCardNameAction } = await import("@/lib/actions/swap-name");
 const { cardNameIdeasAction } = await import("@/lib/actions/suggest");
+const { RANK_SYSTEM } = await import("@/lib/ai/rank-names");
 
 const REQ = "11111111-1111-4111-8111-111111111111";
 const THEME_ID = "22222222-2222-4222-8222-222222222222";
@@ -270,6 +271,26 @@ describe("createInitialsPostAction (Generate)", () => {
     const cover = fake.queries.filter((q) => q.table === "cards" && op(q, "insert"))
       .map((q) => op(q, "insert")![1] as Record<string, unknown>).find((c) => c.kind === "cover");
     expect(cover).toMatchObject({ post_id: POST_ID, kind: "cover", position: 0, order_index: 0, name: "A & R Names", meaning: "for baby boy", title_pos: "top" });
+  });
+
+  it("with migration 023: the AI's top 3 names come first, each card keeping its photo plan and its source", async () => {
+    type Card = Planned & { shot: string; prompt: string; seed: number };
+    world({ settings: { ...settings, cover_enabled: false } });
+    generateJson.mockResolvedValue({ ok: false, error: "down" });
+    await createInitialsPostAction(input);
+    const today = (rpc("create_initials_post")[0].p as { cards: Card[] }).cards;
+    expect(today.map((c) => c.name)).toEqual(["Ansel Roan", "Arlo Reed", "Alaric Rhys", "Ambrose Rafe", "Amos Rhett", "Abel Ross"]);
+    world({ settings: { ...settings, cover_enabled: false } });
+    generateJson.mockReset();
+    generateJson.mockImplementation(async (i: { system: string }) => (i.system === RANK_SYSTEM
+      ? { ok: true, data: { best: ["Abel Ross", "Alaric Rhys", "Arlo Reed"] } } : { ok: false, error: "down" }));
+    expect((await createInitialsPostAction(input)).ok).toBe(true);
+    const ranked = (rpc("create_initials_post")[0].p as { cards: Card[] }).cards;
+    expect(ranked.map((c) => [c.position, c.name, c.source])).toEqual([
+      [1, "Abel Ross", "used"], [2, "Alaric Rhys", "new"], [3, "Arlo Reed", "available"],
+      [4, "Ansel Roan", "available"], [5, "Ambrose Rafe", "new"], [6, "Amos Rhett", "used"],
+    ]);
+    expect(ranked.map((c) => [c.shot, c.prompt, c.seed])).toEqual(today.map((c) => [c.shot, c.prompt, c.seed]));
   });
 
   it("validates before any database call", async () => {

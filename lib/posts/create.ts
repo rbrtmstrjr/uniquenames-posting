@@ -1,7 +1,8 @@
 import "server-only";
 import { revalidatePath } from "next/cache";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { planPost, type AgeChoice } from "@/lib/planner";
+import { planPost, withNameOrder, type AgeChoice } from "@/lib/planner";
+import { RANK_TIMEOUT_MS, bestFirstOn, bestFirstOrder, rankNames } from "@/lib/ai/rank-names";
 import type { Gender, NameRow, NameStyle, SettingsRow, ThemeRow } from "@/lib/db/types";
 import { validateCreatePost } from "@/lib/actions/helpers";
 import { generateLockReason } from "@/lib/actions/generate-guard";
@@ -60,6 +61,20 @@ export async function createPostCore(sb: SupabaseClient, input: CreatePostInput)
     }
     return lines.get(key)!;
   };
+  // The 3 best names first (Today, from 023): ONE ranking call per set of names, alongside the caption, under its own
+  // deadline (RANK_TIMEOUT_MS) for the whole action; past it, or on any failure, today's order. Autopilot's chosen names
+  // come ranked already, so it never asks.
+  const rankDeadline = Date.now() + RANK_TIMEOUT_MS;
+  const ranks = new Map<string, Promise<number[] | null>>();
+  const rankFor = (names: { name: string; meaning: string }[]) => {
+    const key = names.map((n) => n.name).join(",");
+    if (!ranks.has(key)) {
+      const left = rankDeadline - Date.now();
+      if (left < 500) return Promise.resolve(null);
+      ranks.set(key, rankNames({ gender: input.gender, names }, left));
+    }
+    return ranks.get(key)!;
+  };
   let fontsSaved = false;
   // Chosen names (Autopilot) are read by id: the whole available pool can pass PostgREST's 1000-row cap, and a chosen
   // name beyond it would look "no longer available".
@@ -95,7 +110,13 @@ export async function createPostCore(sb: SupabaseClient, input: CreatePostInput)
     // One style per action: the previous post's style is never repeated, the least recently used preferred.
     captionStyle ??= pickStyle(h.styles, postNames);
     const aiOn = captionAiOn(s);
-    const ai = theme && aiOn ? await lineFor(theme, postNames, captionStyle, h) : null;
+    // The caption and the ranking run side by side: Generate waits for the slower one, never for both in turn.
+    const [ai, top] = await Promise.all([
+      theme && aiOn ? lineFor(theme, postNames, captionStyle, h) : Promise.resolve(null),
+      !input.nameIds && bestFirstOn(s) ? rankFor(plan.cards) : Promise.resolve(null),
+    ]);
+    // The AI's top names lead; every position keeps its photo plan (the session's cover shot first, still lifes spread).
+    const ordered = top ? withNameOrder(plan.cards, bestFirstOrder(top, plan.cards.length)) : plan.cards;
     const { caption, caption_style, hashtag_set } = composePostCaption({ ai, aiOn, captionStyle, gender: input.gender, settings: s, history: h, letter, nameTheme: nameTheme?.title ?? null });
     // Remember the fonts as the "last used" ones (Today's defaults, theme previews) BEFORE the
     // cards exist: without migration 003 the PC stamps with the settings fonts, so card 1 must
@@ -107,7 +128,7 @@ export async function createPostCore(sb: SupabaseClient, input: CreatePostInput)
     fontsSaved = true;
     const { data, error } = await sb.rpc("create_post", { p: {
       request_id: input.requestId, post_date: input.postDate, gender: input.gender, style: input.style,
-      theme_id: plan.theme_id, caption, cards: plan.cards, ...fonts, subject_age: age,
+      theme_id: plan.theme_id, caption, cards: ordered, ...fonts, subject_age: age,
     } });
     if (error) return fail(`Could not create the post: ${error.message}`);
     const r = data as { status: string; post_id?: string; reason?: string };
