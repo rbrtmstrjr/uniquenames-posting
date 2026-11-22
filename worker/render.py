@@ -650,6 +650,102 @@ def compose_cta(photo, message, handle, style=None, log=print, layout="classic")
     return _stamp(img, [(p, 255) for p in lay["lines"]], lay["block"], lay["mark"])
 
 
+# ---------------------------------------------------------------- front card (migration 023, worker 2.10.0)
+COVER_PLACES = ("top", "bottom")
+# The title is the biggest text of the album: its main line starts at this share of the name size, the second line at
+# this share of the meaning size, and every line stays inside this share of the card width (an even margin each side).
+COVER_SIZE = 1.3
+COVER_SECOND_SIZE = 1.15
+COVER_MAX_WIDTH = 0.84
+# A long main line may wrap onto this many balanced lines, set closer than meaning lines, before it shrinks further.
+COVER_MAX_LINES = 2
+COVER_LINE_GAP = 0.08
+
+
+def cover_place(value):
+    """The front card's stored title place (cards.title_pos): "top" or "bottom"; anything else is "top"."""
+    return value if value in COVER_PLACES else "top"
+
+
+def fit_cover_title(font_id, text, px, max_w, log=print):
+    """(font, lines) for the main line at about `px` in the title weight: one line, shrinking to meaningShrinkFirst of
+    the size; then COVER_MAX_LINES balanced lines in that size range; then smaller on COVER_MAX_LINES lines."""
+    load = lambda s: fonts.load_safe(font_id, LAYOUT["titleWeight"], s, log)  # noqa: E731
+    words = text.split() or [""]
+    start = _px(px)
+    floor = max(LAYOUT["minPx"], _px(px * LAYOUT["meaningShrinkFirst"]))
+    most = max(1, min(COVER_MAX_LINES, len(words)))
+    widest = lambda f, lns: max(_text_w(f, ln) for ln in lns)  # noqa: E731
+    for n in range(1, most + 1):
+        size = _largest(lambda s: widest(load(s), balanced_lines(load(s), words, n)) <= max_w, floor, start)
+        if size:
+            return load(size), balanced_lines(load(size), words, n)
+    size = _largest(lambda s: widest(load(s), balanced_lines(load(s), words, most)) <= max_w, LAYOUT["minPx"], floor - 1)
+    size = size or LAYOUT["minPx"]
+    return load(size), balanced_lines(load(size), words, most)
+
+
+def layout_cover(size, title, second, handle, style, place="top", log=print, pill=False):
+    """Where the front card's text goes: the main line (title font, bigger than a name, up to COVER_MAX_LINES lines),
+    the second line under it (meaning font, light, may wrap), both centred across; the usual watermark. The block sits
+    at the top or at the bottom of the text room (the stored place), whatever the text position setting says. Pure
+    geometry: {title: [part], second: [part], mark, block, band}."""
+    W, H = size
+    k = W / LAYOUT["baseWidth"]
+    max_w = W * COVER_MAX_WIDTH
+    mark, lo, bottom = _mark_and_room(W, H, handle, style, False, log, pill=pill)
+    main = " ".join(str(title or "").split())
+    main = main.upper() if fonts.caps(style.title_font) else main
+    sub = " ".join(str(second or "").split())
+
+    scale = 1.0
+    while True:
+        # A block taller than the room shrinks (title and second line together) instead of overflowing.
+        tf, rows = fit_cover_title(style.title_font, main, style.title_size * k * COVER_SIZE * scale, max_w, log)
+        pitch = tf.size * (1 + COVER_LINE_GAP)
+        parts = [{"text": ln, "font": tf, "y": i * pitch, "bb": tf.getbbox(ln), "second": False} for i, ln in enumerate(rows)]
+        if sub:
+            mf, lines = fit_meaning(style.meaning_font, sub, style.meaning_size * k * COVER_SECOND_SIZE * scale, max_w, log)
+            last = max(p["y"] + p["bb"][3] for p in parts)
+            first = mf.getbbox(lines[0])
+            mpitch = mf.size * (1 + LAYOUT["lineGap"])
+            for i, ln in enumerate(lines):
+                parts.append({"text": ln, "font": mf, "y": last + W * LAYOUT["gap"] * scale - first[1] + i * mpitch,
+                              "bb": _tracked_bbox(mf, ln, MEANING_TRACK), "track": _track_px(mf, MEANING_TRACK), "second": True})
+        top = min(p["y"] + p["bb"][1] for p in parts)
+        height = max(p["y"] + p["bb"][3] for p in parts) - top
+        if height <= bottom - lo or scale < 0.15:
+            break
+        scale *= 0.9
+
+    band = cover_place(place)
+    y = lo if band == "top" else bottom - height
+    y = max(lo, min(bottom - height, y))
+    dy = y - top
+    out = []
+    for p in parts:
+        bb = p["bb"]
+        x, py = W / 2 - (bb[0] + bb[2]) / 2, p["y"] + dy
+        out.append({"text": p["text"], "font": p["font"], "xy": (x, py), "box": (x + bb[0], py + bb[1], x + bb[2], py + bb[3]),
+                    "track": p.get("track", 0.0), "second": p["second"]})
+    boxes = [p["box"] for p in out]
+    block = (min(b[0] for b in boxes), min(b[1] for b in boxes), max(b[2] for b in boxes), max(b[3] for b in boxes))
+    return {"title": [p for p in out if not p["second"]], "second": [p for p in out if p["second"]], "mark": mark, "block": block,
+            "band": band}
+
+
+def compose_cover(photo, title, second, handle, style=None, place="top", log=print, layout="classic"):
+    """Stamp the front card: the post's title (main line + second line) at its stored place, and the watermark
+    (Name Nest layout: brand ink + the pill)."""
+    img = photo.convert("RGB")
+    style = style or text_style({})
+    if layout == NEST_LAYOUT:
+        lay = layout_cover(img.size, title, second, handle, style, place, log, pill=True)
+        return _stamp_nest(img, lay["title"], lay["second"], None, lay["block"], lay["mark"])
+    lay = layout_cover(img.size, title, second, handle, style, place, log)
+    return _stamp(img, [(p, 255) for p in lay["title"]] + [(p, 240) for p in lay["second"]], lay["block"], lay["mark"])
+
+
 LIGHT_BACKDROP = LAYOUT["lightBackdrop"]  # mean luminance (0-255) above which white text stops reading well
 DARK_INK = tuple(LAYOUT["darkInk"])  # the brand's warm dark brown
 
@@ -794,3 +890,6 @@ class ComfyRenderer:
 
     def compose_cta(self, photo, message, handle, style=None, layout="classic"):
         return compose_cta(photo, message, handle, style, log=self.log, layout=layout)
+
+    def compose_cover(self, photo, title, second, handle, style=None, place="top", layout="classic"):
+        return compose_cover(photo, title, second, handle, style, place=place, log=self.log, layout=layout)

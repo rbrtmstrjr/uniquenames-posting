@@ -1,10 +1,14 @@
 import type { CardRow } from "@/lib/db/types";
 
 type Ordered = Pick<CardRow, "order_index" | "position"> & Partial<Pick<CardRow, "kind">>;
-const isCta = (c: Ordered) => (c.kind === "cta" ? 1 : 0);
+/** A card's place by kind: the front card (migration 023) first, the name cards, the closing card (010) last. */
+export const kindRank = (c: Partial<Pick<CardRow, "kind">>) => (c.kind === "cover" ? 0 : c.kind === "cta" ? 2 : 1);
 
-/** The post's upload order: the owner's order, and the closing card (migration 010) always last. */
-export const cardOrder = (a: Ordered, b: Ordered) => isCta(a) - isCta(b) || a.order_index - b.order_index || a.position - b.position;
+/** The post's upload order: the front card first, then the owner's order, and the closing card always last. */
+export const cardOrder = (a: Ordered, b: Ordered) => kindRank(a) - kindRank(b) || a.order_index - b.order_index || a.position - b.position;
+
+/** The front card stays first and the closing card last: neither is dragged; the name cards are ordered among themselves. */
+export const isPinned = (c: Partial<Pick<CardRow, "kind">>) => c.kind === "cover" || c.kind === "cta";
 
 export function orderedSelection<T extends Pick<CardRow, "id" | "selected"> & Ordered>(cards: T[]): T[] {
   return cards.filter((c) => c.selected).sort(cardOrder);

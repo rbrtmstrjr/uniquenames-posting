@@ -170,6 +170,10 @@ class LayoutRenderer(FakeRenderer):
         self.kwargs.append(kw)
         return FakeRenderer.compose_cta(self, photo, message, handle, style)
 
+    def compose_cover(self, photo, title, second, handle, style=None, place="top", **kw):
+        self.kwargs.append(kw)
+        return FakeRenderer.compose_cover(self, photo, title, second, handle, style, place)
+
 
 class RunnerLayoutTest(unittest.TestCase):
     def setUp(self):
@@ -224,6 +228,12 @@ class RunnerLayoutTest(unittest.TestCase):
     def test_name_nest_closing_card(self):
         r = self.run_one(NamesSupa(NEST), job(kind="cta", name="New names every day. / Pull up a chair.", meaning=""))
         self.assertEqual(r.kwargs, [{"layout": NEST}])
+
+    def test_front_card_layout(self):
+        r = self.run_one(NamesSupa(NEST), job(kind="cover", position=0, name="Baby Girl Names", meaning="", title_pos="top"))
+        self.assertEqual(r.kwargs, [{"layout": NEST}])
+        r = self.run_one(NamesSupa(None), job(kind="cover", position=0, name="'S' Names", meaning="for baby boy", title_pos="bottom"))
+        self.assertEqual(r.kwargs, [{}])
 
 
 if __name__ == "__main__":

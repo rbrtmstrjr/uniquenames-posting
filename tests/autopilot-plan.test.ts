@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  AFTERNOON, MORNING, addDays, dayLabel, firstDay, labelText, lastFacebook, manilaDay, nextLabel, planProblems, planRun,
+  AFTERNOON, MIN_GOOD_NAMES, MORNING, addDays, dayLabel, firstDay, labelText, lastFacebook, manilaDay, nextLabel, planProblems, planRun,
 } from "@/lib/autopilot/plan";
 import { seededRandom } from "@/lib/planner/random";
 
@@ -63,12 +63,13 @@ describe("planRun", () => {
     expect(afternoons.every((m) => m >= AFTERNOON.from && m <= AFTERNOON.to)).toBe(true);
     expect(new Set(mornings).size).toBeGreaterThan(3);
     expect(new Set(items.filter((i) => i.slot === "morning").map((i) => i.gender)).size).toBe(2);
-    expect(items.every((i) => i.nameCount >= 9 && i.nameCount <= 15)).toBe(true);
+    expect(items.every((i) => i.nameCount >= 8 && i.nameCount <= 14)).toBe(true);
   });
-  it("9 to 15 names a post: 10 to 16 cards with the closing card (owner, 2026-11-21)", () => {
+  it("8 to 14 names a post: 10 to 16 cards with the front and closing cards (owner, 2026-11-21)", () => {
     const at = (r: number) => planRun({ firstDay: "2026-11-21", days: 1, last: null, themes: [], minImages: 6, maxImages: 26, rng: () => r });
-    expect(at(0).every((i) => i.nameCount === 9)).toBe(true);
-    expect(at(0.999).every((i) => i.nameCount === 15)).toBe(true);
+    expect(at(0).every((i) => i.nameCount === 8)).toBe(true);
+    expect(at(0.999).every((i) => i.nameCount === 14)).toBe(true);
+    expect(MIN_GOOD_NAMES).toBe(8);
   });
   it("keeps the name count inside the settings min/max", () => {
     const items = planRun({ firstDay: "2026-11-21", days: 1, last: null, themes: [], minImages: 6, maxImages: 9, rng: () => 0.99 });

@@ -74,7 +74,7 @@ class RunnerFlagTest(Base):
         self.assertEqual(self.notes, [True, False])
 
     def test_version(self):
-        self.assertEqual(jobs.VERSION, "2.9.0")
+        self.assertEqual(jobs.VERSION, "2.10.0")
 
 
 if __name__ == "__main__":

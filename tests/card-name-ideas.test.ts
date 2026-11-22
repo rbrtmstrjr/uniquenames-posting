@@ -22,7 +22,7 @@ beforeEach(() => {
   generateJson.mockReset();
   fake = fakeSupabase((q) => respond(q));
   respond = (q: Query) => {
-    if (q.table === "cards") return { data: { id: CARD, post_id: "p1", theme_id: "t1" } };
+    if (q.table === "cards") return { data: { id: CARD, post_id: "p1", theme_id: "t1", kind: "post" } };
     if (q.table === "posts") return { data: { gender: "boy", style: "two-word" } };
     if (q.table === "themes") return { data: { title: "Woodland Explorer" } };
     if (q.table === "names") return { data: dbNames };
@@ -62,7 +62,7 @@ describe("cardNameIdeasAction", () => {
     respond = (q: Query) => (q.table === "cards" ? { data: { id: CARD, post_id: null, theme_id: "t1" } } : undefined);
     expect((await cardNameIdeasAction(CARD)).ok).toBe(false);
     respond = (q: Query) => {
-      if (q.table === "cards") return { data: { id: CARD, post_id: "p1", theme_id: "t1" } };
+      if (q.table === "cards") return { data: { id: CARD, post_id: "p1", theme_id: "t1", kind: "post" } };
       if (q.table === "posts") return { data: { gender: "boy", style: "two-word" } };
       if (q.table === "themes") return { data: { title: "Woodland Explorer" } };
       if (q.table === "names") return { data: dbNames };

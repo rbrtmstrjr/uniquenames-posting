@@ -51,7 +51,9 @@ export function CardDialog({ card, url, health, queuePos = 0, onClose, onDelete,
   const working = card.status === "generating";
   // The closing card (010) has one Message field (kept in `name`) and no meaning.
   const isCta = card.kind === "cta";
-  const changed = isCta ? ctaLines(name).join(" / ") !== ctaLines(card.name).join(" / ") : textChanged(card, name, meaning);
+  // The front card (023) shows the post's title (name + meaning), which comes from the post: no text edit, no name swap.
+  const isCover = card.kind === "cover";
+  const changed = isCover ? false : isCta ? ctaLines(name).join(" / ") !== ctaLines(card.name).join(" / ") : textChanged(card, name, meaning);
   const gen = canGenerate(health);
   // Editing text re-stamps the current photo (Pillow only); a card without a clean photo has to regenerate.
   const textNeedsPhoto = restampMode(card) === "regenerate";
@@ -63,7 +65,7 @@ export function CardDialog({ card, url, health, queuePos = 0, onClose, onDelete,
   const before: Partial<CardRow> = { status: card.status, claimed_at: card.claimed_at, error: card.error, started_at: card.started_at, finished_at: card.finished_at };
   const patch = (p: Partial<CardRow>) => onPatch?.(card.id, p);
   // The picked name counts while the Name field still holds it (typing over it = a typed name, today's path).
-  const swapId = !isCta && picked && picked.id !== card.name_id && nameKey(picked.name) === nameKey(name) ? picked.id : null;
+  const swapId = !isCta && !isCover && picked && picked.id !== card.name_id && nameKey(picked.name) === nameKey(name) ? picked.id : null;
   // After a swap the My names list reloads: the name now on the card (or one just used elsewhere) leaves it.
   const reloadNames = () => setRefreshKey((k) => k + 1);
 
@@ -77,7 +79,8 @@ export function CardDialog({ card, url, health, queuePos = 0, onClose, onDelete,
     toast.success(r.mode === "restamp" ? "Updating the text… (about a second once your PC picks it up)" : "This older card has no clean photo, so it is being remade with the new text.");
   };
   const regen = async () => {
-    const choice = isCta ? (changed ? { kind: "edit-regenerate" as const, name, meaning: "" } : { kind: "regenerate" as const }) : newPictureAction(card, name, meaning);
+    const choice = isCover ? { kind: "regenerate" as const }
+      : isCta ? (changed ? { kind: "edit-regenerate" as const, name, meaning: "" } : { kind: "regenerate" as const }) : newPictureAction(card, name, meaning);
     setBusy("regen");
     const r = await optimistic(
       () => patch({ status: "queued", claimed_at: null, error: null, started_at: null, finished_at: null }),
@@ -92,8 +95,9 @@ export function CardDialog({ card, url, health, queuePos = 0, onClose, onDelete,
   };
 
   return (
-    <Dialog open onOpenChange={(o) => !o && onClose()} title={isCta ? "Closing card" : `${card.position}. ${card.name}`}
-      description={isCta ? "The last picture of the post: a follow message instead of a name." : card.meaning} wide>
+    <Dialog open onOpenChange={(o) => !o && onClose()} title={isCta ? "Closing card" : isCover ? "Front card" : `${card.position}. ${card.name}`}
+      description={isCta ? "The last picture of the post: a follow message instead of a name."
+        : isCover ? "The first picture of the post: its title on a photo from the same photoshoot." : card.meaning} wide>
       <div className="mb-4 flex flex-wrap gap-2" aria-live="polite">
         <Badge tone={status.tone} pulse={status.pulse}>{status.label}</Badge>
         {took !== null && card.status === "done" && <Badge tone="muted">Made in {took}s</Badge>}
@@ -103,7 +107,14 @@ export function CardDialog({ card, url, health, queuePos = 0, onClose, onDelete,
         <CardTile card={card} url={url} health={health} queuePos={queuePos} className="rounded-2xl" />
         <div className="space-y-4">
           {card.error && <p className="rounded-xl bg-bad/10 p-3 text-sm text-bad">{card.error}</p>}
-          {isCta ? (
+          {isCover ? (
+            <div>
+              <span className="text-xs font-semibold text-muted">Title</span>
+              <p className="mt-1 font-semibold text-ink">{card.name}</p>
+              {card.meaning && <p className="text-sm text-muted">{card.meaning}</p>}
+              <p className="mt-1 text-xs text-muted">Stamped at the {card.title_pos === "bottom" ? "bottom" : "top"}. The title comes from the post. New picture makes a new photo; Re-stamp with current text settings keeps the title where it is.</p>
+            </div>
+          ) : isCta ? (
             <label className="block">
               <span className="text-xs font-semibold text-muted">Message</span>
               <Input value={name} onChange={(e) => setName(e.target.value)} className="mt-1 font-semibold" />
@@ -127,13 +138,13 @@ export function CardDialog({ card, url, health, queuePos = 0, onClose, onDelete,
             </>
           )}
           <div className="flex flex-wrap gap-2">
-            <Button onClick={saveText} loading={busy === "text"} disabled={!changed || working || textLocked || busy !== null}><Save className="size-4" /> Save text</Button>
+            {!isCover && <Button onClick={saveText} loading={busy === "text"} disabled={!changed || working || textLocked || busy !== null}><Save className="size-4" /> Save text</Button>}
             <Button variant="subtle" onClick={regen} loading={busy === "regen"} disabled={working || !gen.ok || busy !== null}>
               <RotateCw className="size-4" /> {changed ? "New picture with this text" : "New picture"}
             </Button>
             <Button variant="danger" onClick={() => { onDelete(card); onClose(); }} disabled={working}><Trash2 className="size-4" /> Delete</Button>
           </div>
-          {!gen.ok && <GenerateLockNote reason={gen.reason} extra={textNeedsPhoto ? undefined : "Text edits still save."} />}
+          {!gen.ok && <GenerateLockNote reason={gen.reason} extra={isCover || textNeedsPhoto ? undefined : "Text edits still save."} />}
           <Disclosure summary="Shot and prompt" className="text-xs text-muted">
             <p className="mt-2 whitespace-pre-wrap">{card.prompt}</p>
           </Disclosure>

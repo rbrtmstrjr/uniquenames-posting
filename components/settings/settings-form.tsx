@@ -63,12 +63,18 @@ const ctaOf = (row: Partial<SettingsRow>): { cta_enabled?: boolean; cta_messages
 const labelsOf = (row: Partial<SettingsRow>): { reel_labels?: boolean } =>
   row.reel_labels === undefined ? {} : { reel_labels: row.reel_labels !== false };
 
+/** The front card switch; absent until migration 023 runs (the form then shows it on, disabled, and never sends it). */
+const coverOf = (row: Partial<SettingsRow>): { cover_enabled?: boolean } =>
+  row.cover_enabled === undefined ? {} : { cover_enabled: row.cover_enabled };
+
 /** The default visual theme; absent until migration 007 runs (the form then never sends it). */
 const themeIdOf = (row: Partial<SettingsRow>): { reel_theme_id?: ReelThemeId } =>
   row.reel_theme_id === undefined ? {} : { reel_theme_id: isThemeId(row.reel_theme_id) ? row.reel_theme_id : DEFAULT_THEME_ID };
 
-export function SettingsForm({ initial, sample = DEFAULT_SAMPLE, voices = null, themes = null }: {
+export function SettingsForm({ initial, sample = DEFAULT_SAMPLE, voices = null, themes = null, frontCard = false }: {
   initial: SettingsRow; sample?: PreviewSample; voices?: ReelVoiceRow[] | null; themes?: ReelThemeRow[] | null;
+  /** The page's pack makes front cards (Unique Names; Name Nest does not). */
+  frontCard?: boolean;
 }) {
   const router = useRouter();
   const [s, setS] = useState({ caption_template: initial.caption_template, handle: initial.handle, min_images: initial.min_images, max_images: initial.max_images, sound_on: initial.sound_on,
@@ -85,8 +91,11 @@ export function SettingsForm({ initial, sample = DEFAULT_SAMPLE, voices = null, 
     // undefined until migration 010 runs: not sent then.
     ...ctaOf(initial),
     // undefined until migration 014 runs: hidden and not sent then.
-    ...labelsOf(initial) });
+    ...labelsOf(initial),
+    // undefined until migration 023 runs: not sent then.
+    ...coverOf(initial) });
   const has010 = s.cta_enabled !== undefined;
+  const has023 = s.cover_enabled !== undefined;
   const has009 = s.hashtag_pool !== undefined;
   // Before 009 posts use the default always-tag + the pool made from the old hashtags field.
   const always = s.hashtags_always ?? HASHTAGS_ALWAYS_DEFAULT;
@@ -153,6 +162,18 @@ export function SettingsForm({ initial, sample = DEFAULT_SAMPLE, voices = null, 
         </div>
         <p className="mt-2 text-xs text-muted">The handle change applies to cards made from now on.</p>
       </Panel>
+      {frontCard && (
+        <Panel title="Front card">
+          <div>
+            <label htmlFor="cover-on" className="inline-flex min-h-11 cursor-pointer items-center gap-3 text-sm font-semibold text-ink">
+              <Switch id="cover-on" checked={s.cover_enabled ?? true} disabled={!has023} onCheckedChange={(v) => setS({ ...s, cover_enabled: v })} /> Add a front card to every post
+            </label>
+            <p className="text-xs text-muted">{has023
+              ? "The first picture of each new post: the same photoshoot with the post's title stamped big ('S' Names, for baby boy). Its pose and the title's place change from post to post, and the post's 3 best names come right after it. Posts already made don't change."
+              : "The front card needs the database update first (run supabase/migrations/023_front_card.sql)."}</p>
+          </div>
+        </Panel>
+      )}
       <Panel title="Closing card">
         <div className="space-y-3">
           <div>

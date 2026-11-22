@@ -18,9 +18,10 @@ import { callAction } from "@/lib/actions/call";
 import { CardDialog } from "@/components/cards/card-dialog";
 import { useUndoableDelete } from "@/components/cards/use-undoable-delete";
 import { postLabel } from "@/lib/series/letter";
+import { kindRank } from "@/lib/files/save";
 
-// Making order, with the closing card (010) always last.
-const byPosition = (a: CardRow, b: CardRow) => (a.kind === "cta" ? 1 : 0) - (b.kind === "cta" ? 1 : 0) || a.position - b.position;
+// Making order, with the front card (023) first and the closing card (010) always last.
+const byPosition = (a: CardRow, b: CardRow) => kindRank(a) - kindRank(b) || a.position - b.position;
 
 export function ActivePost({ post, initialCards }: { post: PostRow; initialCards: CardRow[] }) {
   const { health } = useWorkerContext();

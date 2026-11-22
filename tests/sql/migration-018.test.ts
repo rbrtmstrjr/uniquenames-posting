@@ -28,6 +28,7 @@ async function migratedDb() {
   await db.exec(m018);
   await db.exec(stripSupabase(read("supabase", "migrations", "021_facebook_posting.sql")));
   await db.exec(stripSupabase(read("supabase", "migrations", "022_autopilot.sql"))); // 022: Autopilot (settings, posts, names, cards)
+  await db.exec(stripSupabase(read("supabase", "migrations", "023_front_card.sql"))); // 023: the front card (settings, cards)
   return db;
 }
 const addName = async (db: PGlite, name: string) =>

@@ -1,4 +1,4 @@
-import type { CardLayout, Gender } from "@/lib/db/types";
+import type { CardLayout, Gender, TitlePlace } from "@/lib/db/types";
 import type { Session, ShotSpec } from "@/lib/planner/shots";
 import type { CaptionStyle } from "@/lib/captions/styles";
 import type { ReelFormat } from "@/lib/reels/formats";
@@ -81,7 +81,22 @@ export interface PackCards {
   propsShots: ShotSpec[];
   /** The closing card's moment per session (the child low in the frame, open backdrop above). */
   ctaMoment: Readonly<Record<Session, string>>;
+  /** The front card (migration 023): its poses and title wording. None = this pack never makes one (Name Nest). */
+  cover?: PackCover;
 }
+
+/** A front-card pose: `id` is stored in the card's shot (for the rotation); `moment` per session (a newborn sleeps). */
+export interface CoverPose {
+  id: string; moment: Readonly<Record<Session, string>>; optics: string;
+  /** Where the title may be stamped over this pose; absent = both. (A close-up face or a floor-level child keeps the title at the top.) */
+  places?: readonly TitlePlace[];
+}
+/** What the front card's title is made from: the post's gender and kind (letter, name theme, initials, A–Z part). */
+export interface CoverTitleInput { gender: Gender; letter?: string | null; nameTheme?: string | null; initials?: string | null; seriesPart?: 1 | 2 | null }
+/** The stamped title: the big main line and the smaller second line ("" = none). */
+export interface CoverTitle { main: string; second: string }
+/** The front card: the pose pool (each pose written for every session) and the title wording. */
+export interface PackCover { poses: readonly CoverPose[]; title: (p: CoverTitleInput) => CoverTitle }
 
 export interface PackCaptions {
   /** The post caption system prompt (`maxChars` = the caption's own limit). */

@@ -2,14 +2,14 @@ import { describe, expect, it, vi } from "vitest";
 import { memoryRepo } from "./helpers/autopilot-memory";
 import type { RepoName } from "@/lib/autopilot/repo";
 import type { NameVerdict } from "@/lib/autopilot/judge-names";
-import { pickNames, type NamesDeps } from "@/lib/autopilot/names-step";
+import { bestFirst, pickNames, type NamesDeps } from "@/lib/autopilot/names-step";
 
 const nm = (name: string, o: Partial<RepoName> = {}): RepoName => ({ id: `n-${name}`, name, meaning: "a meaning", gender: "girl", style: "single", status: "available", ...o });
 const usage = { input: 10, output: 5 };
 /** A judge that passes every name except the ones listed. */
 const judgeWith = (bad: Record<string, Partial<NameVerdict>> = {}) => vi.fn(async (i: { names: { name: string; meaning: string }[] }) => ({
   ok: true as const, usage,
-  data: i.names.map((n) => ({ name: n.name, good: true, fits: true, reason: "", meaning: n.meaning.toLowerCase(), meaning_wrong: false, ...bad[n.name] })),
+  data: i.names.map((n) => ({ name: n.name, good: true, fits: true, reason: "", meaning: n.meaning.toLowerCase(), meaning_wrong: false, appeal: 5, ...bad[n.name] })),
 }));
 const item = { gender: "girl" as const, letter: "S", name_theme: null, name_count: 10 };
 const S = ["Sabina", "Selah", "Sienna", "Sloane", "Stella", "Sage", "Sora", "Saoirse", "Sylvie", "Seraphina", "Solene", "Sunny"];
@@ -147,5 +147,22 @@ describe("pickNames", () => {
     // With enough time the round runs as before.
     await pickNames({ ...d, now: () => 1_000_000 }, item, null, 1_000_000 + 200_000);
     expect(d.suggest).toHaveBeenCalled();
+  });
+
+  it("the post's names lead with its top 3 by appeal, the rest in random order, with no extra AI call", async () => {
+    const appeal: Record<string, number> = { Sabina: 2, Selah: 9, Sienna: 4, Sloane: 10, Stella: 3, Sage: 8, Sora: 1, Saoirse: 5, Sylvie: 6, Seraphina: 7 };
+    const judge = judgeWith(Object.fromEntries(Object.entries(appeal).map(([n, a]) => [n, { appeal: a }])));
+    const { d } = deps(S.slice(0, 10).map((n) => nm(n)), judge);
+    const r = await pickNames(d, item, null);
+    expect(r.kind === "ok" && r.nameIds.slice(0, 3)).toEqual(["n-Sloane", "n-Selah", "n-Sage"]);
+    expect(r.kind === "ok" && [...r.nameIds].sort()).toEqual(S.slice(0, 10).map((n) => `n-${n}`).sort());
+    expect(judge).toHaveBeenCalledTimes(1);
+    expect(d.suggest).not.toHaveBeenCalled();
+  });
+
+  it("bestFirst: the top 3 by appeal (a tie keeps the given order), then the rest as given", () => {
+    const list = [{ id: "a", appeal: 5 }, { id: "b", appeal: 7 }, { id: "c", appeal: 7 }, { id: "d", appeal: 1 }, { id: "e", appeal: 6 }];
+    expect(bestFirst(list).map((x) => x.id)).toEqual(["b", "c", "e", "a", "d"]);
+    expect(bestFirst(list.slice(0, 2)).map((x) => x.id)).toEqual(["b", "a"]);
   });
 });

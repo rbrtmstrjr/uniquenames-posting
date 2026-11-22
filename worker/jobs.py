@@ -5,6 +5,8 @@
 # requeue rides on one poll a minute, an idle worker polls every 15 s instead of every 3 s, and worker_status is written
 # once a minute plus at once when something the website shows changes (ComfyUI open/closed, busy/idle).
 # 2.9.0: Autopilot (022): claim_next_job's answer says when a run is active; autopilot.py knocks on the website.
+# 2.10.0: the front card (023): kind 'cover' is stamped with the post's title at its stored place (cards.title_pos);
+# its PC copy is 00-front.jpg, first in the post's folder.
 import contextlib
 import datetime
 import io
@@ -22,7 +24,7 @@ import photo_look
 from render import JobError, card_layout, detail_line, slugify, text_style
 from supa import SupaError
 
-VERSION = "2.9.0"
+VERSION = "2.10.0"
 BUCKET = "cards"
 COMFY_CLOSED = "ComfyUI is closed. Open ComfyUI Desktop on your PC, then press Retry."
 NO_NET_SAVE = "Couldn't reach the internet to save this card. Press Retry."
@@ -35,6 +37,7 @@ BUSY_ELSEWHERE = "PC busy with your other page"
 
 
 CTA_FILENAME = "99-follow.jpg"  # the closing card's PC backup name (migration 010)
+COVER_FILENAME = "00-front.jpg"  # the front card's PC backup name (migration 023)
 
 REELS_RECHECK_SECONDS = 600
 ONE_CLAIM_RECHECK_SECONDS = 600  # claim_next_job missing (020 not run): the old calls, checked again after this
@@ -518,10 +521,16 @@ class Runner:
         self._backup(job, card_bytes)
 
     def _compose(self, card, photo, s):
-        """The stamped card: the closing card (kind 'cta', migration 010) gets its message lines
-        (name = the message, "/" = a line break) and no meaning; every other card its name + meaning.
-        The Name Nest layout (settings.card_layout, migration 015) also gets the name's US rank / origin line."""
+        """The stamped card: the front card (kind 'cover', migration 023) gets the post's title (name = the main line,
+        meaning = the second line or "") at its stored place (title_pos; a re-stamp keeps it); the closing card (kind
+        'cta', migration 010) gets its message lines (name = the message, "/" = a line break) and no meaning; every other
+        card its name + meaning. The Name Nest layout (settings.card_layout, migration 015) also gets the name's US rank /
+        origin line."""
         layout = card_layout(s)
+        if card.get("kind") == "cover":
+            kw = {} if layout == "classic" else {"layout": layout}
+            return self.renderer.compose_cover(photo, card["name"], card.get("meaning") or "", s["handle"], s["style"],
+                                               place=card.get("title_pos") or "top", **kw)
         if layout == "classic":  # Unique Names: exactly the calls from before 015
             if card.get("kind") == "cta":
                 return self.renderer.compose_cta(photo, card["name"], s["handle"], s["style"])
@@ -661,14 +670,16 @@ class Runner:
 
     def _backup(self, job, data):
         card = job["card"]
-        if card.get("kind") not in ("post", "cta") or not job.get("post_date") or not job.get("gender_label"):
+        if card.get("kind") not in ("post", "cta", "cover") or not job.get("post_date") or not job.get("gender_label"):
             return
         try:
             label = "%s %s" % (job["post_date"], job["gender_label"])
             if job.get("style_label"):
                 label += " " + job["style_label"]
-            # The closing card sorts last in the post's folder, whatever its position.
-            fname = CTA_FILENAME if card.get("kind") == "cta" else "%02d-%s.jpg" % (int(card["position"]), slugify(card["name"]))
+            # The front card sorts first and the closing card last in the post's folder, whatever their positions.
+            kind = card.get("kind")
+            fname = (COVER_FILENAME if kind == "cover" else CTA_FILENAME if kind == "cta"
+                     else "%02d-%s.jpg" % (int(card["position"]), slugify(card["name"])))
             rel = os.path.join(label, fname)
             idx = self._index_load()
             old = idx.get(card["id"])

@@ -10,14 +10,15 @@ import { PageHeader } from "@/components/ui/page-header";
 import type { PreviewSample } from "@/components/settings/card-text";
 import { getVoices } from "@/lib/data/voices";
 import { getReelThemes } from "@/lib/data/reel-themes";
+import { activePack } from "@/packs";
 
 // "Set up voices" (Gemini reference clips, up to ~270 s per call) runs from this page.
 export const maxDuration = 300;
 
 /** The latest finished card's clean photo + text for the text preview (the built-in sample if none). */
 async function previewSample(sb: Awaited<ReturnType<typeof createClient>>): Promise<PreviewSample | undefined> {
-  // Never the closing card (010): its message is not a name.
-  const { data } = await sb.from("cards").select("photo_path, name, meaning").eq("status", "done").neq("kind", "cta").not("photo_path", "is", null)
+  // Never the closing card (010) or the front card (023): their text is not a name.
+  const { data } = await sb.from("cards").select("photo_path, name, meaning").eq("status", "done").in("kind", ["post", "preview"]).not("photo_path", "is", null)
     .order("finished_at", { ascending: false }).limit(1).maybeSingle();
   const card = data as { photo_path: string; name: string; meaning: string } | null;
   if (!card) return undefined;
@@ -48,7 +49,7 @@ export default async function SettingsPage() {
         ))}
       </nav>
       <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
-        <SettingsForm initial={data as SettingsRow} sample={sample} voices={voices} themes={themes} />
+        <SettingsForm initial={data as SettingsRow} sample={sample} voices={voices} themes={themes} frontCard={!!activePack().cards.cover} />
         <div className="space-y-4 lg:sticky lg:top-20 lg:self-start">
           <WorkerCard />
           <FacebookCard connected={facebookConfig() !== null} />

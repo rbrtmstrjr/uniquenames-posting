@@ -82,12 +82,17 @@ class FakeRenderer:
         self.styles.append(style)
         return photo
 
+    def compose_cover(self, photo, title, second, handle, style=None, place="top", **kw):
+        self.composed.append(("cover", title, second, handle, place))
+        self.styles.append(style)
+        return photo
+
 
 def job(job_type="generate", **over):
     card = {"id": "c1", "kind": "post", "position": 3, "name": "Arlo Zenith", "meaning": "peak strength", "prompt": "p", "seed": 7,
             "version": 1, "photo_path": None, "card_path": None}
     card.update(over)
-    in_post = card["kind"] in ("post", "cta")
+    in_post = card["kind"] in ("post", "cta", "cover")
     return {"job": job_type, "card": card, "post_date": "2026-10-05", "gender_label": "Boy" if in_post else None,
             "style_label": "Two-word" if in_post else None}
 
@@ -342,6 +347,40 @@ class JobsTest(unittest.TestCase):
         self.run_.renderer = real
         out = self.run_._compose(card, photo, {"handle": "@unique_names", "style": render.text_style({})})
         self.assertGreater(out.crop((100, 220, 980, 440)).convert("L").getextrema()[1], 240)
+
+    def test_front_card_is_stamped_with_its_title_at_its_place_and_backed_up_first(self):
+        self.supa.jobs.append(job(kind="cover", position=0, name="'S' Names", meaning="for baby boy", title_pos="bottom"))
+        self.assertTrue(self.run_.tick())
+        self.assertEqual(self.r.composed, [("cover", "'S' Names", "for baby boy", "@unique_names", "bottom")])
+        self.assertEqual(self.last_card_update()[2]["status"], "done")
+        folder = os.path.join(self.root, "out", "2026-10-05 Boy Two-word")
+        self.assertEqual(os.listdir(folder), [jobs.COVER_FILENAME])
+        self.assertEqual(jobs.COVER_FILENAME, "00-front.jpg")
+
+    def test_front_card_restamp_keeps_its_photo_and_its_place(self):
+        b = io.BytesIO()
+        Image.new("RGB", (1080, 1080), (10, 10, 10)).save(b, "JPEG")
+        self.supa.uploads["photos/c1/v1.jpg"] = b.getvalue()
+        self.supa.jobs.append(job("restamp", kind="cover", position=0, version=2, name="Biblical Names", meaning="for baby girl",
+                                  title_pos="top", photo_path="photos/c1/v1.jpg", card_path="cards/c1/v1.jpg"))
+        self.run_.tick()
+        self.assertEqual(self.r.generated, 0)
+        self.assertEqual(self.r.composed, [("cover", "Biblical Names", "for baby girl", "@unique_names", "top")])
+        self.assertIn("cards/c1/v2.jpg", self.supa.uploads)
+
+    def test_front_card_without_a_stored_place_or_a_second_line(self):
+        self.supa.jobs.append(job(kind="cover", position=0, name="Baby Boy Names", meaning=""))
+        self.run_.tick()
+        self.assertEqual(self.r.composed, [("cover", "Baby Boy Names", "", "@unique_names", "top")])
+
+    def test_front_card_with_the_real_renderer_draws_the_title_at_its_place(self):
+        real = render.ComfyRenderer("http://127.0.0.1:1", 5, log=lambda m: None)
+        photo = Image.new("RGB", (1080, 1080), (70, 110, 170))
+        self.run_.renderer = real
+        card = {"kind": "cover", "name": "'S' Names", "meaning": "for baby boy", "title_pos": "bottom"}
+        out = self.run_._compose(card, photo, {"handle": "@unique_names", "style": render.text_style({})})
+        self.assertGreater(out.crop((100, 650, 800, 1000)).convert("L").getextrema()[1], 240)
+        self.assertLess(out.crop((100, 100, 980, 400)).convert("L").getextrema()[1], 200)
 
     def test_heartbeat(self):
         self.run_.current = "c9"

@@ -1,5 +1,5 @@
 import type { Angle, Frame, Session, ShotSpec } from "@/lib/planner/shots";
-import type { PackCards } from "../types";
+import type { CoverPose, CoverTitle, CoverTitleInput, PackCards } from "../types";
 
 // Unique Names name cards: the children's looks, the photoshoot shot lists and the closing card's moment.
 // Story shots (2026-10-18): the shot lists are a photographer's session plan, mostly close-ups and macros, each frame
@@ -195,6 +195,95 @@ const CTA_MOMENT: Record<Session, string> = {
   kid: "the child sitting cross-legged on the blanket beside the main prop, low in the frame, smiling at the viewer",
 };
 
+// The front card (migration 023): the album's first picture, the post's title stamped big by the PC. Ten poses, each
+// written for every session (a newborn sleeps; a toddler may stand); the planner takes the least recently used one,
+// never the previous post's. The prompt adds where the child and props sit, so the title's third stays calm. Optics
+// words only, never the device or the room ("camera", "studio" and "lamp" make the model draw them); tummy poses keep
+// the legs out of view (soles toward the viewer read as lifeless).
+const COVER_POSES: CoverPose[] = [
+  { id: "wide", optics: "eye level, wide shot, 35mm lens, f/2.0, soft background falloff", moment: {
+    newborn: "the newborn sleeping peacefully in the middle of the whole scene, curled up on the blanket beside the main prop, every prop in view",
+    sitter: "the baby sitting in the middle of the whole scene beside the main prop, smiling at the viewer, every prop in view",
+    toddler: "the toddler sitting in the middle of the whole scene beside the main prop, smiling at the viewer, every prop in view",
+    kid: "the child sitting cross-legged in the middle of the whole scene beside the main prop, smiling at the viewer, every prop in view",
+  } },
+  { id: "face", places: ["top"], optics: "eye level, 85mm portrait lens, f/1.8, shallow depth of field, creamy bokeh", moment: {
+    newborn: "a head-and-shoulders portrait of the newborn asleep, snug in a soft wrap, the tiny face turned toward the viewer in the lower half of the frame, calm open space above",
+    sitter: "a head-and-shoulders portrait of the baby looking straight at the viewer with big curious eyes and a little smile, the face in the lower half of the frame, calm open space above",
+    toddler: "a head-and-shoulders portrait of the toddler looking straight at the viewer with a cheeky grin, the face in the lower half of the frame, calm open space above",
+    kid: "a head-and-shoulders portrait of the child looking straight at the viewer with a warm smile, the face in the lower half of the frame, calm open space above",
+  } },
+  { id: "top-down", optics: "top-down viewpoint, 50mm lens, f/2.8, soft focus falloff at the edges", moment: {
+    newborn: "the newborn sleeping curled up on the soft blanket, seen straight from above, the props arranged around",
+    sitter: "the baby lying on the back on the soft blanket, seen straight from above, smiling up at the viewer, the props arranged around",
+    toddler: "the toddler lying on the back on the soft blanket, seen straight from above, giggling up at the viewer, the props arranged around",
+    kid: "the child lying on the back on the soft blanket, seen straight from above, smiling up at the viewer, the props arranged around",
+  } },
+  { id: "peek", optics: "eye level, 85mm portrait lens, f/2.0, shallow depth of field", moment: {
+    newborn: "the sleeping newborn tucked in behind the main prop, the tiny face resting just over its edge",
+    sitter: "the baby peeking out from behind the main prop with big curious eyes",
+    toddler: "the toddler peeking around the side of the main prop with a playful grin",
+    kid: "the child peeking over the top of the main prop with a playful look",
+  } },
+  { id: "profile-up", optics: "eye level, side profile, 85mm portrait lens, f/2.0, shallow depth of field", moment: {
+    newborn: "a side profile of the sleeping newborn, the chin tilted slightly up, the tiny nose and lips in soft profile",
+    sitter: "a side profile of the baby sitting and looking up with wonder",
+    toddler: "a side profile of the toddler standing and looking up with wonder",
+    kid: "a side profile of the child sitting and looking up with a dreamy smile",
+  } },
+  { id: "among-props", optics: "slightly above eye level, three-quarter angle, 50mm lens, f/2.2, soft background falloff", moment: {
+    newborn: "the newborn curled up asleep among the props, seen from a three-quarter angle",
+    sitter: "the baby sitting among the props, seen from a three-quarter angle, looking at the viewer",
+    toddler: "the toddler sitting among the props, seen from a three-quarter angle, looking at the viewer",
+    kid: "the child sitting among the props, seen from a three-quarter angle, looking at the viewer with a soft smile",
+  } },
+  { id: "hug", optics: "eye level, wide shot, 35mm lens, f/2.0, soft background falloff", moment: {
+    newborn: "a wide view of the whole scene with the sleeping newborn snuggled against the softest prop, one tiny hand resting on it, the other props around",
+    sitter: "a wide view of the whole scene with the baby cuddling the softest prop close, smiling, the other props around",
+    toddler: "a wide view of the whole scene with the toddler cuddling the softest prop close, the eyes closed in a happy squeeze, the other props around",
+    kid: "a wide view of the whole scene with the child cuddling the softest prop close with both arms, smiling, the other props around",
+  } },
+  { id: "tummy", places: ["top"], optics: "floor-level viewpoint, 85mm portrait lens, f/2.0, shallow depth of field", moment: {
+    newborn: "the newborn sleeping on the back, tucked in a soft wrap, the chin tilted toward the viewer, low in the frame",
+    sitter: "the baby lying on the tummy with the chin resting on both hands, smiling at the viewer, the legs out of view behind",
+    toddler: "the toddler lying on the tummy with the chin propped on both hands, smiling at the viewer, the legs out of view behind",
+    kid: "the child lying on the tummy with the chin propped on both hands, smiling at the viewer, the legs out of view behind",
+  } },
+  { id: "over-shoulder", optics: "viewpoint just behind the shoulder at eye level, 50mm lens, f/2.0, soft background falloff", moment: {
+    newborn: "a view from just above the sleeping newborn's shoulder, the tiny cheek soft in the near foreground and the props spread out beyond",
+    sitter: "a view from just behind the baby's shoulder as the baby looks out at the props, the face in soft three-quarter profile",
+    toddler: "a view from just behind the toddler's shoulder as the toddler looks out at the props, the face in soft three-quarter profile",
+    kid: "a view from just behind the child's shoulder as the child looks out at the props, the face in soft three-quarter profile",
+  } },
+  { id: "low-angle", places: ["top"], optics: "low angle from floor level, 35mm lens, f/2.2, soft background falloff", moment: {
+    newborn: "the newborn sleeping on the blanket, seen from blanket level, the backdrop rising tall behind",
+    sitter: "the baby sitting on the blanket, seen from floor level, the backdrop rising tall behind",
+    toddler: "the toddler standing proudly on the blanket, seen from a low angle, the backdrop rising tall behind",
+    kid: "the child standing on the blanket with a confident smile, seen from a low angle, the backdrop rising tall behind",
+  } },
+];
+
+const SMALL_WORDS = new Set(["a", "an", "and", "the", "of", "for", "in", "on", "with"]);
+/** "Unique and modern" -> "Unique and Modern": each word and hyphen part capitalised, small words lowercase unless first, the rest kept (a script font has no caps). */
+function titleCase(s: string): string {
+  return s.split(" ").map((w, i) => w.split("-").map((part, j) => {
+    if (SMALL_WORDS.has(part.toLowerCase())) return i === 0 && j === 0 ? part.charAt(0).toUpperCase() + part.slice(1).toLowerCase() : part.toLowerCase();
+    return part.charAt(0).toUpperCase() + part.slice(1);
+  }).join("-")).join(" ");
+}
+
+/** The front card's title (spec 2026-11-21): "'S' Names", "Biblical Names", "A & R Names", "A to Z Names", "Baby Boy Names". */
+function coverTitle(p: CoverTitleInput): CoverTitle {
+  const forWho = `for baby ${p.gender}`;
+  const letter = p.letter?.trim().toUpperCase();
+  if (letter) return { main: `'${letter}' Names`, second: forWho };
+  const theme = p.nameTheme?.replace(/\s+/g, " ").trim();
+  if (theme) return { main: /names$/i.test(theme) ? theme : `${titleCase(theme)} Names`, second: forWho };
+  if (p.initials && /^[A-Z]{2}$/.test(p.initials)) return { main: `${p.initials[0]} & ${p.initials[1]} Names`, second: forWho };
+  if (p.seriesPart === 1 || p.seriesPart === 2) return { main: "A to Z Names", second: `part ${p.seriesPart} · ${forWho}` };
+  return { main: `Baby ${p.gender === "girl" ? "Girl" : "Boy"} Names`, second: "" };
+}
+
 export const UNIQUE_NAMES_CARDS: PackCards = {
   looks: LOOKS,
   childLooks: CHILD_LOOKS,
@@ -202,4 +291,5 @@ export const UNIQUE_NAMES_CARDS: PackCards = {
   shots: { newborn: NEWBORN_SHOTS, sitter: SITTER_SHOTS, toddler: TODDLER_SHOTS, kid: KID_SHOTS },
   propsShots: PROPS_SPECS,
   ctaMoment: CTA_MOMENT,
+  cover: { poses: COVER_POSES, title: coverTitle },
 };

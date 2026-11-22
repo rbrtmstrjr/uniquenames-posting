@@ -136,6 +136,8 @@ create table if not exists public.settings (
   cta_enabled boolean not null default true,
   cta_messages text not null default
     E'Follow for more / baby name ideas.\nFollow us for a new / name list every day.\nStill searching? Follow for / more unique names.\nSave this post and follow / for more name ideas.\nMore {gender} names tomorrow. / Follow so you don''t miss them.\nFound a favorite? / Follow for more like it.\nFollow for a fresh list / of unique {gender} names.\nNew names every day. / Follow along!',
+  -- front card (023): the first picture of every new post (a photo + the post's title), on/off
+  cover_enabled boolean not null default true,
   -- reels (014): draw the on-screen step labels
   reel_labels boolean not null default true,
   -- Name Nest (015): how the PC stamps a card ('classic' = Unique Names; 'name-nest' = brand colours + the US rank / origin line)
@@ -308,7 +310,8 @@ create table if not exists public.cards (
   post_id uuid references public.posts (id) on delete cascade,
   theme_id uuid not null references public.themes (id) on delete cascade,
   -- 'cta' (010) = the closing "follow" card of a post: name = the message ("/" = a line break), meaning = ''
-  kind text not null default 'post' constraint cards_kind_check check (kind in ('post', 'preview', 'cta')),
+  -- 'cover' (023) = the front card, the post's first picture: name = the title's main line, meaning = its second line or ''
+  kind text not null default 'post' constraint cards_kind_check check (kind in ('post', 'preview', 'cta', 'cover')),
   position int not null default 1,
   name_id uuid references public.names (id) on delete set null,
   name text not null, meaning text not null, shot text not null, prompt text not null,
@@ -326,6 +329,8 @@ create table if not exists public.cards (
   check_state text constraint cards_check_state_check check (check_state is null or check_state in ('pending', 'passed', 'failed', 'removed')),
   check_note text constraint cards_check_note_len check (check_note is null or char_length(check_note) <= 300),
   remakes int not null default 0,
+  -- the front card (023): where its title is stamped (null on every other card); a re-stamp keeps it
+  title_pos text constraint cards_title_pos_check check (title_pos is null or title_pos in ('top', 'bottom')),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   check (kind = 'preview' or post_id is not null)
@@ -334,6 +339,8 @@ create index if not exists cards_queue on public.cards (status, queued_at) where
 create index if not exists cards_post on public.cards (post_id, position);
 -- 010: at most one closing card per post
 create unique index if not exists cards_one_cta on public.cards (post_id) where kind = 'cta';
+-- 023: at most one front card per post
+create unique index if not exists cards_one_cover on public.cards (post_id) where kind = 'cover';
 
 -- Autopilot (022)
 -- One run = one press of "Make N days". At most one run is active (running / waiting / paused) at a time.

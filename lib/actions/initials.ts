@@ -2,13 +2,15 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import type { Gender, NameRow, SettingsRow, ThemeRow } from "@/lib/db/types";
-import { planInitialsPost, type AgeChoice } from "@/lib/planner";
+import { planInitialsPost, withNameOrder, type AgeChoice } from "@/lib/planner";
+import { RANK_TIMEOUT_MS, bestFirstOn, bestFirstOrder, rankNames } from "@/lib/ai/rank-names";
 import { aiCaptionLine, CAPTION_TIMEOUT_MS, captionAiOn, composePostCaption, type AiCaption } from "@/lib/ai/caption";
 import { loadPostHistory, missingColumn as missing009 } from "@/lib/captions/load";
 import { recentTags } from "@/lib/captions/history";
 import { pickStyle, type CaptionName } from "@/lib/captions/styles";
 import { fontsOf, sameFonts, validateFonts, type PostFonts } from "@/lib/fonts/post-fonts";
 import { addClosingCard } from "@/lib/cta/card";
+import { addCoverCard } from "@/lib/cover/card";
 import { has017, missingFunction, planInitialsNames } from "@/lib/data/initials";
 import {
   INITIAL_LETTERS, initialsText, initialsWanted, sourceSummary,
@@ -122,6 +124,9 @@ export async function createInitialsPostAction(input: InitialsRequest & {
   const aiDeadline = Date.now() + CAPTION_TIMEOUT_MS;
   const lines = new Map<string, Promise<AiCaption | null>>();
   const historyRead = loadPostHistory(sb);
+  // The 3 best names first (from 023): one ranking call per set of names, alongside the caption, under its own deadline.
+  const rankDeadline = Date.now() + RANK_TIMEOUT_MS;
+  const ranks = new Map<string, Promise<number[] | null>>();
   let reuse = await has017(sb);
   let fontsSaved = false;
   for (let attempt = 0; attempt < 3; attempt++) {
@@ -156,15 +161,29 @@ export async function createInitialsPostAction(input: InitialsRequest & {
     });
     const captionStyle = pickStyle(h.styles, postNames);
     const aiOn = captionAiOn(s);
-    let ai: AiCaption | null = null;
+    let captionLine: Promise<AiCaption | null> = Promise.resolve(null);
     if (theme && aiOn) {
       const key = `${theme.id}|${plan.picks.map((p) => p.name).join(",")}`;
       const left = aiDeadline - Date.now();
       if (!lines.has(key) && left >= 500) {
         lines.set(key, aiCaptionLine({ theme, gender: input.gender, style: "two-word", captionStyle, names: postNames, recent: h.texts, recentTags: recentTags(h), initials }, left));
       }
-      ai = (await lines.get(key)) ?? null;
+      captionLine = lines.get(key) ?? Promise.resolve(null);
     }
+    let rankLine: Promise<number[] | null> = Promise.resolve(null);
+    if (bestFirstOn(s)) {
+      const key = plan.picks.map((p) => p.name).join(",");
+      const left = rankDeadline - Date.now();
+      if (!ranks.has(key) && left >= 500) ranks.set(key, rankNames({ gender: input.gender, names: plan.picks.map((p) => ({ name: p.name, meaning: p.meaning })) }, left));
+      rankLine = ranks.get(key) ?? Promise.resolve(null);
+    }
+    // The caption and the ranking run side by side: Generate waits for the slower one, never for both in turn.
+    const [line, top] = await Promise.all([captionLine, rankLine]);
+    const ai: AiCaption | null = line ?? null;
+    // The AI's top names lead; every position keeps its photo plan, and each pick (source, origin) follows its name.
+    const order = top ? bestFirstOrder(top, gallery.cards.length) : null;
+    const ordered = order ? withNameOrder(gallery.cards, order) : gallery.cards;
+    const orderedPicks = order ? order.map((k) => plan.picks[k]) : plan.picks;
     const { caption, caption_style, hashtag_set } = composePostCaption({ ai, aiOn, captionStyle, gender: input.gender, settings: s, history: h, initials });
     if (fonts && !fontsSaved && !sameFonts(fonts, fontsOf(s))) {
       const { error: saveErr } = await sb.from("settings").update(fonts).eq("id", 1);
@@ -177,8 +196,8 @@ export async function createInitialsPostAction(input: InitialsRequest & {
     if (reuse) {
       const { data, error } = await sb.rpc("create_initials_post", { p: {
         ...base, initials, caption_style, hashtag_set,
-        cards: gallery.cards.map((c, k) => ({ position: c.position, source: c.source, name_id: c.name_id, name: c.name, meaning: c.meaning, shot: c.shot, prompt: c.prompt, seed: c.seed,
-          ...(plan.picks[k].origin ? { origin: plan.picks[k].origin } : {}) })),
+        cards: ordered.map((c, k) => ({ position: c.position, source: c.source, name_id: c.name_id, name: c.name, meaning: c.meaning, shot: c.shot, prompt: c.prompt, seed: c.seed,
+          ...(orderedPicks[k].origin ? { origin: orderedPicks[k].origin } : {}) })),
       } });
       if (error) {
         if (!missingFunction(error)) return fail(`Could not create the post: ${error.message}`);
@@ -191,7 +210,7 @@ export async function createInitialsPostAction(input: InitialsRequest & {
       postId = r.post_id;
     } else {
       // Before 017: the fresh AI names become unused names first, then create_post takes them like any other.
-      const fresh = gallery.cards.filter((c) => c.source === "new");
+      const fresh = ordered.filter((c) => c.source === "new");
       const ids = new Map<string, string>();
       if (fresh.length) {
         const { data: added, error: addErr } = await sb.from("names")
@@ -202,7 +221,7 @@ export async function createInitialsPostAction(input: InitialsRequest & {
         }
         for (const a of (added ?? []) as { id: string; name: string }[]) ids.set(a.name, a.id);
       }
-      const cards = gallery.cards.filter((c) => c.source !== "used").map((c) => ({
+      const cards = ordered.filter((c) => c.source !== "used").map((c) => ({
         position: c.position, name_id: c.name_id ?? ids.get(c.name)!, name: c.name, meaning: c.meaning, shot: c.shot, prompt: c.prompt, seed: c.seed,
       }));
       if (cards.some((c) => !c.name_id)) return fail("Could not add the new names. Try again.");
@@ -216,10 +235,16 @@ export async function createInitialsPostAction(input: InitialsRequest & {
       if (metaErr && !missing009(metaErr)) console.error("createInitialsPostAction: could not save the caption style", metaErr.message);
     }
 
-    const closing = theme
-      ? await addClosingCard(sb, { post: { id: postId, post_date: input.postDate, gender: input.gender, style: "two-word", theme_id: gallery.theme_id, subject_age: age }, theme, settings: s })
-      : null;
+    // The closing card (010) and the front card (023, titled with the initials), side by side, best effort.
+    const newPost = { id: postId, post_date: input.postDate, gender: input.gender, style: "two-word" as const, theme_id: gallery.theme_id, subject_age: age };
+    const [closing, front] = theme
+      ? await Promise.all([
+        addClosingCard(sb, { post: newPost, theme, settings: s }),
+        addCoverCard(sb, { post: newPost, theme, settings: s, title: { initials } }),
+      ])
+      : [null, null];
     if (closing?.status === "error") console.error("createInitialsPostAction: could not add the closing card", closing.message);
+    if (front?.status === "error") console.error("createInitialsPostAction: could not add the front card", front.message);
     revalidatePath("/", "layout");
     const made = reuse ? gallery.cards.length : gallery.cards.filter((c) => c.source !== "used").length;
     return { ok: true, postId, cards: made, short: Math.max(0, want - made) };

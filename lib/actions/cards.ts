@@ -23,6 +23,7 @@ const STALE = "This card just changed (it may be being made right now). Try agai
 const BUSY = "This card is being made right now. Wait for it to finish.";
 const DUP = "Another name in your list already has that spelling.";
 const CTA_TEXT = "The closing card has a message, not a name: edit it in its Message field.";
+const COVER_TEXT = "The front card's title comes from the post, so it can't be edited. Use New picture for a new photo.";
 
 const cleanText = (name: string, meaning: string) => ({ name: normalizeName(name), meaning: meaning.trim().toLowerCase() });
 
@@ -75,6 +76,7 @@ export async function regenerateCardAction(cardId: string, text?: { name: string
   if (card.status === "generating") return fail(BUSY);
   if (lock) return fail(lock);
   if (text && card.kind === "cta") return fail(CTA_TEXT);
+  if (text && card.kind === "cover") return fail(COVER_TEXT);
   const clean = text && textChanged(card, text.name, text.meaning) ? cleanText(text.name, text.meaning) : null;
   if (clean && (await spellingTaken(sb, card, clean.name))) return fail(DUP);
 
@@ -91,6 +93,7 @@ export async function restampCardAction(cardId: string, name: string, meaning: s
   const { sb, card, lock } = await getCard(cardId);
   if (!card) return fail("Card not found.");
   if (card.kind === "cta") return fail(CTA_TEXT);
+  if (card.kind === "cover") return fail(COVER_TEXT);
   if (card.status === "generating") return fail(BUSY);
   // Restamp only when a clean photo is current; a pending regenerate or an imported card regenerates instead.
   // A re-stamp only needs Pillow, so only the regenerate path is locked by the PC / ComfyUI state.

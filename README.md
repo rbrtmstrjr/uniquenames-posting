@@ -45,6 +45,15 @@ Design: `docs/superpowers/specs/2026-11-04-facebook-posting-design.md`; research
 ## Autopilot (2026-11-20)
 - Autopilot: Make 7 days makes, checks (Claude Opus) and schedules the next week of posts by itself (`docs/SETUP.md`, Autopilot).
 
+## Front card and the 3 best names first (2026-11-21)
+- Every new post opens with a front card: a photo from its own photoshoot with the post's title stamped big by the PC
+  ("'S' Names" / for baby boy). Its pose (10 per age) and the title's place (top / bottom) rotate from post to post.
+- The next 3 cards are the post's best names: Today asks the app's AI once, alongside the caption (8 s, checked, the
+  usual order on any failure); Autopilot uses the appeal score from Claude's name check. Autopilot posts get 8 to 14
+  names and go out with 7 passed name cards; a failing front card is left out, never holding a post.
+- Settings > Front card switches it off. Needs migration `023_front_card.sql` and worker 2.10.0 (`docs/SETUP.md`,
+  "Front card and the 3 best names first"). Design: `docs/superpowers/specs/2026-11-21-front-card-design.md`.
+
 ## Story shots (2026-10-18)
 Each post is now shot the way a photographer works through a session: one set, and the camera moves in. About 80% of
 frames are close-ups or macros, each with ONE hero: the child's face, a detail (hands, feet), or one prop from the

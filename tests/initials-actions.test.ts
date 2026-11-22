@@ -14,6 +14,7 @@ const { planInitialsAction, createInitialsPostAction } = await import("@/lib/act
 const { addCardAction, rewriteCaptionAction } = await import("@/lib/actions/posts");
 const { listSwapNamesAction, swapCardNameAction } = await import("@/lib/actions/swap-name");
 const { cardNameIdeasAction } = await import("@/lib/actions/suggest");
+const { RANK_SYSTEM } = await import("@/lib/ai/rank-names");
 
 const REQ = "11111111-1111-4111-8111-111111111111";
 const THEME_ID = "22222222-2222-4222-8222-222222222222";
@@ -45,6 +46,7 @@ const MISSING_FN = { message: "Could not find the function public.create_initial
 type World = {
   names?: NameRow[]; pre017?: boolean; post?: Record<string, unknown> | null; postCards?: Record<string, unknown>[]; card?: Record<string, unknown> | null;
   rpc?: Record<string, { data?: unknown; error?: { message: string; code?: string } }[]>; reusedCards?: { name: string; created_at: string }[];
+  settings?: Record<string, unknown>;
 };
 function world(w: World = {}) {
   fake = fakeSupabase((q) => respond(q));
@@ -61,7 +63,7 @@ function world(w: World = {}) {
       return undefined;
     }
     if (q.table === "settings" && isUpdate(q)) return undefined;
-    if (q.table === "settings") return { data: settings };
+    if (q.table === "settings") return { data: w.settings ?? settings };
     if (q.table === "names" && op(q, "insert")) return { data: (op(q, "insert")![1] as { name: string }[]).map((r) => ({ id: `ins-${r.name}`, name: r.name })) };
     if (q.table === "names" && op(q, "maybeSingle")) return { data: w.names?.find((n) => n.id === op(q, "eq")![2]) ?? null };
     if (q.table === "names") return { data: w.names ?? NAMES() };
@@ -260,6 +262,35 @@ describe("createInitialsPostAction (Generate)", () => {
     const r = await createInitialsPostAction({ ...input, first: "Q", second: "X", fresh: [] });
     expect(r).toEqual({ ok: false, error: "No boy names with the initials Q·X are left. Preview again to ask the AI for new ones." });
     expect(fake.rpcs).toHaveLength(0);
+  });
+
+  it("with migration 023: a front card titled with the initials is queued first", async () => {
+    world({ settings: { ...settings, cover_enabled: true } });
+    generateJson.mockResolvedValue({ ok: false, error: "down" });
+    expect((await createInitialsPostAction(input)).ok).toBe(true);
+    const cover = fake.queries.filter((q) => q.table === "cards" && op(q, "insert"))
+      .map((q) => op(q, "insert")![1] as Record<string, unknown>).find((c) => c.kind === "cover");
+    expect(cover).toMatchObject({ post_id: POST_ID, kind: "cover", position: 0, order_index: 0, name: "A & R Names", meaning: "for baby boy", title_pos: "top" });
+  });
+
+  it("with migration 023: the AI's top 3 names come first, each card keeping its photo plan and its source", async () => {
+    type Card = Planned & { shot: string; prompt: string; seed: number };
+    world({ settings: { ...settings, cover_enabled: false } });
+    generateJson.mockResolvedValue({ ok: false, error: "down" });
+    await createInitialsPostAction(input);
+    const today = (rpc("create_initials_post")[0].p as { cards: Card[] }).cards;
+    expect(today.map((c) => c.name)).toEqual(["Ansel Roan", "Arlo Reed", "Alaric Rhys", "Ambrose Rafe", "Amos Rhett", "Abel Ross"]);
+    world({ settings: { ...settings, cover_enabled: false } });
+    generateJson.mockReset();
+    generateJson.mockImplementation(async (i: { system: string }) => (i.system === RANK_SYSTEM
+      ? { ok: true, data: { best: ["Abel Ross", "Alaric Rhys", "Arlo Reed"] } } : { ok: false, error: "down" }));
+    expect((await createInitialsPostAction(input)).ok).toBe(true);
+    const ranked = (rpc("create_initials_post")[0].p as { cards: Card[] }).cards;
+    expect(ranked.map((c) => [c.position, c.name, c.source])).toEqual([
+      [1, "Abel Ross", "used"], [2, "Alaric Rhys", "new"], [3, "Arlo Reed", "available"],
+      [4, "Ansel Roan", "available"], [5, "Ambrose Rafe", "new"], [6, "Amos Rhett", "used"],
+    ]);
+    expect(ranked.map((c) => [c.shot, c.prompt, c.seed])).toEqual(today.map((c) => [c.shot, c.prompt, c.seed]));
   });
 
   it("validates before any database call", async () => {

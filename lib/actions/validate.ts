@@ -26,7 +26,9 @@ export interface SettingsInput extends TextSettings { caption_template: string;
   /** Closing card (migration 010): on/off and its messages, one per line. Optional: only sent once the database has them. */
   cta_enabled?: boolean; cta_messages?: string;
   /** Reels on-screen step labels (migration 014). Optional: only sent once the database has it. */
-  reel_labels?: boolean }
+  reel_labels?: boolean;
+  /** Front card (migration 023): on/off. Optional: only sent once the database has it. */
+  cover_enabled?: boolean }
 export const REEL_IMAGES_MIN = 10;
 export const REEL_IMAGES_MAX = 40;
 export const REEL_IMAGES_DEFAULT = 40;
@@ -92,6 +94,7 @@ export function validateSettings(s: SettingsInput): string | null {
   }
   if (s.cta_enabled !== undefined && typeof s.cta_enabled !== "boolean") return "Turn the closing card on or off.";
   if (s.reel_labels !== undefined && typeof s.reel_labels !== "boolean") return "Turn the on-screen labels on or off.";
+  if (s.cover_enabled !== undefined && typeof s.cover_enabled !== "boolean") return "Turn the front card on or off.";
   if (s.cta_messages !== undefined) {
     const bad = typeof s.cta_messages === "string" ? validateCtaMessages(s.cta_messages) : "Bad closing card messages.";
     if (bad) return bad;

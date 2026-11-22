@@ -246,6 +246,31 @@ Cost: the checks use Claude Opus 5.5, about $5 for a 7-day run (the page shows t
 If a run pauses (Claude credits, a key), fix it and press **Resume**. **Stop** ends a run at once; scheduled posts stay.
 Stop and Resume say so when nothing changed. Posts that need you stay listed under "Needs you" after a run ends.
 
+## Front card and the 3 best names first (existing install)
+On a phone Facebook shows only the first 4 pictures of an album. Every new post now opens with a **front card**: a
+picture from the same photoshoot with the post's title stamped big ("'S' Names" / for baby boy, "Biblical Names",
+"A & R Names", "Baby Girl Names"). Its pose (10 poses, each made for the child's age) and the title's place (top or
+bottom) change from post to post. The next 3 cards are the post's best names: on Today the app's AI picks them while it
+writes the caption (at most about 8 s, and if it fails the post is made in the usual order); on Autopilot, Claude's name
+check scores every name. Autopilot posts now get 8 to 14 names (10 to 16 cards with the front and closing cards) and go
+out with 7 or more passed name cards. A front card that still fails its check after 2 remakes is left out (the
+Autopilot activity says "Front card left out"); it never holds a post.
+Spec: `docs/superpowers/specs/2026-11-21-front-card-design.md`.
+Do these in this order:
+1. Update: merge and push to GitHub so Vercel redeploys the website.
+2. Restart the worker once its queue is empty (the PC has no card in line; Task Scheduler: **End** then **Run** "Unique
+   Names card worker"). Check `worker/worker.log` says "worker 2.10.0". An older worker would stamp the title like a
+   name. If a front card was made before the restart, press **Re-stamp** on that post.
+3. Run migration 023 in Supabase: **SQL Editor**, paste and run `supabase/migrations/023_front_card.sql` (safe to run
+   again). Until it runs, posts are made exactly as before: no front card and the names in their usual order.
+4. **Settings > Front card**: on by default; switch it off to stop adding it to new posts. Posts already made or
+   scheduled do not change.
+5. On a post the front card has a **Front card** badge and always stays first (the closing card stays last) when you
+   drag cards; Download and Facebook use the same order. New picture, Retry and Re-stamp work on it like on any card;
+   its title comes from the post, so it has no name to edit or swap. On the PC it is saved as `00-front.jpg`.
+6. Check one Today post and one Autopilot day on a phone: the first 4 pictures should be the front card and the 3 best
+   names.
+
 ## When something is wrong
 - Header dot red, "PC offline": turn on the PC. The worker starts at login. **Generate** is disabled (the button says why) until the PC is back. "PC offline" shows 3 minutes after the PC stopped.
 - Amber dot, "ComfyUI closed": open ComfyUI Desktop. **Generate** stays disabled until then; text edits and Re-stamp still work.

@@ -46,6 +46,12 @@ describe("planPost with chosen names", () => {
     const r = planPost({ request: { gender: "girl", style: "single", count: null, postDate: "2026-11-21", age: "random", nameIds: ids }, names, themes: [theme], settings });
     expect(r.ok && r.cards.map((c) => c.name_id).sort()).toEqual([...ids].sort());
   });
+  it("keeps the chosen names in their order (Autopilot sends the best first): card 1 is the first name", () => {
+    const ids = [names[5], names[0], names[9], names[2], names[7], names[1], names[3], names[4], names[6]].map((n) => n.id);
+    const r = planPost({ request: { gender: "girl", style: "single", count: null, postDate: "2026-11-21", age: "random", nameIds: ids }, names, themes: [theme], settings });
+    expect(r.ok && r.cards.map((c) => c.name_id)).toEqual(ids);
+    expect(r.ok && r.cards.map((c) => c.position)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
+  });
   it("fails when a chosen name was taken meanwhile", () => {
     const r = planPost({ request: { gender: "girl", style: "single", count: null, postDate: "2026-11-21", nameIds: ["n-Abigail", "n-gone"] }, names, themes: [theme], settings });
     expect(r).toEqual({ ok: false, reason: "1 of the chosen names is no longer available." });
