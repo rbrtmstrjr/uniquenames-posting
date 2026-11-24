@@ -271,6 +271,16 @@ Do these in this order:
 6. Check one Today post and one Autopilot day on a phone: the first 4 pictures should be the front card and the 3 best
    names.
 
+## US names (2026-11-24)
+No database change and no new keys. Names now aim at the US, Canada, the UK and Australia (US rank 101 to 2,000,
+5,000 for letters with few names). AI suggestions and Autopilot use only those names.
+1. Open the Names page and press **Check names against the US list** once.
+2. It says how many available names are not US names ("N names aren't US names (M checked). Skip them?"). Press
+   **Skip them** to go ahead, or **Cancel** to change nothing.
+3. Skipped names show "Not a US name" on the Skip filter. Press Use again to bring one back; it is not skipped again.
+4. Names you add yourself (Add name, Paste many) are never checked. Used names and posts already made are not touched.
+5. Refresh the list once a year: run `npx tsx scripts/import-us-names.ts`, then commit `packs/unique-names/us-names.json`.
+
 ## When something is wrong
 - Header dot red, "PC offline": turn on the PC. The worker starts at login. **Generate** is disabled (the button says why) until the PC is back. "PC offline" shows 3 minutes after the PC stopped.
 - Amber dot, "ComfyUI closed": open ComfyUI Desktop. **Generate** stays disabled until then; text edits and Re-stamp still work.

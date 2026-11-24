@@ -54,6 +54,17 @@ Design: `docs/superpowers/specs/2026-11-04-facebook-posting-design.md`; research
 - Settings > Front card switches it off. Needs migration `023_front_card.sql` and worker 2.10.0 (`docs/SETUP.md`,
   "Front card and the 3 best names first"). Design: `docs/superpowers/specs/2026-11-21-front-card-design.md`.
 
+## US names (2026-11-24)
+- Names now aim at the US, Canada, the UK and Australia. A name must be a known US name: US rank 101 to 2,000 (up to
+  5,000 for letters with few names). Very common names (top 100) and names not on the US list are left out.
+- This applies to AI suggestions and to Autopilot. Names you add yourself are never checked.
+- Press **Check names against the US list** on the Names page once after this update. It shows how many available
+  names are not US names, and skips them only after you say so. Skipped names show "Not a US name" and can be brought
+  back (Use again); a name you bring back is not skipped again.
+- Each single name on the Names page shows its US rank ("US #172") or "Not on the US list".
+- Refresh the list once a year: run `npx tsx scripts/import-us-names.ts`, then commit `packs/unique-names/us-names.json`.
+  Design: `docs/superpowers/specs/2026-11-24-us-names-design.md`.
+
 ## Story shots (2026-10-18)
 Each post is now shot the way a photographer works through a session: one set, and the camera moves in. About 80% of
 frames are close-ups or macros, each with ONE hero: the child's face, a detail (hands, feet), or one prop from the
