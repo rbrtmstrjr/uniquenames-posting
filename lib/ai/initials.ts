@@ -5,6 +5,7 @@ import { aiJson } from "./provider";
 import { activePack } from "@/packs";
 import { INITIALS_MEANING_MAX_WORDS, MEANING_MIN_WORDS, filterInitialsCombos, sampleForPrompt, type InitialsCandidate, type InitialsFilterResult } from "./suggest-filter";
 import { PROMPT_NAMES_CAP } from "./suggest";
+import { keepUsNames } from "@/lib/names/us-list";
 
 // Fresh two-word names for a post by initials (migration 017): ONE small AI call (Claude Haiku / Gemini, task "small")
 // asks for a few more than missing; the deterministic filter keeps only valid, new, kind names with the right initials
@@ -129,8 +130,14 @@ export async function suggestForInitials(i: {
     partHints: partHintsFor(i.knownParts, i.initials),
   });
   if (!ai.ok) return { ok: false, error: ai.error };
-  const filter = (cands: InitialsCandidate[]) => filterInitialsCombos(cands, [...i.allNames, ...(i.skip ?? [])],
-    { initials: i.initials, want: i.want, unique: INITIALS_UNIQUE, knownParts: i.knownParts }, i.gender);
+  const filter = (cands: InitialsCandidate[]): InitialsFilterResult => {
+    const r = filterInitialsCombos(cands, [...i.allNames, ...(i.skip ?? [])],
+      { initials: i.initials, want: i.want, unique: INITIALS_UNIQUE, knownParts: i.knownParts }, i.gender);
+    // Unique Names: both words must be names US parents give (SSA list); the others count as invalid.
+    const a = keepUsNames(r.fresh, i.gender, { style: "two-word" });
+    const b = keepUsNames(r.relaxed, i.gender, { style: "two-word" });
+    return a.dropped || b.dropped ? { ...r, fresh: a.kept, relaxed: b.kept, invalid: r.invalid + a.dropped + b.dropped } : r;
+  };
   const first = filter(ai.data);
   const left = deadline - Date.now();
   if (!first.stiffNames.length || left < REWRITE_MIN_MS) return { ok: true, result: first };

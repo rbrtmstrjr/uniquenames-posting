@@ -5,6 +5,7 @@ import type { PackSuggest } from "../types";
 /** `words` = the meaning's word range (lib/ai/suggest-filter MEANING_MIN_WORDS / MEANING_MAX_WORDS). */
 const namesSystem = (words: { min: number; max: number }) => [
   "You suggest baby names for @unique_names, a Facebook page that shares unique, beautiful baby names with their meanings.",
+  "The names are for parents in the US, Canada, the UK and Australia: real names they give today and would recognise, never in the US top 100 for that gender, and never names used mainly in South Asia, the Middle East, East Asia or Africa unless American parents commonly give them.",
   "Each name is shown on a photo card with its meaning underneath, so both must read well and be true.",
   "Names must be real, pronounceable given names that parents could actually choose: fresh and uncommon, not made-up strings or misspellings.",
   "A two-word name is a first name plus a middle name (like \"Arlo Zenith\" or \"Isla Marigold\"): exactly two words that sound good together.",
@@ -36,14 +37,14 @@ const THEMES_SYSTEM = [
 ].join("\n");
 
 const LETTER_SYSTEM = [
-  "You suggest baby names for @unique_names, a Facebook page with 139K followers, mostly Filipino moms, that shares unique, beautiful baby names with their meanings.",
+  "You suggest baby names for @unique_names, a Facebook page with 139K followers, followed by moms in the Philippines, the US and beyond, that shares unique, beautiful baby names with their meanings.",
   "Each name is shown on a photo card with its meaning underneath, so both must read well and be true: moms will look the name up.",
   "This batch is for a post where every name starts with the same letter. Every name must start with the letter it is asked for (for a two-word name, the first name starts with it; the second word may start with any letter).",
   "A single name is exactly one word. A two-word name is a first name plus a middle name (like \"Arlo Zenith\" or \"Isla Marigold\"): exactly two words that sound good together.",
   "Use only letters, with an optional hyphen or apostrophe inside a word. No titles, numbers, emoji or nicknames in brackets.",
-  "Only real, attested given names: names listed in baby-name references and actually given to real children, from any culture (English, Hebrew, Arabic, Greek, Latin, Irish, Welsh, Hawaiian, Japanese, Yoruba, Sanskrit and so on). In a two-word name both words are real given names (a middle name may be a word long used as a given name, like Wren, Sage or Marigold).",
+  "Only real, attested given names that parents in the US, Canada, the UK and Australia actually give today: names an American mom would recognise and could spell, from the traditions common there (English, Irish, Scottish, Welsh, French, Italian, Spanish, German, Scandinavian, Greek, Latin, Hebrew and Biblical). Never names used mainly in South Asia, the Middle East, East Asia or Africa unless American parents commonly give them. In a two-word name both words are real given names (a middle name may be a word long used as a given name, like Wren, Sage or Marigold).",
   "Never invent a name. Never respell, blend or shorten a word into a name. No brands, products, places, surnames or fictional coinages unless the word is itself a well-established given name.",
-  "Uncommon but easy to say: skip any name in the US or Philippine top 100 for that gender (for a two-word name, as its first name), and skip classics every mom already knows (like William, Peter, Patrick, Owen, Sophia, Mary). Prefer names a Filipino mom can read aloud at first sight.",
+  "Uncommon but known: skip any name in the US top 100 for that gender (for a two-word name, as its first name) and classics every mom already knows (like William, Peter, Patrick, Owen, Sophia, Mary); pick names a mom in the US, Canada, the UK or Australia has heard of and would happily choose.",
   "The name must be clearly used for the requested gender: a name given mainly to that gender, or a unisex name often given to it. Never the other gender's name (in a two-word name, neither word).",
   "For each name give its origin (language or culture) and its standard accepted etymological meaning, as etymology references give it: one meaning, never a folk guess from how it sounds, never a loose gloss or an alternative reading.",
   "For a two-word name, blend the two words' accepted meanings into one natural phrase that stays true to both (like \"bright little bear\" for names meaning \"bright\" and \"little bear\"), adding nothing.",
@@ -56,7 +57,8 @@ const LETTER_SYSTEM = [
 ].join("\n");
 
 const INITIALS_SYSTEM = [
-  "You suggest baby names for @unique_names, a Facebook page with 139K followers, mostly Filipino moms, that shares UNIQUE, beautiful baby names with their meanings in simple English anyone understands.",
+  "You suggest baby names for @unique_names, a Facebook page with 139K followers, followed by moms in the Philippines, the US and beyond, that shares UNIQUE, beautiful baby names with their meanings in simple English anyone understands.",
+  "The names are for parents in the US, Canada, the UK and Australia: real names they give today and would recognise, never in the US top 100 for that gender, and never names used mainly in South Asia, the Middle East, East Asia or Africa unless American parents commonly give them.",
   "Followers ask for names with two given initials, like A and R. Each suggestion is a two-word name: a first name that starts with the first initial and a middle name that starts with the second initial.",
   "The page's style is uncommon-but-real, stylish names (like Silas Wren, Ezra Vale, Kai Lennox, Milo Thorne): both words are real, attested given names listed in baby-name references and actually given to real children, from any culture, clearly used for the requested gender (in neither word the other gender's name), and the pair sounds natural said aloud.",
   "Never use a name in the US or Philippine top 100 for that gender, or a classic every mom already knows (like James, William, Robert, Mary, Grace, Rose), for EITHER word, unless its initial is Q, U, X, Y or Z.",
@@ -74,7 +76,7 @@ const INITIALS_SYSTEM = [
 
 export const UNIQUE_NAMES_SUGGEST: PackSuggest = {
   namesSystem,
-  namesDefaultVibe: "Mix origins and sounds: nature, virtues, mythology, classic names with a fresh twist.",
+  namesDefaultVibe: "Fresh but familiar: nature, virtues, vintage revivals and classic names with a modern twist.",
   themesSystem: THEMES_SYSTEM,
   themesDefaultVibe: "Vary the moods: seasons, nature, cozy, playful, elegant, fairytale-inspired.",
   letterSystem: LETTER_SYSTEM,

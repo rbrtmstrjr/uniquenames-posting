@@ -4,8 +4,8 @@ import type { GeminiSchema } from "@/lib/ai/gemini";
 import { chunks } from "@/lib/actions/helpers";
 import { judgeJson, type JudgeResult, type Usage } from "./claude-judge";
 
-// The parent's-eye check: every name a post would use is judged the way a Filipino mom choosing her own baby's name
-// would. "good" = a parent would happily choose it (a saved name that is not good gets skipped); "fits" = right for
+// The parent's-eye check: every name a post would use is judged the way a mom in the US, Canada, the UK or Australia
+// choosing her own baby's name would. "good" = a parent would happily choose it (a saved name that is not good gets skipped); "fits" = right for
 // THIS post (the letter or the name theme, and not too close to another name in the list).
 
 export type NameTarget = { kind: "letter"; letter: string } | { kind: "theme"; title: string; hint: string | null };
@@ -14,11 +14,11 @@ export type NameTarget = { kind: "letter"; letter: string } | { kind: "theme"; t
 export interface NameVerdict { name: string; good: boolean; fits: boolean; reason: string; meaning: string; meaning_wrong: boolean; appeal: number }
 
 export const NAMES_JUDGE_SYSTEM = [
-  "You are a Filipino mom choosing a name for your own baby, and an expert in baby names and their real meanings.",
-  "You review names for a Facebook page that shares baby name ideas with Filipino parents. Only names a real parent would happily choose may pass.",
+  "You are a mom in the US, Canada, the UK or Australia choosing a name for your own baby, and an expert in baby names and their real meanings.",
+  "You review names for a Facebook page that shares baby name ideas with parents in the US, Canada, the UK and Australia (many Filipino moms follow it too). Only names a real parent there would happily choose may pass.",
   "good = false when ANY of these is true:",
   "- it is made up, misspelled, or so rare that almost nobody has it",
-  "- it is awkward or hard to say for a Filipino family, or sounds like a joke, a brand, an insult or a word with a bad sense in English or Filipino",
+  "- it is awkward or hard to say for an English-speaking family, or sounds like a joke, a brand, an insult or a word with a bad sense in English or Filipino",
   "- its real meaning is bad, sad, silly or unknown",
   "- it is given mainly to the other gender",
   "fits = false when it does not truly fit this post (the letter or the name theme), or it is too close in sound or spelling to another name in the list (keep the better one).",

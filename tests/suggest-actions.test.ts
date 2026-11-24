@@ -10,6 +10,8 @@ const { revalidatePath } = vi.hoisted(() => ({ revalidatePath: vi.fn() }));
 vi.mock("next/cache", () => ({ revalidatePath }));
 const { generateJson } = vi.hoisted(() => ({ generateJson: vi.fn() }));
 vi.mock("@/lib/ai/gemini", () => ({ generateJson }));
+// These fixtures use invented names: the US-names gate has its own tests (us-names-suggest.test.ts).
+vi.mock("@/lib/names/us-list", async (real) => ({ ...(await real<typeof import("@/lib/names/us-list")>()), usGateOn: () => false, keepUsNames: <T,>(list: T[]) => ({ kept: list, dropped: 0 }) }));
 const { suggestNamesAction, suggestThemesAction } = await import("@/lib/actions/suggest");
 const { approveNamesAction, rejectNamesAction } = await import("@/lib/actions/names");
 const { approveThemesAction, rejectThemesAction, moveThemeNextAction } = await import("@/lib/actions/themes");
