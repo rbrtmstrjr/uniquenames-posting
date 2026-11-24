@@ -12,7 +12,7 @@ vi.mock("next/cache", () => ({ revalidatePath }));
 const { generateJson } = vi.hoisted(() => ({ generateJson: vi.fn() }));
 vi.mock("@/lib/ai/gemini", () => ({ generateJson }));
 
-const { buildExport, validateExport, NEEDS_018 } = await import("@/lib/pdf/export");
+const { buildExport, validateExport, NEEDS_018, SELLABLE_OR } = await import("@/lib/pdf/export");
 const { sortNamesAction, revealExportPasswordAction } = await import("@/lib/actions/names-pdf");
 const { setNameCategoryAction } = await import("@/lib/actions/names");
 const { POST } = await import("@/app/(app)/names/export/route");
@@ -78,7 +78,9 @@ describe("buildExport", () => {
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     const q = fake.queries.find((x) => x.table === "names")!;
-    expect(op(q, "in")).toEqual(["in", "status", ["available", "reserved", "used"]]);
+    // Unique Names: the approved names, plus names skipped only as "Not a US name" (they stay in the PDF)
+    expect(op(q, "or")).toEqual(["or", SELLABLE_OR]);
+    expect(op(q, "in")).toBeUndefined();
     expect(generateJson).not.toHaveBeenCalled(); // every name already has its group
     expect(r.pdf.subarray(0, 8).toString()).toBe("%PDF-1.7");
     expect(r.password).toMatch(PASSWORD_RE);
@@ -169,6 +171,31 @@ describe("POST /names/export", () => {
   });
 });
 
+describe("names skipped as \"Not a US name\" (owner, 2026-11-24)", () => {
+  it("the filter: approved, or skipped with exactly that note (quoted for PostgREST)", () => {
+    expect(SELLABLE_OR).toBe('status.in.(available,reserved,used),and(status.eq.skip,autopilot_note.eq."Not a US name")');
+  });
+  it("stay in the PDF; other skipped names do not", async () => {
+    names = [row(1), row(3, { status: "skip", autopilot_note: "Not a US name" }), row(5, { status: "skip", autopilot_note: "made up" })];
+    const r = await build({ gender: "girl" });
+    expect(r.ok && r.count).toBe(2);
+  });
+  it("Name Nest reads the approved names as before", async () => {
+    const saved = process.env.NICHE;
+    process.env.NICHE = "name-nest";
+    try {
+      await build({ pack: packById("name-nest") });
+      await sortNamesAction();
+      const reads = fake.queries.filter((x) => x.table === "names" && !op(x, "update"));
+      expect(reads.length).toBeGreaterThanOrEqual(2);
+      for (const q of reads) {
+        expect(op(q, "in")).toEqual(["in", "status", ["available", "reserved", "used"]]);
+        expect(op(q, "or")).toBeUndefined();
+      }
+    } finally { if (saved === undefined) delete process.env.NICHE; else process.env.NICHE = saved; }
+  });
+});
+
 describe("sortNamesAction", () => {
   it("sorts one round (300) of the approved names without a group; says how many are left", async () => {
     names = Array.from({ length: 350 }, (_, i) => row(i + 1, { meaning_category: null }));
@@ -177,7 +204,7 @@ describe("sortNamesAction", () => {
     expect(r).toEqual({ ok: true, sorted: 300, remaining: 50 });
     expect(generateJson).toHaveBeenCalledTimes(3);
     const q = fake.queries.find((x) => x.table === "names")!;
-    expect(op(q, "in")).toEqual(["in", "status", ["available", "reserved", "used"]]);
+    expect(op(q, "or")).toEqual(["or", SELLABLE_OR]);
     expect(op(q, "is")).toEqual(["is", "meaning_category", null]);
     expect(revalidatePath).toHaveBeenCalledWith("/names");
   });

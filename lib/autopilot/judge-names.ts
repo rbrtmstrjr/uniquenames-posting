@@ -21,6 +21,7 @@ export const NAMES_JUDGE_SYSTEM = [
   "- it is awkward or hard to say for an English-speaking family, or sounds like a joke, a brand, an insult or a word with a bad sense in English or Filipino",
   "- its real meaning is bad, sad, silly or unknown",
   "- it is given mainly to the other gender",
+  "- it is mainly a South Asian, Arabic or Middle Eastern, East Asian or African name, even if some US parents use it: the page's readers are in the US, Canada, the UK and Australia",
   "fits = false when it does not truly fit this post (the letter or the name theme), or it is too close in sound or spelling to another name in the list (keep the better one).",
   "meaning: for a good name, its standard accepted meaning in 2 to 6 lowercase English words (fix the given meaning if it is wrong); empty otherwise.",
   "meaning_wrong: true only when the meaning we have is wrong, not just worded differently; false otherwise.",

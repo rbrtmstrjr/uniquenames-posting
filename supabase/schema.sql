@@ -1275,17 +1275,17 @@ language sql stable security definer set search_path = public, pg_temp as $$
 $$;
 
 -- Is the shop open (the owner's switch on, and the key linked is THIS server's key), and how many approved names each
--- edition has.
+-- edition has (names skipped only as "Not a US name" count too: they are still sold).
 create or replace function public.shop_info(p_secret text) returns jsonb
 language sql stable security definer set search_path = public, pg_temp as $$
   select jsonb_build_object(
     'enabled', coalesce((select shop_enabled from public.settings where id = 1), false),
     'ready', public.shop_secret_ok(p_secret),
     'counts', jsonb_build_object(
-      'girl_single', (select count(*) from public.names where gender = 'girl' and style = 'single' and status in ('available', 'reserved', 'used')),
-      'girl_combo', (select count(*) from public.names where gender = 'girl' and style = 'two-word' and status in ('available', 'reserved', 'used')),
-      'boy_single', (select count(*) from public.names where gender = 'boy' and style = 'single' and status in ('available', 'reserved', 'used')),
-      'boy_combo', (select count(*) from public.names where gender = 'boy' and style = 'two-word' and status in ('available', 'reserved', 'used'))));
+      'girl_single', (select count(*) from public.names where gender = 'girl' and style = 'single' and (status in ('available', 'reserved', 'used') or (status = 'skip' and autopilot_note = 'Not a US name'))),
+      'girl_combo', (select count(*) from public.names where gender = 'girl' and style = 'two-word' and (status in ('available', 'reserved', 'used') or (status = 'skip' and autopilot_note = 'Not a US name'))),
+      'boy_single', (select count(*) from public.names where gender = 'boy' and style = 'single' and (status in ('available', 'reserved', 'used') or (status = 'skip' and autopilot_note = 'Not a US name'))),
+      'boy_combo', (select count(*) from public.names where gender = 'boy' and style = 'two-word' and (status in ('available', 'reserved', 'used') or (status = 'skip' and autopilot_note = 'Not a US name')))));
 $$;
 
 -- A pending order, made by our server only (it needs the shop key, so the honeypot and the network limit cannot be
@@ -1440,10 +1440,11 @@ begin
   update public.shop_orders set downloads = downloads + 1, last_download_at = now() where id = o.id;
   -- to_jsonb(n)->>'origin': names.origin exists only after 015_name_nest.sql
   select coalesce(jsonb_agg(jsonb_build_object('name', n.name, 'meaning', n.meaning, 'gender', n.gender, 'style', n.style,
-      'status', n.status, 'origin', to_jsonb(n)->>'origin', 'meaning_category', n.meaning_category) order by n.name), '[]'::jsonb)
+      'status', n.status, 'origin', to_jsonb(n)->>'origin', 'meaning_category', n.meaning_category, 'autopilot_note', n.autopilot_note) order by n.name), '[]'::jsonb)
     into v_names
     from public.names n
-    where n.status in ('available', 'reserved', 'used') and (o.product = 'both' or n.gender = o.product);
+    where (n.status in ('available', 'reserved', 'used') or (n.status = 'skip' and n.autopilot_note = 'Not a US name'))
+      and (o.product = 'both' or n.gender = o.product);
   return jsonb_build_object('status', 'ok', 'product', o.product, 'buyer_name', o.buyer_name, 'email', o.email,
     'password', o.password, 'pack', o.pack, 'downloads', o.downloads + 1, 'names', v_names);
 end $$;

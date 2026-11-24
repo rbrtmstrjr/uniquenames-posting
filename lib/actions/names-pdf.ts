@@ -3,7 +3,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { categorizeNames } from "@/lib/ai/categorize";
 import { PDF_STATUSES } from "@/lib/pdf/plan";
-import { storeGroups } from "@/lib/pdf/export";
+import { SELLABLE_OR, sellsUsSkips, storeGroups } from "@/lib/pdf/export";
 import { missing018 } from "@/lib/pdf/migration";
 import { UUID_RE } from "./helpers";
 import { fail, requireOwner, type ActionResult } from "./result";
@@ -22,7 +22,8 @@ export async function sortNamesAction(): Promise<SortResult> {
   const sb = await createClient();
   const todo: { id: string; name: string; meaning: string }[] = [];
   for (let from = 0; ; from += 1000) {
-    const { data, error } = await sb.from("names").select("id, name, meaning").in("status", [...PDF_STATUSES]).is("meaning_category", null)
+    const q = sb.from("names").select("id, name, meaning");
+    const { data, error } = await (sellsUsSkips() ? q.or(SELLABLE_OR) : q.in("status", [...PDF_STATUSES])).is("meaning_category", null)
       .order("name").order("id").range(from, from + 999);
     if (error) return missing018(error) ? { ok: true, sorted: 0, remaining: 0, needs018: true } : fail(error.message);
     todo.push(...((data ?? []) as typeof todo));

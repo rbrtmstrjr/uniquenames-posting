@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { packById, PACK_IDS } from "@/packs";
 import { MEANING_CATEGORIES, categoryRank, isMeaningCategory } from "@/lib/names/categories";
-import { fillCopy, pdfFileName, planSections, previewCounts, type PdfSourceName } from "@/lib/pdf/plan";
+import { fillCopy, pdfFileName, planSections, previewCounts, sellable, type PdfSourceName } from "@/lib/pdf/plan";
 import { PASSWORD_ALPHABET, PASSWORD_RE, newOwnerPassword, newPassword } from "@/lib/pdf/password";
 import {
   PDF_PERMISSIONS, balanceColumns, fit, footerText, layoutContents, pdfDocOptions, renderNamesPdf, watermarkText, type RenderResult,
@@ -64,6 +64,27 @@ describe("planSections: what goes in, in which order", () => {
 
   it("previewCounts counts approved names per gender and style", () => {
     expect(previewCounts(NAMES as never)).toEqual({ girl: { single: 5, "two-word": 2 }, boy: { single: 3, "two-word": 1 } });
+  });
+
+  it("a name skipped only as \"Not a US name\" stays in the PDF and its counts; other skips do not (owner, 2026-11-24)", () => {
+    const names = [N("Sakura", { status: "skip", autopilot_note: "Not a US name", meaning_category: "nature" }), N("Odd", { status: "skip", autopilot_note: "made up", meaning_category: "nature" }), N("Plain", { status: "skip", meaning_category: "nature" })];
+    expect(sellable(names[0])).toBe(true);
+    expect(sellable(names[1])).toBe(false);
+    expect(sellable(names[2])).toBe(false);
+    const s = planSections(names, "girl", UN.pdf, UN.nameCategories);
+    expect(s.flatMap((x) => x.styles.flatMap((y) => y.categories.flatMap((c) => c.names.map((n) => n.name))))).toEqual(["Sakura"]);
+    expect(previewCounts(names as never).girl.single).toBe(1);
+  });
+
+  it("a buyer's shop PDF keeps them too (download_shop_order sends each name's note, migration 024)", async () => {
+    const { buildShopPdf } = await import("@/lib/shop/pdf");
+    const row = (name: string, status: string, autopilot_note?: string | null) =>
+      ({ name, meaning: "a kind meaning", gender: "girl", style: "single", status, origin: null, meaning_category: "nature", autopilot_note });
+    const r = await buildShopPdf({
+      pack: UN, product: "girl", buyerName: "Maria Santos", email: "maria@example.com", password: "Kp7m-Xr4d-Tq9w", now: new Date("2026-11-24T00:00:00Z"),
+      names: [row("Wren", "available"), row("Sakura", "skip", "Not a US name"), row("Kip", "skip", null), row("Old", "available")],
+    });
+    expect(r.ok && r.count).toBe(3);
   });
 });
 

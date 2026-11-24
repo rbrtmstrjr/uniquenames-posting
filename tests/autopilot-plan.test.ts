@@ -17,6 +17,25 @@ describe("the name flow", () => {
     expect(nextLabel({ letter: null, nameTheme: "Removed theme" }, THEMES)).toEqual({ letter: null, nameTheme: "Unique and modern" });
     expect(nextLabel({ letter: "Z", nameTheme: null }, [])).toEqual({ letter: "A", nameTheme: null });
   });
+  it("skips a letter that is short of names (letterOk), like Z goes on to the themes", () => {
+    const noU = (l: string) => l !== "U";
+    expect(nextLabel({ letter: "T", nameTheme: null }, THEMES, noU)).toEqual({ letter: "V", nameTheme: null });
+    expect(nextLabel({ letter: "S", nameTheme: null }, THEMES, noU)).toEqual({ letter: "T", nameTheme: null });
+    expect(nextLabel({ letter: "Z", nameTheme: null }, THEMES, noU)).toEqual({ letter: null, nameTheme: "Unique and modern" });
+    const noYZ = (l: string) => l !== "Y" && l !== "Z";
+    expect(nextLabel({ letter: "X", nameTheme: null }, THEMES, noYZ)).toEqual({ letter: null, nameTheme: "Unique and modern" });
+    expect(nextLabel({ letter: "X", nameTheme: null }, [], noYZ)).toEqual({ letter: "A", nameTheme: null });
+    const noA = (l: string) => l !== "A";
+    expect(nextLabel(null, THEMES, noA)).toEqual({ letter: "B", nameTheme: null });
+    expect(nextLabel({ letter: null, nameTheme: "Biblical" }, THEMES, noA)).toEqual({ letter: "B", nameTheme: null });
+    expect(nextLabel({ letter: "Z", nameTheme: null }, [], noA)).toEqual({ letter: "B", nameTheme: null });
+  });
+  it("when no letter is ok, the flow is as before (no endless loop)", () => {
+    const none = () => false;
+    expect(nextLabel({ letter: "T", nameTheme: null }, THEMES, none)).toEqual({ letter: "U", nameTheme: null });
+    expect(nextLabel({ letter: "Z", nameTheme: null }, [], none)).toEqual({ letter: "A", nameTheme: null });
+    expect(nextLabel(null, [], none)).toEqual({ letter: "A", nameTheme: null });
+  });
 });
 
 describe("days", () => {
@@ -70,6 +89,12 @@ describe("planRun", () => {
     expect(at(0).every((i) => i.nameCount === 8)).toBe(true);
     expect(at(0.999).every((i) => i.nameCount === 14)).toBe(true);
     expect(MIN_GOOD_NAMES).toBe(8);
+  });
+  it("letterOk skips short letters day by day (S, T, V, W...); without it the plan is unchanged", () => {
+    const skipped = planRun({ firstDay: "2026-11-21", days: 7, last: { letter: "R", nameTheme: null }, themes: THEMES, minImages: 6, maxImages: 26, rng: seededRandom(7), letterOk: (l) => l !== "U" && l !== "X" });
+    expect([...new Set(skipped.map((i) => i.letter ?? i.nameTheme))]).toEqual(["S", "T", "V", "W", "Y", "Z", "Unique and modern"]);
+    expect(plan()).toEqual(planRun({ firstDay: "2026-11-21", days: 7, last: { letter: "R", nameTheme: null }, themes: THEMES, minImages: 6, maxImages: 26, rng: seededRandom(7), letterOk: undefined }));
+    expect(planRun({ firstDay: "2026-11-21", days: 7, last: { letter: "R", nameTheme: null }, themes: THEMES, minImages: 6, maxImages: 26, rng: seededRandom(7), letterOk: () => true })).toEqual(plan());
   });
   it("keeps the name count inside the settings min/max", () => {
     const items = planRun({ firstDay: "2026-11-21", days: 1, last: null, themes: [], minImages: 6, maxImages: 9, rng: () => 0.99 });

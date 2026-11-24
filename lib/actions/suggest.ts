@@ -111,8 +111,9 @@ export async function cardNameIdeasAction(cardId: string): Promise<CardNameIdeas
   const vibe = theme?.title ? `names that suit a "${theme.title}" baby photoshoot`.slice(0, VIBE_MAX) : undefined;
   const ai = await suggestNames({ gender, style, count: CARD_IDEAS, vibe, existing });
   if (!ai.ok) return fail(`The AI could not suggest names: ${ai.error}`);
-  const fresh = keepUsNames(filterNameSuggestions(ai.data, all.rows.map((n) => n.name), style).fresh, gender, { style }).kept;
-  if (!fresh.length) return fail("Every idea Gemini had is already one of your names. Try again.");
+  const us = keepUsNames(filterNameSuggestions(ai.data, all.rows.map((n) => n.name), style).fresh, gender, { style });
+  const fresh = us.kept;
+  if (!fresh.length) return fail(us.dropped ? "None of the ideas were US names. Try again." : "Every idea Gemini had is already one of your names. Try again.");
   return { ok: true, ideas: fresh.slice(0, CARD_IDEAS).map((n) => ({ name: n.name, meaning: n.meaning })) };
 }
 

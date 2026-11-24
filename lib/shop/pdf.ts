@@ -10,7 +10,8 @@ import { renderNamesPdf } from "@/lib/pdf/render";
 // encrypted with the order's own password. Names the owner has not sorted yet go to the last meaning group ("More
 // Beautiful Names"); the public route never calls the AI (the Orders page reminds the owner to sort them).
 
-export interface ShopPdfName { name: string; meaning: string; gender: string; style: string; status: string; origin: string | null; meaning_category: string | null }
+/** `autopilot_note`: sent from migration 024 on, so the PDF keeps names skipped only as "Not a US name". */
+export interface ShopPdfName { name: string; meaning: string; gender: string; style: string; status: string; origin: string | null; meaning_category: string | null; autopilot_note?: string | null }
 
 /** "Maria Santos (maria@example.com)", cut to the PDF's 120 characters. */
 export function buyerStamp(name: string, email: string): string {
@@ -24,6 +25,7 @@ export async function buildShopPdf(i: { pack: NichePack; product: ShopProduct; b
     .map((n) => ({
       name: n.name, meaning: n.meaning, gender: n.gender as "girl" | "boy", style: n.style as "single" | "two-word",
       status: n.status as PdfSourceName["status"], origin: n.origin, meaning_category: isMeaningCategory(n.meaning_category) ? n.meaning_category : null,
+      autopilot_note: n.autopilot_note ?? null,
     }));
   const sections = planSections(rows, i.product, i.pack.pdf, i.pack.nameCategories);
   const count = sections.reduce((s, x) => s + x.count, 0);

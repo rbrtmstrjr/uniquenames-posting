@@ -51,6 +51,7 @@ describe("autopilotDeps", () => {
     ] });
     const r = await namesDeps.suggest({ gender: "boy", target: { kind: "theme", title: "Biblical", hint: null }, want: 10, allNames: ["Noah"], existing: [] });
     expect(r.ok).toBe(true);
+    // Zephyr passes the Unique Names US gate only because the real US list has it (boys #1123); a list refresh may move it.
     expect(r.names?.map((n) => n.name)).toEqual(["Zephyr"]);
   });
 });

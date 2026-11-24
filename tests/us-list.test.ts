@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { US_LIST, US_NOTE, keepUsNames, makeUsList, usKey, type UsNamesData } from "@/lib/names/us-list";
+import { US_LETTER_POOL_MIN, US_LIST, US_NOTE, keepUsNames, makeUsList, usGateOn, usKey, usLetterOk, type UsNamesData } from "@/lib/names/us-list";
 
 // Ranks: Vivienne 150, Vera 900, Olivia 1 (top 100), Vikram 4000 (only allowed if the letter is short), Zoe 300.
 const ranks = (from: number, n: number, letter: string) =>
@@ -16,6 +16,14 @@ describe("the US list", () => {
     expect(usKey(" Zoë ")).toBe("zoe");
     expect(L.rank("ZOË", "girl")).toBe(300);
   });
+  it("keys keep letters only: hyphens, apostrophes and spaces go", () => {
+    expect(usKey("Anne-Marie")).toBe("annemarie");
+    expect(usKey("D'Angelo")).toBe("dangelo");
+    expect(usKey("Zoë-Rose ")).toBe("zoerose");
+    const H = makeUsList({ years: [2025], girl: { annemarie: 900 }, boy: { dangelo: 700 } });
+    expect(H.rank("Anne-Marie", "girl")).toBe(900);
+    expect(H.rank("D'Angelo", "boy")).toBe(700);
+  });
   it("101 to 2,000 for a letter with enough names", () => {
     expect(L.isUsName("Vivienne", "girl")).toBe(true);
     expect(L.isUsName("Olivia", "girl")).toBe(false); // top 100
@@ -31,6 +39,33 @@ describe("the US list", () => {
     expect(L.isUsTwoWord("Olivia Rose", "girl")).toBe(false);
     expect(L.isUsTwoWord("Vivienne Nobody", "girl")).toBe(false);
     expect(L.isUsTwoWord("Vivienne", "girl")).toBe(false);
+  });
+  it("usPool counts a letter's names from 101 up to its range (the widened one for a short letter)", () => {
+    expect(L.usPool("V", "girl")).toBe(32); // Vivienne, Vera and 30 more in 101..2000
+    expect(L.usPool("v", "boy")).toBe(2); // Victor 500 and Vikram 4000 (boys' V widens to 5,000)
+    expect(L.usPool("O", "girl")).toBe(0); // Olivia is top 100
+    expect(US_LETTER_POOL_MIN).toBe(16);
+  });
+  it("usLetterOk: both genders need 16 names in range (real list: girls' U and Q are short, V is fine)", () => {
+    expect(US_LIST.usPool("U", "girl")).toBeLessThan(16);
+    expect(US_LIST.usPool("Q", "girl")).toBeLessThan(16);
+    expect(usLetterOk("U")).toBe(false);
+    expect(usLetterOk("Q")).toBe(false);
+    expect(usLetterOk("V")).toBe(true);
+    expect(usLetterOk("a")).toBe(true);
+  });
+  it("usLetterOk is always true when the gate is off (Name Nest)", () => {
+    const saved = process.env.NICHE;
+    process.env.NICHE = "name-nest";
+    try {
+      expect(usGateOn()).toBe(false);
+      expect(usLetterOk("U")).toBe(true);
+    } finally { if (saved === undefined) delete process.env.NICHE; else process.env.NICHE = saved; }
+  });
+  it("the real list has no SSA placeholders", () => {
+    for (const k of ["unknown", "baby", "infant", "boy", "girl", "babyboy", "babygirl"]) {
+      expect([k, US_LIST.rank(k, "girl"), US_LIST.rank(k, "boy")]).toEqual([k, null, null]);
+    }
   });
   it("the real list has both genders and recent years", () => {
     expect(US_LIST.latestYear).toBeGreaterThanOrEqual(2023);

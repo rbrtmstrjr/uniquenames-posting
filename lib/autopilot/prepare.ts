@@ -3,6 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Gender, PostRow, SettingsRow } from "@/lib/db/types";
 import { dayLabel, firstDay, labelText, lastFacebook, planProblems, planRun, type PlannedItem } from "./plan";
 import { parseNameThemes } from "./name-themes";
+import { usLetterOk } from "@/lib/names/us-list";
 
 export const NEEDS_022 = "Autopilot needs a database update first: run supabase/migrations/022_autopilot.sql in Supabase.";
 export const missing022 = (e: { message: string; code?: string }) => e.code === "PGRST204" || e.code === "42703" || e.code === "42P01" || e.code === "PGRST205" || /schema cache|does not exist/i.test(e.message);
@@ -25,7 +26,7 @@ export async function preparePlan(sb: SupabaseClient, days: number, rng: () => n
   const last = lastFacebook((posts.data ?? []) as Pick<PostRow, "fb_state" | "fb_scheduled_for" | "posted_at" | "letter" | "name_theme">[]);
   const first = firstDay(last.at, now);
   const items = planRun({ firstDay: first, days, last: last.label, themes: parseNameThemes(s.autopilot_name_themes).map((t) => t.title),
-    minImages: s.min_images, maxImages: s.max_images, rng });
+    minImages: s.min_images, maxImages: s.max_images, rng, letterOk: usLetterOk }); // Unique Names skips letters short of US names
   const left: Record<Gender, number> = { boy: 0, girl: 0 };
   for (const t of (themes.data ?? []) as { gender: Gender }[]) left[t.gender]++;
   const dayList = [...new Set(items.map((i) => i.day))].map((day) => ({ day, dayLabel: dayLabel(day), label: labelText(items.find((i) => i.day === day)!) }));

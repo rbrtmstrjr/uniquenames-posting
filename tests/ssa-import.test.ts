@@ -45,6 +45,19 @@ describe("SSA national data (scripts/import-ssa.ts)", () => {
   });
 });
 
+describe("the US list (scripts/import-us-names.ts)", () => {
+  it("best rank over the years, top N, sorted; SSA placeholders (any case) left out with SSA's ranks kept", async () => {
+    const { buildUsNames } = await import("@/scripts/lib/us-names");
+    const y1 = year([["Olivia", "F", 100], ["Unknown", "F", 90], ["Vera", "F", 80], ["Baby", "M", 70], ["Liam", "M", 60], ["BOY", "M", 50]]);
+    const y2 = year([["Vera", "F", 100], ["Babygirl", "F", 90], ["Olivia", "F", 80], ["Infant", "M", 70], ["Babyboy", "M", 60], ["Girl", "M", 55], ["Liam", "M", 50]]);
+    const out = buildUsNames([{ year: 2025, text: y2 }, { year: 2024, text: y1 }], 3);
+    expect(out.years).toEqual([2024, 2025]);
+    expect(out.girl).toEqual({ olivia: 1, vera: 1 });
+    expect(out.boy).toEqual({ liam: 2 }); // Liam: 2nd in 2024 (after Baby), 4th in 2025
+    expect(Object.keys(out.girl)).toEqual(["olivia", "vera"]);
+  });
+});
+
 describe("meanings + origins (scripts/name-meanings.ts)", () => {
   it("meaning: 2-6 plain lowercase words, one meaning", () => {
     expect(meaningProblem("olive tree")).toBeNull();

@@ -25,6 +25,7 @@ import type { NamesFilter } from "@/lib/names/filter";
 import { nameDetail } from "@/lib/names/detail";
 import { MEANING_CATEGORIES, isMeaningCategory, type MeaningCategory } from "@/lib/names/categories";
 import { sellable } from "@/lib/pdf/plan";
+import { US_MIN_RANK } from "@/lib/names/us-key";
 import { sharedPack } from "@/packs/shared";
 
 const STATUS_TONE: Record<NameStatus, "ok" | "accent" | "muted" | "warn"> = { available: "ok", reserved: "accent", used: "muted", skip: "warn", pending: "accent" };
@@ -46,6 +47,9 @@ function GroupSelect({ n, disabled, onPick }: { n: NameRow; disabled: boolean; o
     </Select>
   );
 }
+
+/** "US #234", "US #5 · too common" (the top 100), or "Not on the US list". */
+const usRankText = (r: number | null) => (r === null ? "Not on the US list" : r < US_MIN_RANK ? `US #${r} · too common` : `US #${r}`);
 
 /** `usRanks` (by name id) comes from the server page: the US list itself must never reach the browser. */
 export function NamesTable({ names: serverNames, initial = {}, toolbar, usRanks }: { names: NameRow[]; initial?: NamesFilter; toolbar?: React.ReactNode; usRanks?: Record<string, number | null> }) {
@@ -167,7 +171,7 @@ export function NamesTable({ names: serverNames, initial = {}, toolbar, usRanks 
                 <div className="break-words text-sm text-muted">{n.meaning}</div>
                 {nameDetail(n) && <div className="text-xs text-muted">{nameDetail(n)}</div>}
                 {usRanks && n.style === "single" && n.id in usRanks && (
-                  <div className="text-xs text-muted">{usRanks[n.id] === null ? "Not on the US list" : `US #${usRanks[n.id]}`}</div>
+                  <div className="text-xs text-muted">{usRankText(usRanks[n.id])}</div>
                 )}
                 {/* Why Autopilot skipped it (migration 022), e.g. "Skipped by Autopilot: hard to say". */}
                 {n.status === "skip" && n.autopilot_note && <div className="break-words text-xs text-muted">{n.autopilot_note}</div>}

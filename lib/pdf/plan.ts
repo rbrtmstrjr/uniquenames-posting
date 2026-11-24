@@ -1,11 +1,15 @@
 import type { Gender, NameRow, NameStyle } from "@/lib/db/types";
 import { FALLBACK_CATEGORY, MEANING_CATEGORIES, isMeaningCategory, type MeaningCategory } from "@/lib/names/categories";
 import type { PackPdf, PdfGender } from "@/packs/types";
+import { US_NOTE } from "@/lib/names/us-key";
 
 // What goes into the names PDF, in order (owner, 2026-10-11): per gender section (Girl, then Boy for "Both") ->
 // Single names, then Combo (two-word) names -> the meaning groups in their fixed order -> names A to Z. Pure.
 
-/** Only names the owner approved: never pending (AI ideas waiting for approval) or skipped. */
+/**
+ * Only names the owner approved: never pending (AI ideas waiting for approval) or skipped, except names skipped only
+ * as "Not a US name" (Unique Names' US check, owner 2026-11-24): they stop being used in posts but are still sold.
+ */
 export const PDF_STATUSES = ["available", "reserved", "used"] as const;
 
 export interface PdfName { name: string; meaning: string; origin: string | null }
@@ -14,14 +18,15 @@ export interface PdfStyle { style: NameStyle; title: string; intro: string; cate
 export interface PdfSection { gender: Gender; label: string; styles: PdfStyle[]; count: number }
 
 export type PdfSourceName = Pick<NameRow, "name" | "meaning" | "gender" | "style" | "status"> &
-  Partial<Pick<NameRow, "origin" | "meaning_category">>;
+  Partial<Pick<NameRow, "origin" | "meaning_category" | "autopilot_note">>;
 
 export const pdfGenders = (g: PdfGender): Gender[] => (g === "both" ? ["girl", "boy"] : [g]);
 const STYLES: NameStyle[] = ["single", "two-word"];
 const byName = (a: PdfName, b: PdfName) => a.name.localeCompare(b.name, "en", { sensitivity: "base" }) || a.name.localeCompare(b.name);
 
-/** Is this name in the PDF at all (approved)? */
-export const sellable = (n: Pick<NameRow, "status">) => (PDF_STATUSES as readonly string[]).includes(n.status);
+/** Is this name in the PDF at all (approved, or skipped only as "Not a US name")? */
+export const sellable = (n: Pick<NameRow, "status"> & Partial<Pick<NameRow, "autopilot_note">>) =>
+  (PDF_STATUSES as readonly string[]).includes(n.status) || (n.status === "skip" && n.autopilot_note === US_NOTE);
 
 /**
  * The PDF's sections. `categoryOf` gives a name's group when the row has none (sorted in memory before migration
@@ -56,7 +61,7 @@ export function planSections(
 }
 
 /** How many names each part of a pick would have (the export dialog's preview). */
-export function previewCounts(names: readonly Pick<NameRow, "gender" | "style" | "status">[]): Record<Gender, Record<NameStyle, number>> {
+export function previewCounts(names: readonly (Pick<NameRow, "gender" | "style" | "status"> & Partial<Pick<NameRow, "autopilot_note">>)[]): Record<Gender, Record<NameStyle, number>> {
   const out: Record<Gender, Record<NameStyle, number>> = { girl: { single: 0, "two-word": 0 }, boy: { single: 0, "two-word": 0 } };
   for (const n of names) if (sellable(n)) out[n.gender][n.style] += 1;
   return out;

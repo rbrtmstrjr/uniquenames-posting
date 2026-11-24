@@ -3,7 +3,7 @@ import type { Gender, NameStyle } from "@/lib/db/types";
 import type { GeminiSchema, GenerateJsonResult } from "./gemini";
 import { aiJson } from "./provider";
 import { activePack } from "@/packs";
-import { keepUsNames } from "@/lib/names/us-list";
+import { keepUsNames, usGateOn } from "@/lib/names/us-list";
 import { MEANING_MAX_WORDS, MEANING_MIN_WORDS, VIBE_MAX, filterLetterSuggestions, sampleForPrompt, type LetterCandidate, type LetterFilterResult, type NameSuggestion, type ThemeFields } from "./suggest-filter";
 
 /** The active niche pack's suggestion prompts (packs/<id>/suggest.ts). */
@@ -179,8 +179,11 @@ export function suggestLetterNames(i: SuggestLetterInput): Promise<GenerateJsonR
 export async function suggestForLetter(i: SuggestLetterInput & { allNames: string[] }): Promise<{ ok: true; result: LetterFilterResult } | { ok: false; error: string }> {
   const ai = await suggestLetterNames(i);
   if (!ai.ok) return { ok: false, error: ai.error };
-  const r = filterLetterSuggestions(ai.data, i.allNames, { letter: i.letter, want: i.count, style: i.style }, i.gender);
-  // Unique Names: only names parents in the US actually give (SSA rank); the others count as invalid.
+  if (!usGateOn()) return { ok: true, result: filterLetterSuggestions(ai.data, i.allNames, { letter: i.letter, want: i.count, style: i.style }, i.gender) };
+  // Unique Names: only names parents in the US actually give (SSA rank); the others count as invalid. The gate runs
+  // before the cap, so the over-ask absorbs the drops; the names past `count` count as more than wanted (offLetter).
+  const r = filterLetterSuggestions(ai.data, i.allNames, { letter: i.letter, want: ai.data.length, style: i.style }, i.gender);
   const us = keepUsNames(r.fresh, i.gender, { style: i.style, letter: i.letter });
-  return { ok: true, result: us.dropped ? { ...r, fresh: us.kept, invalid: r.invalid + us.dropped } : r };
+  const fresh = us.kept.slice(0, i.count);
+  return { ok: true, result: { ...r, fresh, invalid: r.invalid + us.dropped, offLetter: r.offLetter + us.kept.length - fresh.length } };
 }

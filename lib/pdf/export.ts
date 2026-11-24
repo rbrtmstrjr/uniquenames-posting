@@ -10,6 +10,7 @@ import { PDF_STATUSES, pdfFileName, pdfGenders, planSections, type PdfSourceName
 import { newOwnerPassword, newPassword } from "./password";
 import { renderNamesPdf } from "./render";
 import { NEEDS_018, missing018 } from "./migration";
+import { US_NOTE, usGateOn } from "@/lib/names/us-list";
 
 export { NEEDS_018, missing018 };
 
@@ -33,11 +34,20 @@ export function validateExport(raw: unknown): { ok: true; buyer: string; gender:
   return { ok: true, buyer, gender: r.gender };
 }
 
+/**
+ * PostgREST filter for the names the PDF sells: the approved statuses, or skipped with exactly the US check's note
+ * (the note is double-quoted: PostgREST takes a quoted value literally, spaces included).
+ */
+export const SELLABLE_OR = `status.in.(${PDF_STATUSES.join(",")}),and(status.eq.skip,autopilot_note.eq."${US_NOTE}")`;
+/** Unique Names also sells its "Not a US name" skips (filter SELLABLE_OR); other packs read the statuses as before. */
+export const sellsUsSkips = usGateOn;
+
 /** Every approved name (all pages of the table), and whether the meaning_category column exists. */
 export async function loadSellableNames(sb: Sb): Promise<{ ok: true; rows: ExportRow[]; hasColumn: boolean } | { ok: false; error: string }> {
   const rows: ExportRow[] = [];
   for (let from = 0; ; from += 1000) {
-    const { data, error } = await sb.from("names").select("*").in("status", [...PDF_STATUSES]).order("name").order("id").range(from, from + 999);
+    const q = sb.from("names").select("*");
+    const { data, error } = await (sellsUsSkips() ? q.or(SELLABLE_OR) : q.in("status", [...PDF_STATUSES])).order("name").order("id").range(from, from + 999);
     if (error) return { ok: false, error: error.message };
     rows.push(...((data ?? []) as ExportRow[]));
     if ((data?.length ?? 0) < 1000) break;

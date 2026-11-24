@@ -22,12 +22,24 @@ describe("usCleanupPlan", () => {
   it("keeps an available name in the US range (Vivienne)", () => {
     expect(usCleanupPlan([row("1", "Vivienne")])).toEqual({ skip: [], checked: 1 });
   });
-  it("does not check used or already-skipped names", () => {
-    const p = usCleanupPlan([row("1", "Sakura", { status: "used" }), row("2", "Sakura", { status: "skip" })]);
+  it("does not check used, reserved or already-skipped names", () => {
+    const p = usCleanupPlan([row("1", "Sakura", { status: "used" }), row("2", "Sakura", { status: "skip" }), row("3", "Sakura", { status: "reserved" })]);
     expect(p).toEqual({ skip: [], checked: 0 });
+  });
+  it("checks pending names too: a pending non-US name is skipped, a pending US name is kept", () => {
+    const p = usCleanupPlan([row("1", "Sakura", { status: "pending" }), row("2", "Vivienne", { status: "pending" })]);
+    expect(p).toEqual({ skip: ["1"], checked: 2 });
   });
   it("keeps a restored name (it carries the note)", () => {
     expect(usCleanupPlan([row("1", "Sakura", { autopilot_note: US_NOTE })]).skip).toEqual([]);
+  });
+  it("keeps any name with a note: Autopilot's own skips the owner brought back too (names-step's rule)", () => {
+    const p = usCleanupPlan([
+      row("1", "Sakura", { autopilot_note: "made up" }),
+      row("2", "Olivia", { status: "pending", autopilot_note: "too close to Aria" }),
+      row("3", "Sakura", { autopilot_note: "" }),
+    ]);
+    expect(p).toEqual({ skip: ["3"], checked: 3 });
   });
   it("checks two-word names by both words", () => {
     const p = usCleanupPlan([
@@ -36,8 +48,8 @@ describe("usCleanupPlan", () => {
     ]);
     expect(p.skip).toEqual(["2"]);
   });
-  it("counts available rows only in checked", () => {
-    expect(usCleanupPlan([row("1", "Vivienne"), row("2", "Sakura"), row("3", "Zed", { status: "used" })]).checked).toBe(2);
+  it("counts available and pending rows only in checked", () => {
+    expect(usCleanupPlan([row("1", "Vivienne"), row("2", "Sakura", { status: "pending" }), row("3", "Zed", { status: "used" })]).checked).toBe(2);
   });
 });
 
@@ -54,6 +66,12 @@ describe("usCheckPreviewAction", () => {
     expect(await usCheckPreviewAction()).toEqual({ ok: true, skip: 2, checked: 3 });
     expect(fake.queries.some((q) => op(q, "update"))).toBe(false);
   });
+  it("reads available and pending names", async () => {
+    await usCheckPreviewAction();
+    const read = fake.queries.find((q) => q.table === "names")!;
+    expect(op(read, "in")).toEqual(["in", "status", ["available", "pending"]]);
+    expect(op(read, "eq")).toBeUndefined();
+  });
   it("refuses when the gate is off", async () => {
     gate = false;
     expect(await usCheckPreviewAction()).toEqual({ ok: false, error: "This check is for Unique Names." });
@@ -65,18 +83,19 @@ describe("usCheckPreviewAction", () => {
 });
 
 describe("usCheckApplyAction", () => {
-  it("updates in chunks of 200 with the available guard and the note", async () => {
-    const many = Array.from({ length: 450 }, (_, i) => row(`s${i}`, "Sakura"));
+  it("updates in chunks of 100 with the available-or-pending guard and the note", async () => {
+    const many = Array.from({ length: 450 }, (_, i) => row(`s${i}`, "Sakura", { status: i % 2 ? "pending" : "available" }));
     // pages of 1,000: the first page is short, so the read stops
     respond = (q) => (op(q, "update") ? { data: [] } : { data: many });
     const r = await usCheckApplyAction();
     expect(r).toEqual({ ok: true, skipped: 450 });
     const ups = fake.queries.filter((q) => op(q, "update"));
-    expect(ups.map((q) => (op(q, "in")![2] as string[]).length)).toEqual([200, 200, 50]);
+    const ins = (q: (typeof ups)[number]) => q.ops.filter((o) => o[0] === "in");
+    expect(ups.map((q) => (ins(q).find((o) => o[1] === "id")![2] as string[]).length)).toEqual([100, 100, 100, 100, 50]);
     for (const q of ups) {
       expect(op(q, "update")![1]).toEqual({ status: "skip", autopilot_note: US_NOTE });
-      expect(op(q, "eq")).toEqual(["eq", "status", "available"]);
-      expect(op(q, "in")![1]).toBe("id");
+      expect(ins(q)).toContainEqual(["in", "status", ["available", "pending"]]);
+      expect(op(q, "eq")).toBeUndefined();
     }
   });
   it("refuses when the gate is off", async () => {

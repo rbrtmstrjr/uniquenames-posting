@@ -43,8 +43,17 @@ describe("UsCheck", () => {
     preview.mockResolvedValue({ ok: true, skip: 0, checked: 40 });
     render(<UsCheck />);
     open();
-    expect(await screen.findByText("Every available name is a US name.")).toBeTruthy();
+    expect(await screen.findByText("Every available and pending name is a US name.")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Skip them" })).toBeNull();
+  });
+  it("one name: singular wording", async () => {
+    preview.mockResolvedValue({ ok: true, skip: 1, checked: 300 });
+    apply.mockResolvedValue({ ok: true, skipped: 1 });
+    render(<UsCheck />);
+    open();
+    expect(await screen.findByText("1 name isn't a US name (300 checked). Skip it?")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Skip it" }));
+    expect(await screen.findByText("1 name skipped.")).toBeTruthy();
   });
 });
 
@@ -57,6 +66,12 @@ describe("NamesTable US rank", () => {
     render(<NamesTable names={[row("Vivienne"), row("Sakura")]} usRanks={{ Vivienne: 172, Sakura: null }} />);
     expect(screen.getByText("US #172")).toBeTruthy();
     expect(screen.getByText("Not on the US list")).toBeTruthy();
+  });
+  it("a top-100 name says it is too common (100 is, 101 is not)", () => {
+    render(<NamesTable names={[row("Olivia"), row("Margot"), row("Willa")]} usRanks={{ Olivia: 5, Margot: 100, Willa: 101 }} />);
+    expect(screen.getByText("US #5 · too common")).toBeTruthy();
+    expect(screen.getByText("US #100 · too common")).toBeTruthy();
+    expect(screen.getByText("US #101")).toBeTruthy();
   });
   it("shows nothing when no ranks are passed", () => {
     render(<NamesTable names={[row("Vivienne")]} />);
