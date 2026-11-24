@@ -1,6 +1,6 @@
 import JSZip from "jszip";
 import { describe, expect, it } from "vitest";
-import { latestYear, parseYear, pickTop } from "@/scripts/lib/ssa";
+import { latestYear, parseYear, pickTop, recentYears } from "@/scripts/lib/ssa";
 import { acceptMeanings, meaningProblem, meaningsPrompt, originProblem } from "@/scripts/lib/meanings";
 
 const year = (rows: [string, "F" | "M", number][]) => rows.map((r) => r.join(",")).join("\r\n") + "\r\n";
@@ -15,6 +15,16 @@ describe("SSA national data (scripts/import-ssa.ts)", () => {
     expect(got.year).toBe(2024);
     expect(got.text).toContain("Olivia,F,10");
     await expect(latestYear(await new JSZip().generateAsync({ type: "uint8array" }))).rejects.toThrow(/no yobYYYY/);
+  });
+
+  it("recentYears returns the latest N years, newest first", async () => {
+    const zip = new JSZip();
+    zip.file("yob2021.txt", year([["Ava", "F", 9]]));
+    zip.file("yob2022.txt", year([["Ava", "F", 9]]));
+    zip.file("yob2023.txt", year([["Ava", "F", 9]]));
+    const got = await recentYears(await zip.generateAsync({ type: "uint8array" }), 2);
+    expect(got.map((g) => g.year)).toEqual([2023, 2022]);
+    await expect(recentYears(await new JSZip().generateAsync({ type: "uint8array" }))).rejects.toThrow(/no yobYYYY/);
   });
 
   it("ranks per sex in file order and skips junk lines", () => {
