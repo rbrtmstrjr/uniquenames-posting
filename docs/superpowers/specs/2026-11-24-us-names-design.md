@@ -62,8 +62,8 @@ Insights for 1 to 2 weeks after the change.
 - The parent's-eye check now judges as a parent in the US, Canada, the UK or Australia would, keeping in mind that
   Filipino moms read the page too.
 - The US list check runs before the Claude check, so no money is spent judging a name that will be dropped.
-- Saved names outside the range are not used. The one-time cleanup below skips them, and Autopilot's own stock
-  read also filters by the list.
+- Saved names come from the library, which the one-time cleanup below cleans. Autopilot adds no separate stock
+  filter, so names the owner adds or restores are used like any available name.
 
 **Today.**
 - Today keeps picking from available names in the library.
@@ -82,8 +82,8 @@ Which names it touches:
   The owner can bring back any of their own on the Names page; filtering Skip with the note shows them. A restored
   name stays.
 
-The US rank is written to each checked name, in the existing `names.us_rank` / `us_year` columns. The Names page
-shows it, for example "US #234".
+The Names page shows each name's US rank, for example "US #234", or "Not on the US list". It is worked out from the
+list when the page loads, so nothing extra is written to the database. The cleanup itself is one batched update.
 
 ### Not changed
 - Posts already made or scheduled.
@@ -104,8 +104,8 @@ shows it, for example "US #234".
   - the pack's suggestion prompts are rewritten (packs/unique-names/suggest.ts);
   - the list filter is applied before names are saved or returned.
 - The Autopilot names judge prompt (lib/autopilot/judge-names.ts) gets the new parent's point of view.
-- The cleanup is a server action on the Names page with a preview count and a confirm. It writes `us_rank` and
-  `us_year`.
+- The cleanup is a server action on the Names page with a preview count and a confirm: one batched update of
+  `status` and `autopilot_note`.
 - The Names page row shows the US rank.
 - The whole feature is behind the active pack, so Name Nest is unaffected.
 
@@ -119,15 +119,14 @@ shows it, for example "US #234".
 - **Suggestions:** names outside the range are dropped before saving, for each path. The rewritten prompts name the
   US, Canada, the UK and Australia and no longer list "Yoruba, Sanskrit".
 - **Autopilot:**
-  - out-of-range names never reach the judge;
-  - the judge prompt has the new point of view;
-  - the stock filter respects the list.
+  - out-of-range AI names never reach the judge;
+  - the judge prompt has the new point of view.
 - **Cleanup:**
   - the preview count;
   - only available names are skipped, with the note;
   - used and already-skipped names are untouched;
   - restored names are never skipped again;
-  - `us_rank` is written.
+  - one batched update is sent.
 - **Names page:** the US rank is shown.
 - **Live:** after the cleanup, the next letter posts on Today and Autopilot use names US moms know. Top countries in
   Insights is checked after 1 to 2 weeks.
