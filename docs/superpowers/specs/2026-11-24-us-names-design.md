@@ -130,3 +130,14 @@ list when the page loads, so nothing extra is written to the database. The clean
 - **Names page:** the US rank is shown.
 - **Live:** after the cleanup, the next letter posts on Today and Autopilot use names US moms know. Top countries in
   Insights is checked after 1 to 2 weeks.
+
+## Owner decisions after the final review (2026-11-24)
+- **Hard letters:** Autopilot skips a letter for the day when either gender has fewer than **16** names in its US
+  range for that letter (girls' Q and U today), and moves on to the next letter or name theme. Nothing is held.
+- **PDF and shop:** names skipped as "Not a US name" stay in the paid names PDF and the shop's name counts. They
+  only stop being used in posts. This needs migration **024**, which redefines `shop_info` to count them. Before
+  024 runs, the shop count is just lower.
+- **Name origins:** Autopilot's names check also turns down names that are mainly South Asian, Arabic or Middle
+  Eastern, East Asian or African, even when they are on the US list. It is the same check, at no extra cost. The
+  cleanup button still uses only the US list.
+- **Pending names** are checked by the cleanup too (pending names made before this update were never checked).
