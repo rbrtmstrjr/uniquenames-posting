@@ -58,10 +58,18 @@ Design: `docs/superpowers/specs/2026-11-04-facebook-posting-design.md`; research
 - Names now aim at the US, Canada, the UK and Australia. A name must be a known US name: US rank 101 to 2,000 (up to
   5,000 for letters with few names). Very common names (top 100) and names not on the US list are left out.
 - This applies to AI suggestions and to Autopilot. Names you add yourself are never checked.
-- Press **Check names against the US list** on the Names page once after this update. It shows how many available
-  names are not US names, and skips them only after you say so. Skipped names show "Not a US name" and can be brought
-  back (Use again); a name you bring back is not skipped again.
-- Each single name on the Names page shows its US rank ("US #172") or "Not on the US list".
+- Two-word names: both words must be on the US list (the first name not in the top 100).
+- Run `supabase/migrations/024_us_names_shop.sql` in Supabase after this update (for the shop count). Until then the
+  shop count is just lower.
+- Press **Check names against the US list** on the Names page once after this update. Autopilot keeps using library
+  names until you do. It shows how many available and pending names are not US names (pending names are checked too),
+  and skips them only after you say so. Skipped names show "Not a US name" and can be brought back (Use again); a name
+  you bring back is not skipped again.
+- Skipped names stay in the names PDF and the shop count: they only stop being used in posts.
+- Autopilot skips letters that are short of US names (girls' Q and U today) and goes on to the next letter or theme.
+- Each single name on the Names page shows its US rank ("US #172", "US #5 · too common") or "Not on the US list".
+- Bulk undo, if ever needed: in the Supabase SQL Editor run
+  `update names set status = 'available' where status = 'skip' and autopilot_note = 'Not a US name';`
 - Refresh the list once a year: run `npx tsx scripts/import-us-names.ts`, then commit `packs/unique-names/us-names.json`.
   Design: `docs/superpowers/specs/2026-11-24-us-names-design.md`.
 

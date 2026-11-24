@@ -272,14 +272,22 @@ Do these in this order:
    names.
 
 ## US names (2026-11-24)
-No database change and no new keys. Names now aim at the US, Canada, the UK and Australia (US rank 101 to 2,000,
-5,000 for letters with few names). AI suggestions and Autopilot use only those names.
-1. Open the Names page and press **Check names against the US list** once.
-2. It says how many available names are not US names ("N names aren't US names (M checked). Skip them?"). Press
-   **Skip them** to go ahead, or **Cancel** to change nothing.
-3. Skipped names show "Not a US name" on the Skip filter. Press Use again to bring one back; it is not skipped again.
-4. Names you add yourself (Add name, Paste many) are never checked. Used names and posts already made are not touched.
-5. Refresh the list once a year: run `npx tsx scripts/import-us-names.ts`, then commit `packs/unique-names/us-names.json`.
+No new keys. Names now aim at the US, Canada, the UK and Australia (US rank 101 to 2,000, 5,000 for letters with few
+names). AI suggestions and Autopilot use only those names. Two-word names: both words must be on the US list (the first
+name not in the top 100).
+1. Run `supabase/migrations/024_us_names_shop.sql` in the Supabase SQL Editor after this update (safe to run twice).
+   It keeps the skipped names in the shop count. Until then the shop count is just lower.
+2. Open the Names page and press **Check names against the US list** once. Autopilot keeps using library names until
+   you do.
+3. It says how many available and pending names are not US names ("N names aren't US names (M checked). Skip them?").
+   Pending names are checked too. Press **Skip them** to go ahead, or **Cancel** to change nothing.
+4. Skipped names show "Not a US name" on the Skip filter. Press Use again to bring one back; it is not skipped again.
+   Skipped names stay in the names PDF and the shop count: they only stop being used in posts.
+5. Names you add yourself (Add name, Paste many) are never checked. Used names and posts already made are not touched.
+6. Autopilot skips letters that are short of US names (girls' Q and U today) and goes on to the next letter or theme.
+7. Bulk undo, if ever needed: in the Supabase SQL Editor run
+   `update names set status = 'available' where status = 'skip' and autopilot_note = 'Not a US name';`
+8. Refresh the list once a year: run `npx tsx scripts/import-us-names.ts`, then commit `packs/unique-names/us-names.json`.
 
 ## When something is wrong
 - Header dot red, "PC offline": turn on the PC. The worker starts at login. **Generate** is disabled (the button says why) until the PC is back. "PC offline" shows 3 minutes after the PC stopped.
