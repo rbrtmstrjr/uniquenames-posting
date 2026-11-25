@@ -1,7 +1,7 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Gender, PostRow, SettingsRow } from "@/lib/db/types";
-import { dayLabel, firstDay, labelText, lastFacebook, planProblems, planRun, type PlannedItem } from "./plan";
+import { dayLabel, firstDay, labelText, lastFacebook, planProblems, planRun, type Label, type PlannedItem } from "./plan";
 import { parseNameThemes } from "./name-themes";
 import { usLetterOk } from "@/lib/names/us-list";
 
@@ -9,6 +9,19 @@ export const NEEDS_022 = "Autopilot needs a database update first: run supabase/
 export const missing022 = (e: { message: string; code?: string }) => e.code === "PGRST204" || e.code === "42703" || e.code === "42P01" || e.code === "PGRST205" || /schema cache|does not exist/i.test(e.message);
 
 export interface RunPreview { range: string; posts: number; days: { day: string; dayLabel: string; label: string }[]; problems: string[] }
+
+/**
+ * The label of the latest held Autopilot item later than the last Facebook post (`after`; any held item when there is
+ * none), so a held post never blocks the A–Z and theme flow (brief 2026-11-25). Null on none or a read error.
+ */
+async function heldAfter(sb: SupabaseClient, after: string | null): Promise<Label | null> {
+  let q = sb.from("autopilot_items").select("letter, name_theme, scheduled_for").eq("state", "held");
+  if (after) q = q.gt("scheduled_for", after);
+  const { data, error } = await q.order("scheduled_for", { ascending: false }).limit(1);
+  if (error) return null;
+  const h = (data ?? [])[0] as { letter: string | null; name_theme: string | null } | undefined;
+  return h?.letter ? { letter: h.letter, nameTheme: null } : h?.name_theme ? { letter: null, nameTheme: h.name_theme } : null;
+}
 
 /** The plan for a run of `days` from today's database (preview and start use the same reading). */
 export async function preparePlan(sb: SupabaseClient, days: number, rng: () => number, now: number):
@@ -24,8 +37,9 @@ export async function preparePlan(sb: SupabaseClient, days: number, rng: () => n
   const s = settings.data as SettingsRow;
   if (s.autopilot_name_themes === undefined) return { ok: false, error: NEEDS_022 };
   const last = lastFacebook((posts.data ?? []) as Pick<PostRow, "fb_state" | "fb_scheduled_for" | "posted_at" | "letter" | "name_theme">[]);
+  // The first day stays the day after the last Facebook post, so held days are planned again with the next labels.
   const first = firstDay(last.at, now);
-  const items = planRun({ firstDay: first, days, last: last.label, themes: parseNameThemes(s.autopilot_name_themes).map((t) => t.title),
+  const items = planRun({ firstDay: first, days, last: (await heldAfter(sb, last.at)) ?? last.label, themes: parseNameThemes(s.autopilot_name_themes).map((t) => t.title),
     minImages: s.min_images, maxImages: s.max_images, rng, letterOk: usLetterOk }); // Unique Names skips letters short of US names
   const left: Record<Gender, number> = { boy: 0, girl: 0 };
   for (const t of (themes.data ?? []) as { gender: Gender }[]) left[t.gender]++;
