@@ -40,18 +40,19 @@ describe("the US list", () => {
     expect(L.isUsTwoWord("Vivienne Nobody", "girl")).toBe(false);
     expect(L.isUsTwoWord("Vivienne", "girl")).toBe(false);
   });
-  it("usPool counts a letter's names from 101 up to its range (the widened one for a short letter)", () => {
+  it("usPool counts a letter's names ranked 101 to 2,000 only, never the widened range", () => {
     expect(L.usPool("V", "girl")).toBe(32); // Vivienne, Vera and 30 more in 101..2000
-    expect(L.usPool("v", "boy")).toBe(2); // Victor 500 and Vikram 4000 (boys' V widens to 5,000)
+    expect(L.usPool("v", "boy")).toBe(1); // Victor 500; not Vikram 4000, though boys' V widens to 5,000 for isUsName
+    expect(L.maxRankFor("V", "boy")).toBe(5000);
     expect(L.usPool("O", "girl")).toBe(0); // Olivia is top 100
     expect(US_LETTER_POOL_MIN).toBe(16);
   });
-  it("usLetterOk: both genders need 16 names in range (real list: girls' U and Q are short, V is fine)", () => {
-    expect(US_LIST.usPool("U", "girl")).toBeLessThan(16);
-    expect(US_LIST.usPool("Q", "girl")).toBeLessThan(16);
-    expect(usLetterOk("U")).toBe(false);
-    expect(usLetterOk("Q")).toBe(false);
-    expect(usLetterOk("V")).toBe(true);
+  it("usLetterOk: both genders need 16 names ranked 101-2,000 (real list: exactly Q, U and X are skipped)", () => {
+    const AZ = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
+    expect(AZ.filter((l) => !usLetterOk(l))).toEqual(["Q", "U", "X"]);
+    for (const l of ["Y", "Z", "V", "W", "K", "J"]) expect([l, usLetterOk(l)]).toEqual([l, true]);
+    expect(US_LIST.usPool("X", "girl")).toBeLessThan(16);
+    expect(US_LIST.maxRankFor("X", "girl")).toBe(5000); // X still widens for isUsName: only the skip rule is narrower
     expect(usLetterOk("a")).toBe(true);
   });
   it("usLetterOk is always true when the gate is off (Name Nest)", () => {

@@ -35,11 +35,14 @@ export function makeUsList(d: UsNamesData) {
     // The second word has no top-100 floor (spec: only the first name must not be in the top 100).
     return a !== null && b !== null && a >= US_MIN_RANK && a <= US_WIDE_MAX_RANK && b <= US_WIDE_MAX_RANK;
   };
-  /** How many names start with `letter` and rank 101 up to that letter's range for this gender. */
+  /**
+   * How many names start with `letter` and rank 101 to 2,000 for this gender: never the widened range, whose spelling
+   * variants and rare names do not make posts (brief 2026-11-25: X was not skipped and Autopilot held every X post).
+   */
   const usPool = (letter: string, gender: Gender): number => {
-    const l = usKey(letter).charAt(0), max = maxRankFor(l, gender);
+    const l = usKey(letter).charAt(0);
     let n = 0;
-    for (const [k, r] of Object.entries(d[gender])) if (k[0] === l && r >= US_MIN_RANK && r <= max) n++;
+    for (const [k, r] of Object.entries(d[gender])) if (k[0] === l && r >= US_MIN_RANK && r <= US_MAX_RANK) n++;
     return n;
   };
   /**
@@ -72,7 +75,7 @@ export const usCandidates = US_LIST.usCandidates;
 /** True on a pack that aims its names at the US, Canada, the UK and Australia (Unique Names). */
 export const usGateOn = () => activePack().suggest.usNames === true;
 
-/** Can Autopilot plan a post for this letter? Always with the gate off; else both genders need 16 US names for it. */
+/** Can Autopilot plan a post for this letter? Always with the gate off; else both genders need 16 names ranked 101-2,000. */
 export const usLetterOk = (letter: string): boolean =>
   !usGateOn() || (["girl", "boy"] as const).every((g) => US_LIST.usPool(letter, g) >= US_LETTER_POOL_MIN);
 
