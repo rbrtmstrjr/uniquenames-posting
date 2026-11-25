@@ -34,7 +34,8 @@ describe("Autopilot actions", () => {
   it("previews the next days from the last Facebook post, and warns about themes", async () => {
     const r = await previewAutopilotAction(7);
     expect(r.ok && r.preview).toMatchObject({ range: "Sat, Nov 21 – Fri, Nov 27", posts: 14 });
-    expect(r.ok && r.preview.days.map((d) => d.label)).toEqual(["Letter S", "Letter T", "Letter U", "Letter V", "Letter W", "Letter X", "Letter Y"]);
+    // Unique Names skips the letters short of US names (girls' U today: fewer than 16 in range), so U is not planned.
+    expect(r.ok && r.preview.days.map((d) => d.label)).toEqual(["Letter S", "Letter T", "Letter V", "Letter W", "Letter X", "Letter Y", "Letter Z"]);
     expect(r.ok && r.preview.problems).toEqual(["Only 3 girl photoshoot themes are left: the girl posts from Tue, Nov 24 will be held. Add girl themes first."]);
     expect(await previewAutopilotAction(8)).toEqual({ ok: false, error: "Pick 1 to 7 days." });
   });

@@ -1,6 +1,6 @@
 import JSZip from "jszip";
 import { describe, expect, it } from "vitest";
-import { latestYear, parseYear, pickTop } from "@/scripts/lib/ssa";
+import { latestYear, parseYear, pickTop, recentYears } from "@/scripts/lib/ssa";
 import { acceptMeanings, meaningProblem, meaningsPrompt, originProblem } from "@/scripts/lib/meanings";
 
 const year = (rows: [string, "F" | "M", number][]) => rows.map((r) => r.join(",")).join("\r\n") + "\r\n";
@@ -15,6 +15,16 @@ describe("SSA national data (scripts/import-ssa.ts)", () => {
     expect(got.year).toBe(2024);
     expect(got.text).toContain("Olivia,F,10");
     await expect(latestYear(await new JSZip().generateAsync({ type: "uint8array" }))).rejects.toThrow(/no yobYYYY/);
+  });
+
+  it("recentYears returns the latest N years, newest first", async () => {
+    const zip = new JSZip();
+    zip.file("yob2021.txt", year([["Ava", "F", 9]]));
+    zip.file("yob2022.txt", year([["Ava", "F", 9]]));
+    zip.file("yob2023.txt", year([["Ava", "F", 9]]));
+    const got = await recentYears(await zip.generateAsync({ type: "uint8array" }), 2);
+    expect(got.map((g) => g.year)).toEqual([2023, 2022]);
+    await expect(recentYears(await new JSZip().generateAsync({ type: "uint8array" }))).rejects.toThrow(/no yobYYYY/);
   });
 
   it("ranks per sex in file order and skips junk lines", () => {
@@ -32,6 +42,19 @@ describe("SSA national data (scripts/import-ssa.ts)", () => {
     expect(top.filter((n) => n.gender === "girl").map((n) => [n.name, n.us_rank])).toEqual([["Olivia", 1], ["Avery", 2], ["Emma", 3]]);
     expect(top.filter((n) => n.gender === "boy").map((n) => [n.name, n.us_rank])).toEqual([["Liam", 1], ["Noah", 3], ["Leo", 4]]);
     expect(top.every((n) => n.style === "single" && n.us_year === 2024)).toBe(true);
+  });
+});
+
+describe("the US list (scripts/import-us-names.ts)", () => {
+  it("best rank over the years, top N, sorted; SSA placeholders (any case) left out with SSA's ranks kept", async () => {
+    const { buildUsNames } = await import("@/scripts/lib/us-names");
+    const y1 = year([["Olivia", "F", 100], ["Unknown", "F", 90], ["Vera", "F", 80], ["Baby", "M", 70], ["Liam", "M", 60], ["BOY", "M", 50]]);
+    const y2 = year([["Vera", "F", 100], ["Babygirl", "F", 90], ["Olivia", "F", 80], ["Infant", "M", 70], ["Babyboy", "M", 60], ["Girl", "M", 55], ["Liam", "M", 50]]);
+    const out = buildUsNames([{ year: 2025, text: y2 }, { year: 2024, text: y1 }], 3);
+    expect(out.years).toEqual([2024, 2025]);
+    expect(out.girl).toEqual({ olivia: 1, vera: 1 });
+    expect(out.boy).toEqual({ liam: 2 }); // Liam: 2nd in 2024 (after Baby), 4th in 2025
+    expect(Object.keys(out.girl)).toEqual(["olivia", "vera"]);
   });
 });
 

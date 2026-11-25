@@ -52,3 +52,12 @@ export function pickTop(rows: { girl: Row[]; boy: Row[] }, year: number, top = 5
   }
   return out;
 }
+
+/** The latest `count` yobYYYY.txt files in the zip, newest first: [{ year, text }]. */
+export async function recentYears(zipBytes: ArrayBuffer | Uint8Array, count = 3): Promise<{ year: number; text: string }[]> {
+  const zip = await JSZip.loadAsync(zipBytes);
+  const years = Object.keys(zip.files).map((f) => ({ f, m: /^yob(\d{4})\.txt$/i.exec(f.split("/").pop() ?? "") }))
+    .filter((x) => x.m).map((x) => ({ year: Number(x.m![1]), f: x.f })).sort((a, b) => b.year - a.year).slice(0, count);
+  if (!years.length) throw new Error("names.zip has no yobYYYY.txt files");
+  return Promise.all(years.map(async (y) => ({ year: y.year, text: await zip.file(y.f)!.async("string") })));
+}

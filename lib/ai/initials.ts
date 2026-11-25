@@ -5,6 +5,7 @@ import { aiJson } from "./provider";
 import { activePack } from "@/packs";
 import { INITIALS_MEANING_MAX_WORDS, MEANING_MIN_WORDS, filterInitialsCombos, sampleForPrompt, type InitialsCandidate, type InitialsFilterResult } from "./suggest-filter";
 import { PROMPT_NAMES_CAP } from "./suggest";
+import { keepUsNames, usGateOn } from "@/lib/names/us-list";
 
 // Fresh two-word names for a post by initials (migration 017): ONE small AI call (Claude Haiku / Gemini, task "small")
 // asks for a few more than missing; the deterministic filter keeps only valid, new, kind names with the right initials
@@ -56,6 +57,10 @@ export interface SuggestInitialsInput {
   partHints?: { name: string; meaning: string }[];
 }
 
+/** Where the AI should look for names: any origin, or (Unique Names) the traditions of the US, Canada, the UK and Australia. */
+const ORIGINS_ANY = "across origins (Latin, Greek, Hebrew, Celtic, Norse, Germanic, French, Italian, Spanish, Arabic, Hawaiian and more)";
+const ORIGINS_US = "from the name traditions common in the US, Canada, the UK and Australia (English, Irish, Scottish, Welsh, French, Italian, Spanish, German, Scandinavian, Greek, Latin, Hebrew and Biblical)";
+
 export function initialsPrompt(i: SuggestInitialsInput, rng?: () => number): string {
   const [a, b] = [i.initials[0], i.initials[1]];
   const { items, sampled } = sampleForPrompt(i.existing, PROMPT_NAMES_CAP, rng);
@@ -63,7 +68,7 @@ export function initialsPrompt(i: SuggestInitialsInput, rng?: () => number): str
   const hints = (i.partHints ?? []).slice(0, PART_HINTS * 2);
   return [
     `Suggest ${i.count} two-word baby ${i.gender} names with the initials ${a} and ${b}: the first name starts with ${a} and the middle name starts with ${b}.`,
-    `List the best names first. Aim for all ${i.count}: most pairs of letters have many real names across origins (Latin, Greek, Hebrew, Celtic, Norse, Germanic, French, Italian, Spanish, Arabic, Hawaiian and more); return fewer only if you truly know no more real ones.`,
+    `List the best names first. Aim for all ${i.count}: most pairs of letters have many real names ${usGateOn() ? ORIGINS_US : ORIGINS_ANY}; return fewer only if you truly know no more real ones.`,
     `Each first name and each middle name is a real given name used for ${i.gender}s (or a unisex name often given to ${i.gender}s), and the pair sounds good together.`,
     ...(examples.length ? [`Match the style of the page's own two-word ${i.gender} names, for example: ${examples.join(", ")}.`] : []),
     ...(hints.length ? [`If you use one of these names as a part, its part meaning is exactly this (the page's own meaning):\n${hints.map((h) => `${h.name} = ${h.meaning}`).join("\n")}`] : []),
@@ -129,8 +134,18 @@ export async function suggestForInitials(i: {
     partHints: partHintsFor(i.knownParts, i.initials),
   });
   if (!ai.ok) return { ok: false, error: ai.error };
-  const filter = (cands: InitialsCandidate[]) => filterInitialsCombos(cands, [...i.allNames, ...(i.skip ?? [])],
-    { initials: i.initials, want: i.want, unique: INITIALS_UNIQUE, knownParts: i.knownParts }, i.gender);
+  const filter = (cands: InitialsCandidate[]): InitialsFilterResult => {
+    const gate = usGateOn();
+    // Unique Names: the US gate runs before the cap (want = every answer), so the over-ask absorbs its drops.
+    const r = filterInitialsCombos(cands, [...i.allNames, ...(i.skip ?? [])],
+      { initials: i.initials, want: gate ? Math.max(i.want, cands.length) : i.want, unique: INITIALS_UNIQUE, knownParts: i.knownParts }, i.gender);
+    if (!gate) return r;
+    // Both words must be names US parents give (SSA list); the others count as invalid, the names past `want` as offInitials.
+    const a = keepUsNames(r.fresh, i.gender, { style: "two-word" });
+    const b = keepUsNames(r.relaxed, i.gender, { style: "two-word" });
+    const fresh = a.kept.slice(0, i.want);
+    return { ...r, fresh, relaxed: b.kept.slice(0, i.want), invalid: r.invalid + a.dropped + b.dropped, offInitials: r.offInitials + a.kept.length - fresh.length };
+  };
   const first = filter(ai.data);
   const left = deadline - Date.now();
   if (!first.stiffNames.length || left < REWRITE_MIN_MS) return { ok: true, result: first };

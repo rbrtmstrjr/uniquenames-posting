@@ -127,6 +127,8 @@ export interface PackSuggest {
   initialsSystem: string;
   /** Initials posts on a page of UNIQUE names: very common names are rejected for both parts (except rare initials). */
   initialsUnique: boolean;
+  /** Aim the names at the US, Canada, the UK and Australia: only real US names (SSA rank 101 to 2,000) are kept (lib/names/us-list.ts). */
+  usNames?: boolean;
   /** Style examples for initials names when the page has no two-word names of that gender yet. */
   initialsExamples: Readonly<Record<Gender, readonly string[]>>;
 }

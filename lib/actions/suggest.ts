@@ -7,6 +7,7 @@ import { LETTER_IDEAS, isLetter, startsWith } from "@/lib/series/letter";
 import { hasInitials, initialsText, isInitials } from "@/lib/series/initials";
 import { suggestForInitials } from "@/lib/ai/initials";
 import { NAME_COUNT, THEME_COUNT, VIBE_MAX, filterNameSuggestions, filterThemeSuggestions } from "@/lib/ai/suggest-filter";
+import { keepUsNames } from "@/lib/names/us-list";
 import { fail, requireOwner, type ActionResult } from "./result";
 import { UUID_RE } from "./helpers";
 
@@ -50,8 +51,11 @@ export async function suggestNamesAction(i: { gender: Gender; style: NameStyle; 
   const existing = all.rows.filter((n) => n.gender === i.gender && n.style === i.style).map((n) => n.name);
   const ai = await suggestNames({ gender: i.gender, style: i.style, count: i.count, vibe: i.vibe, existing });
   if (!ai.ok) return fail(`The AI could not suggest names: ${ai.error}`);
-  const { fresh, duplicates, invalid } = filterNameSuggestions(ai.data, all.rows.map((n) => n.name), i.style);
-  const rows = fresh.slice(0, i.count).map((n) => ({ name: n.name, meaning: n.meaning, gender: i.gender, style: i.style, status: "pending" as const }));
+  const filtered = filterNameSuggestions(ai.data, all.rows.map((n) => n.name), i.style);
+  const us = keepUsNames(filtered.fresh, i.gender, { style: i.style });
+  const { duplicates } = filtered;
+  const invalid = filtered.invalid + us.dropped;
+  const rows = us.kept.slice(0, i.count).map((n) => ({ name: n.name, meaning: n.meaning, gender: i.gender, style: i.style, status: "pending" as const }));
   if (rows.length) {
     const { error } = await sb.from("names").insert(rows);
     if (error) return fail(insertError(error, "Some of these names were added at the same time. Try again."));
@@ -107,8 +111,9 @@ export async function cardNameIdeasAction(cardId: string): Promise<CardNameIdeas
   const vibe = theme?.title ? `names that suit a "${theme.title}" baby photoshoot`.slice(0, VIBE_MAX) : undefined;
   const ai = await suggestNames({ gender, style, count: CARD_IDEAS, vibe, existing });
   if (!ai.ok) return fail(`The AI could not suggest names: ${ai.error}`);
-  const { fresh } = filterNameSuggestions(ai.data, all.rows.map((n) => n.name), style);
-  if (!fresh.length) return fail("Every idea Gemini had is already one of your names. Try again.");
+  const us = keepUsNames(filterNameSuggestions(ai.data, all.rows.map((n) => n.name), style).fresh, gender, { style });
+  const fresh = us.kept;
+  if (!fresh.length) return fail(us.dropped ? "None of the ideas were US names. Try again." : "Every idea Gemini had is already one of your names. Try again.");
   return { ok: true, ideas: fresh.slice(0, CARD_IDEAS).map((n) => ({ name: n.name, meaning: n.meaning })) };
 }
 

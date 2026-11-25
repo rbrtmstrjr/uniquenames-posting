@@ -6,6 +6,7 @@ import { formatPrice } from "@/lib/shop/products";
 import { revenueTotals, type OrderRow } from "@/lib/shop/orders";
 import { missing019 } from "@/lib/shop/service";
 import { PDF_STATUSES } from "@/lib/pdf/plan";
+import { SELLABLE_OR, sellsUsSkips } from "@/lib/pdf/export";
 import { PageHeader } from "@/components/ui/page-header";
 import { OrdersAdmin, type ShopSetup } from "@/components/shop/orders-admin";
 
@@ -20,12 +21,13 @@ async function loadOrders(now: Date) {
   const env = shopEnv(pack.shop);
   const sb = await createClient();
   const since = new Date(now.getTime() - 32 * 24 * 3600_000).toISOString();
+  const sellable = sb.from("names").select("id", { count: "exact", head: true });
   const [list, month, settings, unsorted, linked] = await Promise.all([
     sb.from("shop_orders").select("id, created_at, buyer_name, email, fb_name, product, amount, currency, status, paid_at, downloads, emailed_at, email_error")
       .order("created_at", { ascending: false }).limit(300),
     sb.from("shop_orders").select("status, paid_at, amount").eq("status", "paid").gte("paid_at", since),
     sb.from("settings").select("shop_enabled").eq("id", 1).maybeSingle(),
-    sb.from("names").select("id", { count: "exact", head: true }).in("status", [...PDF_STATUSES]).is("meaning_category", null),
+    (sellsUsSkips() ? sellable.or(SELLABLE_OR) : sellable.in("status", [...PDF_STATUSES])).is("meaning_category", null),
     env.webhookSecret ? sb.rpc("shop_secret_matches", { p_secret: shopKey(env.webhookSecret) }) : Promise.resolve({ data: false, error: null }),
   ]);
   if (list.error && !missing019(list.error)) throw new Error(list.error.message);

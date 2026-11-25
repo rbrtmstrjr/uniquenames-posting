@@ -21,7 +21,7 @@ const DAY_MS = 86400_000;
 export type Label = { letter: string; nameTheme: null } | { letter: null; nameTheme: string };
 
 /** The label after `last`: A..Z, then the name themes in order, then A again. */
-export function nextLabel(last: Label | null, themes: string[]): Label {
+function stepLabel(last: Label | null, themes: string[]): Label {
   const A: Label = { letter: "A", nameTheme: null };
   const firstTheme: Label = themes.length ? { letter: null, nameTheme: themes[0] } : A;
   if (!last) return A;
@@ -32,6 +32,18 @@ export function nextLabel(last: Label | null, themes: string[]): Label {
   const i = themes.findIndex((t) => t.toLowerCase() === last.nameTheme.toLowerCase());
   if (i === -1) return firstTheme;
   return i < themes.length - 1 ? { letter: null, nameTheme: themes[i + 1] } : A;
+}
+
+/**
+ * The label after `last`: A..Z, then the name themes in order, then A again. A letter `letterOk` turns down (Unique
+ * Names: too few US names for it) is skipped, the way Z moves on to the themes. When no letter is ok, as before.
+ */
+export function nextLabel(last: Label | null, themes: string[], letterOk?: (letter: string) => boolean): Label {
+  let next = stepLabel(last, themes);
+  if (!letterOk || !AZ_LETTERS.some((l) => letterOk(l))) return next;
+  // An ok letter exists, so this ends within one lap of the letters (themes stop it sooner).
+  for (let n = 0; next.letter !== null && !letterOk(next.letter) && n <= AZ_LETTERS.length; n++) next = stepLabel(next, themes);
+  return next;
 }
 
 /** The Manila calendar day of `t` ("2026-11-21"). */
@@ -76,14 +88,18 @@ const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n
 const pick = (lo: number, hi: number, rng: () => number) => lo + Math.floor(rng() * (hi - lo + 1));
 
 /** Two posts a day (one boy, one girl, random order), each at a random minute of its window. */
-export function planRun(i: { firstDay: string; days: number; last: Label | null; themes: string[]; minImages: number; maxImages: number; rng: () => number }): PlannedItem[] {
+export function planRun(i: {
+  firstDay: string; days: number; last: Label | null; themes: string[]; minImages: number; maxImages: number; rng: () => number;
+  /** Letters to skip (Unique Names: those short of US names); without it every letter is used. */
+  letterOk?: (letter: string) => boolean;
+}): PlannedItem[] {
   const lo = clamp(NAMES_PER_POST.min, i.minImages, i.maxImages);
   const hi = clamp(NAMES_PER_POST.max, i.minImages, i.maxImages);
   const out: PlannedItem[] = [];
   let label = i.last;
   for (let d = 0; d < i.days; d++) {
     const day = addDays(i.firstDay, d);
-    label = nextLabel(label, i.themes);
+    label = nextLabel(label, i.themes, i.letterOk);
     const morning: Gender = i.rng() < 0.5 ? "boy" : "girl";
     const slots = [
       { slot: "morning" as const, gender: morning, w: MORNING },

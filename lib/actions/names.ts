@@ -6,6 +6,8 @@ import { validateName } from "./validate";
 import { UUID_RE, badIds, chunks, dedupeNames, nameKey, normalizeName, styleOf } from "./helpers";
 import { isMeaningCategory, type MeaningCategory } from "@/lib/names/categories";
 import { missing018 } from "@/lib/pdf/migration";
+import { US_NOTE, usGateOn } from "@/lib/names/us-list";
+import { CHECKABLE, readCheckableNames, usCleanupPlan } from "@/lib/names/us-cleanup";
 import { bulkFail, fail, requireOwner, type ActionResult, type BulkResult } from "./result";
 
 // `style` is accepted for caller convenience but always derived from the name itself.
@@ -120,4 +122,35 @@ export async function setNameCategoryAction(id: string, category: MeaningCategor
   if (!data?.length) return fail("Name not found.");
   revalidatePath("/names");
   return { ok: true };
+}
+
+const NOT_US_PACK = "This check is for Unique Names.";
+
+/** Counts only: how many available or pending names are not US names, out of how many checked. Changes nothing. */
+export async function usCheckPreviewAction(): Promise<ActionResult<{ skip: number; checked: number }>> {
+  await requireOwner();
+  if (!usGateOn()) return fail(NOT_US_PACK);
+  try {
+    const { skip, checked } = usCleanupPlan(await readCheckableNames(await createClient()));
+    return { ok: true, skip: skip.length, checked };
+  } catch (e) {
+    return fail(e instanceof Error ? e.message : "Could not read the names.");
+  }
+}
+
+/** Skip every available or pending non-US name (note "Not a US name"). Re-reads and re-plans; only those rows change. */
+export async function usCheckApplyAction(): Promise<ActionResult<{ skipped: number }>> {
+  await requireOwner();
+  if (!usGateOn()) return fail(NOT_US_PACK);
+  const sb = await createClient();
+  let skip: string[];
+  try { skip = usCleanupPlan(await readCheckableNames(sb)).skip; } catch (e) { return fail(e instanceof Error ? e.message : "Could not read the names."); }
+  let done = 0;
+  for (const part of chunks(skip, 100)) { // 100 ids a request, like the other id lists (a long URL is refused)
+    const { error } = await sb.from("names").update({ status: "skip", autopilot_note: US_NOTE }).in("id", part).in("status", CHECKABLE);
+    if (error) { if (done) revalidatePath("/names"); return fail(done ? `${error.message} (${done} were skipped before this.)` : error.message); }
+    done += part.length;
+  }
+  if (done) { revalidatePath("/names"); revalidatePath("/"); }
+  return { ok: true, skipped: done };
 }

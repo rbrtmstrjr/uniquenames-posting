@@ -4,6 +4,8 @@ import { NamesTable } from "@/components/names/names-table";
 import { ExportPdf } from "@/components/names/export-pdf";
 import { PastExports } from "@/components/names/past-exports";
 import { namesFilterFromParams } from "@/lib/names/filter";
+import { UsCheck } from "@/components/names/us-check";
+import { US_LIST, usGateOn } from "@/lib/names/us-list";
 import { PageHeader } from "@/components/ui/page-header";
 
 const PAGE = 1000; // PostgREST's default max-rows
@@ -29,12 +31,18 @@ export default async function NamesPage({ searchParams }: { searchParams: Promis
   const exports = logError ? null : ((log ?? []) as ExportLogRow[]);
   // A select("*") row carries meaning_category once 018 ran (null = not sorted yet).
   const canSort = names.some((n) => "meaning_category" in n);
+  // US rank of each single name (by id), worked out here so the list never goes to the browser. null = not on the list.
+  const usOn = usGateOn();
+  const usRanks: Record<string, number | null> | undefined = usOn
+    ? Object.fromEntries(names.filter((n) => n.style === "single").map((n) => [n.id, US_LIST.rank(n.name, n.gender)]))
+    : undefined;
   return (
     <>
       <PageHeader title="Names" subtitle="The names and meanings your posts use. Exact spelling here is exactly what goes on the card." />
       <div className="space-y-4">
+        {usOn && <UsCheck />}
         <PastExports exports={exports} />
-        <NamesTable names={names} initial={initial} toolbar={<ExportPdf names={names} canSort={canSort} />} />
+        <NamesTable names={names} initial={initial} usRanks={usRanks} toolbar={<ExportPdf names={names} canSort={canSort} />} />
       </div>
     </>
   );

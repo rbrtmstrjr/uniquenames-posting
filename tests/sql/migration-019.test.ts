@@ -33,6 +33,7 @@ async function migratedDb(o: { secret?: boolean; roles?: boolean } = {}) {
   await db.exec(stripSupabase(read("supabase", "migrations", "021_facebook_posting.sql")));
   await db.exec(stripSupabase(read("supabase", "migrations", "022_autopilot.sql"))); // 022: Autopilot (settings, posts, names, cards)
   await db.exec(stripSupabase(read("supabase", "migrations", "023_front_card.sql"))); // 023: the front card (settings, cards)
+  await db.exec(stripSupabase(read("supabase", "migrations", "024_us_names_shop.sql"))); // 024: the shop counts and sells "Not a US name" skips (functions)
   // linked and opened (the switch is off until the owner opens the shop at go-live)
   if (o.secret !== false) {
     await db.query(`select set_shop_secret($1)`, [SECRET]);
@@ -291,9 +292,10 @@ describe("download_shop_order", () => {
     await paid(db, a.id!);
     const d = await dl(db, a.token);
     expect(d).toMatchObject({ status: "ok", product: "girl", buyer_name: "Maria Santos", email: "maria@example.com", password: "Kp7m-Xr4d-Tq9w", downloads: 1 });
+    // autopilot_note: 024 sends each name's note (names skipped as "Not a US name" are still sold)
     expect(d.names).toEqual([
-      { name: "Ivy Rose", meaning: "a kind meaning", gender: "girl", style: "two-word", status: "used", origin: null, meaning_category: null },
-      { name: "Wren", meaning: "a kind meaning", gender: "girl", style: "single", status: "available", origin: null, meaning_category: "nature" },
+      { name: "Ivy Rose", meaning: "a kind meaning", gender: "girl", style: "two-word", status: "used", origin: null, meaning_category: null, autopilot_note: null },
+      { name: "Wren", meaning: "a kind meaning", gender: "girl", style: "single", status: "available", origin: null, meaning_category: "nature", autopilot_note: null },
     ]);
     for (let i = 2; i <= 5; i++) expect(await dl(db, a.token)).toMatchObject({ status: "ok", downloads: i });
     expect(await dl(db, a.token)).toEqual({ status: "error", reason: "limit" });
