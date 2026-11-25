@@ -248,10 +248,19 @@ describe("prompts", () => {
     expect(NAMES_JUDGE_SYSTEM).toContain("a mom in the US, Canada, the UK or Australia");
     expect(NAMES_JUDGE_SYSTEM).toContain("an English-speaking family");
   });
-  it("the names check turns down names mainly from other regions (owner, 2026-11-24)", () => {
+  it("the names check turns down names mainly from other regions, never Hebrew or Biblical ones (brief 2026-11-25)", () => {
     expect(NAMES_JUDGE_SYSTEM.split("\n")).toContain(
-      "- it is mainly a South Asian, Arabic or Middle Eastern, East Asian or African name, even if some US parents use it: the page's readers are in the US, Canada, the UK and Australia",
+      "- it is mainly a South Asian (Indian, Pakistani, Bangladeshi), Arabic, Persian or Turkish, East Asian (Chinese, Japanese, Korean, Vietnamese) or African name, even if some US parents use it. Hebrew and Biblical, Greek, Latin, European, Celtic and Spanish or Latin American names are fine: they are common in the US, Canada, the UK and Australia",
     );
+    expect(NAMES_JUDGE_SYSTEM).toContain("Hebrew and Biblical");
+    expect(NAMES_JUDGE_SYSTEM).not.toContain("Middle East");
+  });
+  it("the suggestion prompts say the Arab world, Iran or Turkey, not the Middle East", () => {
+    const p = initialsPrompt({ gender: "girl", initials: "YZ", count: 6, existing: [] });
+    for (const s of [NAMES_SYSTEM, LETTER_SYSTEM, INITIALS_SYSTEM, p]) expect(s).not.toContain("the Middle East");
+    for (const s of [NAMES_SYSTEM, LETTER_SYSTEM, INITIALS_SYSTEM]) {
+      expect(s).toContain("never names used mainly in South Asia, the Arab world, Iran or Turkey, East Asia or Africa".replace(/^never/, s === LETTER_SYSTEM ? "Never" : "never"));
+    }
   });
   it("initials: US name traditions, the US top 100 only, no rare-initial exception", () => {
     expect(INITIALS_SYSTEM).toContain("from the name traditions common in the US, Canada, the UK and Australia");
