@@ -3,7 +3,7 @@ import type { Gender, NameStyle } from "@/lib/db/types";
 import type { GeminiSchema, GenerateJsonResult } from "./gemini";
 import { aiJson } from "./provider";
 import { activePack } from "@/packs";
-import { keepUsNames, usGateOn } from "@/lib/names/us-list";
+import { keepUsNames, usCandidates, usGateOn } from "@/lib/names/us-list";
 import { MEANING_MAX_WORDS, MEANING_MIN_WORDS, VIBE_MAX, filterLetterSuggestions, sampleForPrompt, type LetterCandidate, type LetterFilterResult, type NameSuggestion, type ThemeFields } from "./suggest-filter";
 
 /** The active niche pack's suggestion prompts (packs/<id>/suggest.ts). */
@@ -18,10 +18,15 @@ export const PROMPT_THEMES_CAP = 150;
 /** Ask for ~1.5x so the uniqueness filter still leaves enough. */
 export const overAsk = (count: number) => Math.ceil(count * 1.5);
 
-export interface SuggestNamesInput { gender: Gender; style: NameStyle; count: number; vibe?: string; existing: string[] }
+/** `choices` (Unique Names): the US-list names the AI must pick from; an empty list means none are left, so no AI call. */
+export interface SuggestNamesInput { gender: Gender; style: NameStyle; count: number; vibe?: string; existing: string[]; choices?: string[] }
 export interface SuggestThemesInput { gender: Gender; count: number; vibe?: string; existing: { title: string; props: string }[] }
 
 const clip = (s: string | undefined) => (s ?? "").replace(/\s+/g, " ").trim().slice(0, VIBE_MAX);
+
+/** The prompt block that makes the AI pick from the US list (none without choices, so the prompt is as before). */
+export const US_CHOICES_INTRO = "Choose ONLY from these real names that US parents give (pick the ones a mom in the US, Canada, the UK or Australia would love, and give each its true meaning):";
+const choicesBlock = (choices: string[] | undefined) => (choices?.length ? [`${US_CHOICES_INTRO}\n${choices.join(", ")}`] : []);
 
 export const NAMES_SYSTEM = SUGGEST.namesSystem({ min: MEANING_MIN_WORDS, max: MEANING_MAX_WORDS });
 
@@ -54,6 +59,7 @@ export function namesPrompt(i: SuggestNamesInput, rng?: () => number): string {
     items.length
       ? `${sampled ? `Some of the ${i.existing.length} names already on the page (a random sample; the full list is longer, so be extra creative and avoid common picks)` : "Names already on the page (do not repeat any)"}:\n${items.join(", ")}`
       : "The page has no names of this kind yet.",
+    ...choicesBlock(i.choices),
     `Return exactly ${want} names.`,
   ].join("\n\n");
 }
@@ -97,8 +103,9 @@ const arrayOf = <T>(key: string) => (raw: unknown): T[] | null => {
   return Array.isArray(v) ? (v.filter((x) => x && typeof x === "object") as T[]) : null;
 };
 
-/** Gemini's name ideas (unfiltered: run filterNameSuggestions on them). Never throws. */
-export function suggestNames(i: SuggestNamesInput): Promise<GenerateJsonResult<NameSuggestion[]>> {
+/** Gemini's name ideas (unfiltered: run filterNameSuggestions on them). Never throws. No US names left: none, no AI call. */
+export async function suggestNames(i: SuggestNamesInput): Promise<GenerateJsonResult<NameSuggestion[]>> {
+  if (i.choices && !i.choices.length) return { ok: true, data: [] };
   return aiJson<NameSuggestion[]>({
     task: "small", system: NAMES_SYSTEM, prompt: namesPrompt(i), schema: NAMES_SCHEMA, temperature: 1, timeoutMs: SUGGEST_TIMEOUT_MS, parse: arrayOf<NameSuggestion>("names"),
   });
@@ -119,6 +126,8 @@ export interface SuggestLetterInput {
   gender: Gender; style: NameStyle; letter: string; count: number;
   /** Names already on the page that the prompt lists (this gender + style, starting with the letter). */
   existing: string[];
+  /** Unique Names: the letter's US-list names the AI must pick from; an empty list means none are left, so no AI call. */
+  choices?: string[];
 }
 
 export const LETTER_SYSTEM = SUGGEST.letterSystem;
@@ -158,11 +167,13 @@ export function letterPrompt(i: SuggestLetterInput, rng?: () => number): string 
     items.length
       ? `${sampled ? `Some of the ${i.existing.length} ${i.letter} names already on the page (a random sample)` : `${i.letter} names already on the page (do not repeat any)`}:\n${items.join(", ")}`
       : `The page has no ${two ? "two-word" : "single"} ${i.gender} names starting with ${i.letter} yet.`,
+    ...choicesBlock(i.choices),
   ].join("\n\n");
 }
 
-/** Gemini's names for one letter (unfiltered). Never throws. */
-export function suggestLetterNames(i: SuggestLetterInput): Promise<GenerateJsonResult<LetterCandidate[]>> {
+/** Gemini's names for one letter (unfiltered). Never throws. No US names left: none, no AI call. */
+export async function suggestLetterNames(i: SuggestLetterInput): Promise<GenerateJsonResult<LetterCandidate[]>> {
+  if (i.choices && !i.choices.length) return { ok: true, data: [] };
   return aiJson<LetterCandidate[]>({
     task: "small",
     // Low temperature + some thinking: real names and true meanings matter more than variety here.
@@ -177,7 +188,9 @@ export function suggestLetterNames(i: SuggestLetterInput): Promise<GenerateJsonR
  * common, not the other gender's, starting with the letter), at most `count`.
  */
 export async function suggestForLetter(i: SuggestLetterInput & { allNames: string[] }): Promise<{ ok: true; result: LetterFilterResult } | { ok: false; error: string }> {
-  const ai = await suggestLetterNames(i);
+  // Unique Names, single names: the AI picks from the letter's US names not yet in the library (none left: no AI call).
+  const choices = i.style === "single" && usGateOn() ? usCandidates(i.gender, { letter: i.letter, exclude: i.allNames }) : undefined;
+  const ai = await suggestLetterNames({ ...i, choices });
   if (!ai.ok) return { ok: false, error: ai.error };
   if (!usGateOn()) return { ok: true, result: filterLetterSuggestions(ai.data, i.allNames, { letter: i.letter, want: i.count, style: i.style }, i.gender) };
   // Unique Names: only names parents in the US actually give (SSA rank); the others count as invalid. The gate runs

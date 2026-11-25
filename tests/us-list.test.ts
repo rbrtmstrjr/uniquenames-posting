@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { US_LETTER_POOL_MIN, US_LIST, US_NOTE, keepUsNames, makeUsList, usGateOn, usKey, usLetterOk, type UsNamesData } from "@/lib/names/us-list";
+import { US_LETTER_POOL_MIN, US_LIST, US_NOTE, keepUsNames, makeUsList, usCandidates, usGateOn, usKey, usLetterOk, type UsNamesData } from "@/lib/names/us-list";
 
 // Ranks: Vivienne 150, Vera 900, Olivia 1 (top 100), Vikram 4000 (only allowed if the letter is short), Zoe 300.
 const ranks = (from: number, n: number, letter: string) =>
@@ -72,6 +72,42 @@ describe("the US list", () => {
     expect(US_LIST.rank("Olivia", "girl")).toBeLessThanOrEqual(10);
     expect(US_LIST.rank("Liam", "boy")).toBeLessThanOrEqual(10);
     expect(US_NOTE).toBe("Not a US name");
+  });
+  describe("usCandidates (the names the AI picks from)", () => {
+    const seeded = (seed: number) => () => ((seed = (seed * 16807) % 2147483647) - 1) / 2147483646;
+    it("with a letter: names starting with it, ranked 101 up to the letter's range, display-cased", () => {
+      const v = L.usCandidates("girl", { letter: "v", exclude: [], rng: seeded(1) });
+      expect([...v].sort()).toEqual(["Vera", "Vivienne", ...Array.from({ length: 30 }, (_, k) => `Vx${k}`)].sort());
+      // boys' V is short (1 name in 101..2,000), so it widens to 5,000 like isUsName: Victor and Vikram
+      expect([...L.usCandidates("boy", { letter: "V", exclude: [] })].sort()).toEqual(["Victor", "Vikram"]);
+      expect(L.usCandidates("girl", { letter: "O", exclude: [] })).toEqual([]); // Olivia is top 100
+    });
+    it("without a letter: every name ranked 101 to 2,000 (never the widened range)", () => {
+      expect([...L.usCandidates("boy", { exclude: [] })].sort()).toEqual(["Victor"]); // James top 100, Vikram 4,000
+      const all = L.usCandidates("girl", { exclude: [] });
+      expect(all).toHaveLength(34); // Vivienne, Vera, Zoe, Rose + 30; not Olivia
+      expect(all).toContain("Zoe");
+      expect(all).not.toContain("Olivia");
+    });
+    it("leaves out the library's names (any case, any accents)", () => {
+      const r = L.usCandidates("girl", { exclude: ["VIVIENNE", " Zoë ", "vera", "Nobody"] });
+      expect(r).toHaveLength(31);
+      for (const n of ["Vivienne", "Zoe", "Vera"]) expect(r).not.toContain(n);
+      expect(L.usCandidates("girl", { letter: "Z", exclude: new Set(["zoe"]) })).toEqual([]);
+    });
+    it("a random sample of at most `limit` (150 with a letter, 300 without by default), from `rng`", () => {
+      const five = L.usCandidates("girl", { letter: "V", exclude: [], limit: 5, rng: seeded(3) });
+      expect(five).toHaveLength(5);
+      expect(new Set(five).size).toBe(5);
+      expect(L.usCandidates("girl", { letter: "V", exclude: [], limit: 5, rng: seeded(3) })).toEqual(five);
+      expect(L.usCandidates("girl", { letter: "V", exclude: [], limit: 5, rng: seeded(4) })).not.toEqual(five);
+      expect(usCandidates("girl", { letter: "A", exclude: [] })).toHaveLength(150);
+      expect(usCandidates("boy", { exclude: [] })).toHaveLength(300);
+      expect(usCandidates("girl", { letter: "Z", exclude: ["Zora"] })).toHaveLength(44); // 45 girls' Z names in 101..2,000
+      for (const n of usCandidates("girl", { letter: "Z", exclude: [] })) {
+        expect([n, US_LIST.isUsName(n, "girl", "Z"), n === n.charAt(0).toUpperCase() + n.slice(1).toLowerCase()]).toEqual([n, true, true]);
+      }
+    });
   });
   it("keepUsNames drops names outside the range (Unique Names)", () => {
     const r = keepUsNames([{ name: "Olivia" }, { name: "Vivienne" }, { name: "Vikram" }], "girl", { style: "single" });
