@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fakeSupabase, op, type Query, type Respond } from "./helpers/fake-supabase";
+import type { SuggestLetterInput, SuggestNamesInput } from "@/lib/ai/suggest";
 
 // Task 2 of the US names feature: every suggestion path keeps only US names (best SSA rank 101-2,000;
 // two-word: both words in the top 5,000, first not in the top 100), and the prompts aim at the US, Canada, the UK and Australia.
@@ -43,10 +44,10 @@ async function onNameNest(fn: () => Promise<void>) {
 
 describe("the AI picks from the US list (Unique Names)", () => {
   it("letterPrompt and namesPrompt add the choices block only when given; without it they are as before", () => {
-    const li = { gender: "girl", style: "single", letter: "Z", count: 5, existing: ["Zelda"] } as const;
+    const li: SuggestLetterInput = { gender: "girl", style: "single", letter: "Z", count: 5, existing: ["Zelda"] };
     expect(letterPrompt({ ...li, choices: [] })).toBe(letterPrompt(li));
     expect(letterPrompt({ ...li, choices: ["Zora", "Zoya"] })).toBe(`${letterPrompt(li)}\n\n${CHOICES}\nZora, Zoya`);
-    const ni = { gender: "boy", style: "single", count: 7, existing: ["Desmond"] } as const;
+    const ni: SuggestNamesInput = { gender: "boy", style: "single", count: 7, existing: ["Desmond"] };
     const plain = namesPrompt(ni);
     expect(namesPrompt({ ...ni, choices: [] })).toBe(plain);
     expect(namesPrompt({ ...ni, choices: ["Yosef", "Yuri"] })).toBe(plain.replace("\n\nReturn exactly", `\n\n${CHOICES}\nYosef, Yuri\n\nReturn exactly`));
