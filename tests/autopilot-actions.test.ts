@@ -34,8 +34,8 @@ describe("Autopilot actions", () => {
   it("previews the next days from the last Facebook post, and warns about themes", async () => {
     const r = await previewAutopilotAction(7);
     expect(r.ok && r.preview).toMatchObject({ range: "Sat, Nov 21 – Fri, Nov 27", posts: 14 });
-    // Unique Names skips the letters short of US names (girls' U today: fewer than 16 in range), so U is not planned.
-    expect(r.ok && r.preview.days.map((d) => d.label)).toEqual(["Letter S", "Letter T", "Letter V", "Letter W", "Letter X", "Letter Y", "Letter Z"]);
+    // Unique Names skips the letters short of US names (fewer than 16 ranked 101-2,000: U and X here), then Z goes on to the themes.
+    expect(r.ok && r.preview.days.map((d) => d.label)).toEqual(["Letter S", "Letter T", "Letter V", "Letter W", "Letter Y", "Letter Z", "Biblical names"]);
     expect(r.ok && r.preview.problems).toEqual(["Only 3 girl photoshoot themes are left: the girl posts from Tue, Nov 24 will be held. Add girl themes first."]);
     expect(await previewAutopilotAction(8)).toEqual({ ok: false, error: "Pick 1 to 7 days." });
   });
@@ -90,6 +90,63 @@ describe("Autopilot actions", () => {
     respond = (q) => (q.table === "autopilot_items" && op(q, "insert") ? { error: { message: "boom" } }
       : q.table === "autopilot_runs" && op(q, "delete") ? { error: { message: "nope" } } : base(q));
     expect(await startAutopilotAction(2)).toEqual({ ok: false, error: "Could not save the plan: boom. Also could not undo the started run (nope): press Stop on the Autopilot page before starting again." });
+  });
+
+  describe("a held post never blocks the flow (brief 2026-11-25)", () => {
+    type Held = { letter: string | null; name_theme: string | null; scheduled_for: string };
+    /** autopilot_items answered like the database: state held, newer than `gt`, newest first, `limit`. */
+    const withHeld = (held: Held[] | { error: { message: string } }, fbPosts: unknown[] = posts) => {
+      const base = respond;
+      respond = (q) => {
+        if (q.table === "posts") return { data: fbPosts };
+        if (q.table !== "autopilot_items" || op(q, "insert")) return base(q);
+        if (!Array.isArray(held)) return held;
+        const gt = op(q, "gt");
+        const rows = held.filter((h) => !gt || Date.parse(h.scheduled_for) > Date.parse(gt[2] as string))
+          .sort((a, b) => Date.parse(b.scheduled_for) - Date.parse(a.scheduled_for));
+        return { data: rows.slice(0, (op(q, "limit")?.[1] as number) ?? rows.length) };
+      };
+    };
+    const labels = async (days = 3) => {
+      const r = await previewAutopilotAction(days);
+      return r.ok ? r.preview.days.map((d) => d.label) : r;
+    };
+    const W = [{ fb_state: "scheduled", fb_scheduled_for: "2026-11-19T05:29:00Z", posted_at: null, letter: "W", name_theme: null }];
+
+    it("goes on after a held item later than the last Facebook post (W posted, X held: Y next), from the same first day", async () => {
+      withHeld([{ letter: "X", name_theme: null, scheduled_for: "2026-11-21T01:10:00Z" }, { letter: null, name_theme: "Biblical", scheduled_for: "2026-11-18T01:10:00Z" }], W);
+      const r = await previewAutopilotAction(3);
+      expect(r.ok && r.preview.range).toBe("Sat, Nov 21 – Mon, Nov 23"); // first_day unchanged: the held days are planned again
+      expect(r.ok && r.preview.days.map((d) => d.label)).toEqual(["Letter Y", "Letter Z", "Biblical names"]);
+      const q = fake.queries.find((x) => x.table === "autopilot_items")!;
+      expect(q.ops).toEqual([["select", "letter, name_theme, scheduled_for"], ["eq", "state", "held"], ["gt", "scheduled_for", "2026-11-19T05:29:00Z"],
+        ["order", "scheduled_for", { ascending: false }], ["limit", 1]]);
+    });
+    it("the newest held item wins (R posted, S and T held: V next, as U is skipped)", async () => {
+      withHeld([{ letter: "S", name_theme: null, scheduled_for: "2026-11-20T01:10:00Z" }, { letter: "T", name_theme: null, scheduled_for: "2026-11-20T05:10:00Z" }]);
+      expect(await labels()).toEqual(["Letter V", "Letter W", "Letter Y"]);
+    });
+    it("a held name theme counts too", async () => {
+      withHeld([{ letter: null, name_theme: "Biblical", scheduled_for: "2026-11-21T01:10:00Z" }], W);
+      expect(await labels(2)).toEqual(["Soft and cool names", "Letter A"]);
+    });
+    it("ignores held items older than the last Facebook post", async () => {
+      withHeld([{ letter: "X", name_theme: null, scheduled_for: "2026-11-18T01:10:00Z" }]);
+      expect(await labels()).toEqual(["Letter S", "Letter T", "Letter V"]);
+    });
+    it("no held items, or no Facebook post yet", async () => {
+      withHeld([]);
+      expect(await labels()).toEqual(["Letter S", "Letter T", "Letter V"]);
+      withHeld([{ letter: "X", name_theme: null, scheduled_for: "2026-11-18T01:10:00Z" }], []);
+      expect(await labels(2)).toEqual(["Letter Y", "Letter Z"]);
+      expect(fake.queries.filter((x) => x.table === "autopilot_items").at(-1)!.ops.some((o) => o[0] === "gt")).toBe(false);
+    });
+    it("a read error: as before, without the held item", async () => {
+      withHeld({ error: { message: "boom" } });
+      const r = await previewAutopilotAction(3);
+      expect(r.ok && r.preview.days.map((d) => d.label)).toEqual(["Letter S", "Letter T", "Letter V"]);
+      expect(r.ok && r.preview.range).toBe("Sat, Nov 21 – Mon, Nov 23");
+    });
   });
 
   it("reads the newest Facebook posts first, nulls last", async () => {

@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fakeSupabase, op, type Query, type Respond } from "./helpers/fake-supabase";
+import type { SuggestLetterInput, SuggestNamesInput } from "@/lib/ai/suggest";
 
 // Task 2 of the US names feature: every suggestion path keeps only US names (best SSA rank 101-2,000;
 // two-word: both words in the top 5,000, first not in the top 100), and the prompts aim at the US, Canada, the UK and Australia.
@@ -17,18 +18,101 @@ vi.mock("@/lib/cards/remake", () => ({ remakeCard: vi.fn() }));
 vi.mock("@/lib/autopilot/judge-photos", () => ({ judgeCard: vi.fn(), judgeLookAlike: vi.fn() }));
 delete process.env.AI_PROVIDER;
 
-const { suggestForLetter, NAMES_SYSTEM, LETTER_SYSTEM } = await import("@/lib/ai/suggest");
+const { suggestForLetter, letterPrompt, namesPrompt, NAMES_SYSTEM, LETTER_SYSTEM } = await import("@/lib/ai/suggest");
 const { suggestForInitials, initialsPrompt, INITIALS_SYSTEM } = await import("@/lib/ai/initials");
 const { suggestNamesAction, cardNameIdeasAction } = await import("@/lib/actions/suggest");
 const { autopilotDeps } = await import("@/lib/autopilot/wiring");
 const { NAMES_JUDGE_SYSTEM } = await import("@/lib/autopilot/judge-names");
-const { US_LIST } = await import("@/lib/names/us-list");
+const { US_LIST, usCandidates } = await import("@/lib/names/us-list");
 const { UNIQUE_NAMES_SUGGEST } = await import("@/packs/unique-names/suggest");
 
 beforeEach(() => {
   generateJson.mockReset();
   fake = fakeSupabase((q) => respond(q));
   respond = () => undefined;
+});
+
+/** The block that makes the AI pick from the US list (brief 2026-11-25, verbatim). */
+const CHOICES = "Choose ONLY from these real names that US parents give (pick the ones a mom in the US, Canada, the UK or Australia would love, and give each its true meaning):";
+const promptOf = (k = 0) => (generateJson.mock.calls[k][0] as { prompt: string }).prompt;
+const offeredIn = (prompt: string) => prompt.split(`${CHOICES}\n`)[1]?.split("\n\n")[0].split(", ") ?? [];
+async function onNameNest(fn: () => Promise<void>) {
+  const saved = process.env.NICHE;
+  process.env.NICHE = "name-nest";
+  try { await fn(); } finally { if (saved === undefined) delete process.env.NICHE; else process.env.NICHE = saved; }
+}
+
+describe("the AI picks from the US list (Unique Names)", () => {
+  it("letterPrompt and namesPrompt add the choices block only when given; without it they are as before", () => {
+    const li: SuggestLetterInput = { gender: "girl", style: "single", letter: "Z", count: 5, existing: ["Zelda"] };
+    expect(letterPrompt({ ...li, choices: [] })).toBe(letterPrompt(li));
+    expect(letterPrompt({ ...li, choices: ["Zora", "Zoya"] })).toBe(`${letterPrompt(li)}\n\n${CHOICES}\nZora, Zoya`);
+    const ni: SuggestNamesInput = { gender: "boy", style: "single", count: 7, existing: ["Desmond"] };
+    const plain = namesPrompt(ni);
+    expect(namesPrompt({ ...ni, choices: [] })).toBe(plain);
+    expect(namesPrompt({ ...ni, choices: ["Yosef", "Yuri"] })).toBe(plain.replace("\n\nReturn exactly", `\n\n${CHOICES}\nYosef, Yuri\n\nReturn exactly`));
+    expect(plain).not.toContain("Choose ONLY");
+  });
+  it("suggestForLetter offers the letter's US names minus the library's (single style, gate on)", async () => {
+    generateJson.mockResolvedValueOnce({ ok: true, data: [] });
+    await suggestForLetter({ gender: "girl", style: "single", letter: "Z", count: 8, existing: ["Zelda"], allNames: ["Zelda", "Willa"] });
+    const offered = offeredIn(promptOf());
+    expect(offered).toHaveLength(44); // the 45 girls' Z names ranked 101-2,000, less Zelda
+    expect(offered).toContain("Zora");
+    expect(offered).not.toContain("Zelda");
+  });
+  it("no choices for two-word names, or with the gate off (Name Nest)", async () => {
+    generateJson.mockResolvedValue({ ok: true, data: [] });
+    await suggestForLetter({ gender: "girl", style: "two-word", letter: "Z", count: 8, existing: [], allNames: [] });
+    expect(promptOf(0)).not.toContain("Choose ONLY");
+    await onNameNest(async () => {
+      await suggestForLetter({ gender: "girl", style: "single", letter: "Z", count: 8, existing: [], allNames: [] });
+    });
+    expect(promptOf(1)).not.toContain("Choose ONLY");
+  });
+  it("a letter with no US names left: no AI call, ok with no names", async () => {
+    const all = usCandidates("girl", { letter: "X", exclude: [], limit: 10_000 });
+    expect(all.length).toBeGreaterThan(0);
+    const r = await suggestForLetter({ gender: "girl", style: "single", letter: "X", count: 8, existing: [], allNames: all });
+    expect(generateJson).not.toHaveBeenCalled();
+    expect(r).toEqual({ ok: true, result: { fresh: [], duplicates: 0, invalid: 0, offLetter: 0, blocked: 0, wrongGender: 0, negative: 0 } });
+  });
+  it("an AI that answers from the choices gets every one of them kept", async () => {
+    const pick = ["Zora", "Zoya", "Zelda", "Zinnia", "Zariah", "Zola", "Ziva", "Zadie"];
+    generateJson.mockImplementationOnce(async (input: { prompt: string }) => {
+      const offered = offeredIn(input.prompt);
+      return { ok: true, data: pick.filter((n) => offered.includes(n)).map((name) => ({ name, origin: "Hebrew", gender: "girl", meaning: "bright morning light" })) };
+    });
+    const r = await suggestForLetter({ gender: "girl", style: "single", letter: "Z", count: 8, existing: [], allNames: [] });
+    expect(r.ok && r.result.fresh.map((n) => n.name)).toEqual(pick);
+  });
+  it("Names page, card ideas and Autopilot themes offer the US names (single style), minus the library's", async () => {
+    respond = (q: Query) => (op(q, "insert") ? { error: null } : q.table === "names" ? { data: [{ name: "Willa", gender: "girl", style: "single" }] } : undefined);
+    generateJson.mockResolvedValue({ ok: true, data: [] });
+    await suggestNamesAction({ gender: "girl", style: "single", count: 5 });
+    expect(offeredIn(promptOf(0))).toHaveLength(300);
+    expect(offeredIn(promptOf(0))).not.toContain("Willa");
+    await suggestNamesAction({ gender: "girl", style: "two-word", count: 5 });
+    expect(promptOf(1)).not.toContain("Choose ONLY");
+
+    const CARD = "00000000-0000-4000-8000-000000000001";
+    respond = (q: Query) => {
+      if (q.table === "cards") return { data: { id: CARD, post_id: "p1", theme_id: "t1", kind: "post" } };
+      if (q.table === "posts") return { data: { gender: "girl", style: "single" } };
+      if (q.table === "themes") return { data: { title: "Garden" } };
+      if (q.table === "names") return { data: [{ name: "Willa", gender: "girl", style: "single" }] };
+      return undefined;
+    };
+    await cardNameIdeasAction(CARD);
+    expect(offeredIn(promptOf(2))).toHaveLength(300);
+    expect(offeredIn(promptOf(2))).not.toContain("Willa");
+
+    await autopilotDeps(fakeSupabase(() => ({ data: null })).client as never).pickNames({} as never, null);
+    const deps = (pickNames.mock.calls.at(-1) as unknown as unknown[])[0] as { suggest: (i: unknown) => Promise<unknown> };
+    await deps.suggest({ gender: "girl", target: { kind: "theme", title: "Garden", hint: null }, want: 8, allNames: ["Willa"], existing: ["Willa"] });
+    expect(offeredIn(promptOf(3))).toHaveLength(300);
+    expect(offeredIn(promptOf(3))).not.toContain("Willa");
+  });
 });
 
 it("the fixtures are what the tests assume (real SSA data)", () => {
@@ -165,10 +249,19 @@ describe("prompts", () => {
     expect(NAMES_JUDGE_SYSTEM).toContain("a mom in the US, Canada, the UK or Australia");
     expect(NAMES_JUDGE_SYSTEM).toContain("an English-speaking family");
   });
-  it("the names check turns down names mainly from other regions (owner, 2026-11-24)", () => {
+  it("the names check turns down names mainly from other regions, never Hebrew or Biblical ones (brief 2026-11-25)", () => {
     expect(NAMES_JUDGE_SYSTEM.split("\n")).toContain(
-      "- it is mainly a South Asian, Arabic or Middle Eastern, East Asian or African name, even if some US parents use it: the page's readers are in the US, Canada, the UK and Australia",
+      "- it is mainly a South Asian (Indian, Pakistani, Bangladeshi), Arabic, Persian or Turkish, East Asian (Chinese, Japanese, Korean, Vietnamese) or African name, even if some US parents use it. Hebrew and Biblical, Greek, Latin, European, Celtic and Spanish or Latin American names are fine: they are common in the US, Canada, the UK and Australia",
     );
+    expect(NAMES_JUDGE_SYSTEM).toContain("Hebrew and Biblical");
+    expect(NAMES_JUDGE_SYSTEM).not.toContain("Middle East");
+  });
+  it("the suggestion prompts say the Arab world, Iran or Turkey, not the Middle East", () => {
+    const p = initialsPrompt({ gender: "girl", initials: "YZ", count: 6, existing: [] });
+    for (const s of [NAMES_SYSTEM, LETTER_SYSTEM, INITIALS_SYSTEM, p]) expect(s).not.toContain("the Middle East");
+    for (const s of [NAMES_SYSTEM, LETTER_SYSTEM, INITIALS_SYSTEM]) {
+      expect(s).toContain("never names used mainly in South Asia, the Arab world, Iran or Turkey, East Asia or Africa".replace(/^never/, s === LETTER_SYSTEM ? "Never" : "never"));
+    }
   });
   it("initials: US name traditions, the US top 100 only, no rare-initial exception", () => {
     expect(INITIALS_SYSTEM).toContain("from the name traditions common in the US, Canada, the UK and Australia");

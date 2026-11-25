@@ -35,22 +35,47 @@ export function makeUsList(d: UsNamesData) {
     // The second word has no top-100 floor (spec: only the first name must not be in the top 100).
     return a !== null && b !== null && a >= US_MIN_RANK && a <= US_WIDE_MAX_RANK && b <= US_WIDE_MAX_RANK;
   };
-  /** How many names start with `letter` and rank 101 up to that letter's range for this gender. */
+  /**
+   * How many names start with `letter` and rank 101 to 2,000 for this gender: never the widened range, whose spelling
+   * variants and rare names do not make posts (brief 2026-11-25: X was not skipped and Autopilot held every X post).
+   */
   const usPool = (letter: string, gender: Gender): number => {
-    const l = usKey(letter).charAt(0), max = maxRankFor(l, gender);
+    const l = usKey(letter).charAt(0);
     let n = 0;
-    for (const [k, r] of Object.entries(d[gender])) if (k[0] === l && r >= US_MIN_RANK && r <= max) n++;
+    for (const [k, r] of Object.entries(d[gender])) if (k[0] === l && r >= US_MIN_RANK && r <= US_MAX_RANK) n++;
     return n;
   };
-  return { rank, maxRankFor, isUsName, isUsTwoWord, usPool, latestYear: Math.max(...d.years) };
+  /**
+   * The names the AI picks from (brief 2026-11-25): with a letter, those starting with it ranked 101 up to its range;
+   * without, every name ranked 101 to 2,000. Less the library's names (`exclude`, by usKey), a random sample of at
+   * most `limit` (150 with a letter, 300 without), display-cased ("zora" → "Zora").
+   */
+  const usCandidates = (gender: Gender, o: { letter?: string | null; exclude: Iterable<string>; limit?: number; rng?: () => number }): string[] => {
+    const l = o.letter ? usKey(o.letter).charAt(0) : "";
+    const max = l ? maxRankFor(l, gender) : US_MAX_RANK;
+    const skip = new Set<string>();
+    for (const n of o.exclude) skip.add(usKey(n));
+    const pool = Object.entries(d[gender]).filter(([k, r]) => (!l || k[0] === l) && r >= US_MIN_RANK && r <= max && !skip.has(k)).map(([k]) => k);
+    const n = Math.min(Math.max(0, o.limit ?? (l ? 150 : 300)), pool.length);
+    const rng = o.rng ?? Math.random;
+    for (let i = 0; i < n; i++) { // a partial Fisher-Yates shuffle: the first n are a uniform sample
+      const j = i + Math.floor(rng() * (pool.length - i));
+      [pool[i], pool[j]] = [pool[j], pool[i]];
+    }
+    return pool.slice(0, n).map((k) => k.charAt(0).toUpperCase() + k.slice(1));
+  };
+  return { rank, maxRankFor, isUsName, isUsTwoWord, usPool, usCandidates, latestYear: Math.max(...d.years) };
 }
 
 export const US_LIST = makeUsList(data as UsNamesData);
 
+/** The real list's names for the AI to pick from (see makeUsList's usCandidates). */
+export const usCandidates = US_LIST.usCandidates;
+
 /** True on a pack that aims its names at the US, Canada, the UK and Australia (Unique Names). */
 export const usGateOn = () => activePack().suggest.usNames === true;
 
-/** Can Autopilot plan a post for this letter? Always with the gate off; else both genders need 16 US names for it. */
+/** Can Autopilot plan a post for this letter? Always with the gate off; else both genders need 16 names ranked 101-2,000. */
 export const usLetterOk = (letter: string): boolean =>
   !usGateOn() || (["girl", "boy"] as const).every((g) => US_LIST.usPool(letter, g) >= US_LETTER_POOL_MIN);
 

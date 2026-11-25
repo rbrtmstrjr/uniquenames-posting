@@ -7,7 +7,7 @@ import { LETTER_IDEAS, isLetter, startsWith } from "@/lib/series/letter";
 import { hasInitials, initialsText, isInitials } from "@/lib/series/initials";
 import { suggestForInitials } from "@/lib/ai/initials";
 import { NAME_COUNT, THEME_COUNT, VIBE_MAX, filterNameSuggestions, filterThemeSuggestions } from "@/lib/ai/suggest-filter";
-import { keepUsNames } from "@/lib/names/us-list";
+import { keepUsNames, usCandidates, usGateOn } from "@/lib/names/us-list";
 import { fail, requireOwner, type ActionResult } from "./result";
 import { UUID_RE } from "./helpers";
 
@@ -49,7 +49,9 @@ export async function suggestNamesAction(i: { gender: Gender; style: NameStyle; 
   const all = await selectAll<{ name: string; gender: Gender; style: NameStyle }>(sb, "names", "name, gender, style");
   if (all.error) return fail(all.error);
   const existing = all.rows.filter((n) => n.gender === i.gender && n.style === i.style).map((n) => n.name);
-  const ai = await suggestNames({ gender: i.gender, style: i.style, count: i.count, vibe: i.vibe, existing });
+  // Unique Names, single names: the AI picks from the US names not yet in the library.
+  const choices = i.style === "single" && usGateOn() ? usCandidates(i.gender, { exclude: all.rows.map((n) => n.name) }) : undefined;
+  const ai = await suggestNames({ gender: i.gender, style: i.style, count: i.count, vibe: i.vibe, existing, choices });
   if (!ai.ok) return fail(`The AI could not suggest names: ${ai.error}`);
   const filtered = filterNameSuggestions(ai.data, all.rows.map((n) => n.name), i.style);
   const us = keepUsNames(filtered.fresh, i.gender, { style: i.style });
@@ -109,7 +111,8 @@ export async function cardNameIdeasAction(cardId: string): Promise<CardNameIdeas
     return { ok: true, ideas: ai.result.fresh.map((n) => ({ name: n.name, meaning: n.meaning })) };
   }
   const vibe = theme?.title ? `names that suit a "${theme.title}" baby photoshoot`.slice(0, VIBE_MAX) : undefined;
-  const ai = await suggestNames({ gender, style, count: CARD_IDEAS, vibe, existing });
+  const choices = style === "single" && usGateOn() ? usCandidates(gender, { exclude: all.rows.map((n) => n.name) }) : undefined;
+  const ai = await suggestNames({ gender, style, count: CARD_IDEAS, vibe, existing, choices });
   if (!ai.ok) return fail(`The AI could not suggest names: ${ai.error}`);
   const us = keepUsNames(filterNameSuggestions(ai.data, all.rows.map((n) => n.name), style).fresh, gender, { style });
   const fresh = us.kept;

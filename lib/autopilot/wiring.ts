@@ -4,7 +4,7 @@ import { createPostCore } from "@/lib/posts/create";
 import { publishPost } from "@/lib/facebook/publish";
 import { remakeCard } from "@/lib/cards/remake";
 import { suggestForLetter, suggestNames } from "@/lib/ai/suggest";
-import { keepUsNames } from "@/lib/names/us-list";
+import { keepUsNames, usCandidates, usGateOn } from "@/lib/names/us-list";
 import { NAME_COUNT, VIBE_MAX, filterNameSuggestions } from "@/lib/ai/suggest-filter";
 import type { EngineDeps } from "./engine";
 import { judgeNames } from "./judge-names";
@@ -19,7 +19,9 @@ const suggest: NamesDeps["suggest"] = async (i) => {
     return r.ok ? { ok: true, names: r.result.fresh.map((n) => ({ name: n.name, meaning: n.meaning })) } : { ok: false, error: r.error };
   }
   const vibe = `${i.target.title} baby names${i.target.hint ? ` (${i.target.hint})` : ""}`.slice(0, VIBE_MAX);
-  const r = await suggestNames({ gender: i.gender, style: "single", count: Math.min(Math.max(i.want, NAME_COUNT.min), NAME_COUNT.max), vibe, existing: i.existing });
+  // Unique Names: the AI picks from the US names not yet in the library (the US gate below stays the guarantee).
+  const choices = usGateOn() ? usCandidates(i.gender, { exclude: i.allNames }) : undefined;
+  const r = await suggestNames({ gender: i.gender, style: "single", count: Math.min(Math.max(i.want, NAME_COUNT.min), NAME_COUNT.max), vibe, existing: i.existing, choices });
   if (!r.ok) return { ok: false, error: r.error };
   return { ok: true, names: keepUsNames(filterNameSuggestions(r.data, i.allNames, "single").fresh, i.gender, { style: "single" }).kept.map((n) => ({ name: n.name, meaning: n.meaning })) };
 };
